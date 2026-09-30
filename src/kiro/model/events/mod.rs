@@ -11,7 +11,7 @@ mod context_usage;
 mod metering;
 mod tool_use;
 
-pub use assistant::AssistantResponseEvent;
+pub use assistant::{AssistantResponseEvent, ReasoningContentEvent};
 pub use base::Event;
 pub use code_reference::CodeReferenceEvent;
 pub use context_usage::ContextUsageEvent;

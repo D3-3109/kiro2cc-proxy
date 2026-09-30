@@ -234,7 +234,7 @@ fn build_web_search_visibility_events(
     tool_use_id: &str,
     query: &str,
 ) -> Vec<SseEvent> {
-    let mut events = Vec::new();
+    let mut events = ctx.finish_native_thinking();
 
     // server_tool_use 块：start + input_json_delta + stop
     let idx = ctx.state_manager.next_block_index();
@@ -283,7 +283,7 @@ pub(crate) fn build_web_search_result_events(
     tool_use_id: &str,
     search_results: &Option<websearch::WebSearchResults>,
 ) -> Vec<SseEvent> {
-    let mut events = Vec::new();
+    let mut events = ctx.finish_native_thinking();
 
     let search_content = search_results_to_json_array(search_results);
 

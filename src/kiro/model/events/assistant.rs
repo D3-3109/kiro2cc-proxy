@@ -10,6 +10,21 @@ use crate::kiro::parser::frame::Frame;
 
 use super::base::EventPayload;
 
+/// 原生推理增量；文本与签名可能分别到达。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReasoningContentEvent {
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub signature: String,
+}
+
+impl EventPayload for ReasoningContentEvent {
+    fn from_frame(frame: &Frame) -> ParseResult<Self> {
+        frame.payload_as_json()
+    }
+}
+
 /// 助手响应事件
 ///
 /// 包含 AI 助手的流式响应内容

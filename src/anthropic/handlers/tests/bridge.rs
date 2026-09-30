@@ -139,6 +139,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_native_reasoning_closes_before_search_and_reopens() {
+        use crate::kiro::model::events::ReasoningContentEvent;
+        use serde_json::json;
+
+        let mut ctx = StreamContext::new_with_thinking("claude-opus-5", 100, true);
+        ctx.generate_initial_events();
+        let mut bridge = Some(BridgeState::new(Some(3)));
+        ctx.process_kiro_event(&Event::ReasoningContent(ReasoningContentEvent {
+            text: "先搜索".into(),
+            signature: "first-signature".into(),
+        }));
+        let (consumed, events) = bridge_handle_event(
+            &mut ctx,
+            &mut bridge,
+            &tool_use_event("web_search", "search-1", r#"{"query":"rust"}"#, true),
+        );
+        assert!(consumed);
+        assert_eq!(events[0].event, "content_block_stop");
+        assert_eq!(events[0].data["index"], 0);
+        assert_eq!(events[1].data["content_block"]["type"], "server_tool_use");
+
+        let events = ctx.process_kiro_event(&Event::ReasoningContent(ReasoningContentEvent {
+            text: "继续推理".into(),
+            signature: "second-signature".into(),
+        }));
+        assert_eq!(events[0].data["index"], 2);
+        assert_eq!(events[0].data["content_block"]["type"], "thinking");
+        assert_eq!(
+            events.last().unwrap().data["delta"],
+            json!({"type": "signature_delta", "signature": "second-signature"})
+        );
+        assert_eq!(ctx.finish_native_thinking().len(), 1);
+        assert!(ctx.finish_native_thinking().is_empty());
+    }
+
+    #[test]
     fn test_bridge_input_fragments_aggregated() {
         // 分片到达（stop=false）→ Collecting 聚合，不透传也不发块；
         // stop=true → 截获完成，发 server_tool_use + web_search_tool_result 可见性块

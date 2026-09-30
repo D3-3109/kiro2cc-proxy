@@ -20,6 +20,7 @@ use super::thinking::{
 };
 
 mod metrics;
+mod native;
 mod tool_use;
 
 /// 流处理上下文
@@ -61,6 +62,9 @@ pub struct StreamContext {
     strip_thinking_leading_newline: bool,
     /// signature_delta 是否已发送（签名只能在 content_block_stop 之前发送一次）
     signature_sent: bool,
+    /// 原生推理块独立于旧文本标签状态。
+    native_thinking_index: Option<i32>,
+    native_thinking_seen: bool,
     /// 用量追踪器（可选）
     usage_tracker: Option<Arc<UsageTracker>>,
     /// API Key ID（用于用量记录）
@@ -114,6 +118,8 @@ impl StreamContext {
             text_block_index: None,
             strip_thinking_leading_newline: false,
             signature_sent: false,
+            native_thinking_index: None,
+            native_thinking_seen: false,
             usage_tracker: None,
             api_key_id: None,
             credential_id: None,
@@ -262,6 +268,7 @@ impl StreamContext {
     pub fn process_kiro_event(&mut self, event: &Event) -> Vec<SseEvent> {
         match event {
             Event::AssistantResponse(resp) => self.process_assistant_response(&resp.content),
+            Event::ReasoningContent(reasoning) => self.process_native_reasoning(reasoning),
             Event::ToolUse(tool_use) => self.process_tool_use(tool_use),
             Event::ContextUsage(context_usage) => {
                 // contextUsage 本地化：仅保留事件接收用于 stop_reason 兜底判定，
@@ -348,14 +355,17 @@ impl StreamContext {
         self.output_chars_cn += cn;
         self.output_chars_other += other;
 
+        let mut events = self.finish_native_thinking();
         // 如果启用了thinking，需要处理thinking块
-        if self.thinking_enabled {
-            return self.process_content_with_thinking(content);
+        if self.thinking_enabled && !self.native_thinking_seen {
+            events.extend(self.process_content_with_thinking(content));
+            return events;
         }
 
         // 非 thinking 模式同样复用统一的 text_delta 发送逻辑，
         // 以便在 tool_use 自动关闭文本块后能够自愈重建新的文本块，避免“吞字”。
-        self.create_text_delta_events(content)
+        events.extend(self.create_text_delta_events(content));
+        events
     }
 
     /// 处理包含thinking块的内容
@@ -590,7 +600,7 @@ impl StreamContext {
         &mut self,
         tool_use: &crate::kiro::model::events::ToolUseEvent,
     ) -> Vec<SseEvent> {
-        let mut events = Vec::new();
+        let mut events = self.finish_native_thinking();
 
         self.state_manager.set_has_tool_use(true);
 
@@ -712,7 +722,7 @@ impl StreamContext {
 
     /// 生成最终事件序列
     pub fn generate_final_events(&mut self) -> Vec<SseEvent> {
-        let mut events = Vec::new();
+        let mut events = self.finish_native_thinking();
 
         // Flush thinking_buffer 中的剩余内容
         if self.thinking_enabled && !self.thinking_buffer.is_empty() {
@@ -784,7 +794,7 @@ impl StreamContext {
         // 则设置 stop_reason 为 max_tokens（表示模型耗尽了 token 预算在思考上），
         // 并补发一套完整的 text 事件（内容为一个空格），确保 content 数组中有 text 块
         if self.thinking_enabled
-            && self.thinking_block_index.is_some()
+            && (self.thinking_block_index.is_some() || self.native_thinking_seen)
             && !self.state_manager.has_non_thinking_blocks()
         {
             self.state_manager.set_stop_reason("max_tokens");
