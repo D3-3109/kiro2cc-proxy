@@ -228,10 +228,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const isFiltered = searchQuery.trim() !== '' || statusFilter !== 'all'
 
   const disabledCredentialCount = data?.credentials.filter(credential => credential.disabled).length || 0
-  const selectedDisabledCount = Array.from(selectedIds).filter(id => {
-    const credential = data?.credentials.find(c => c.id === id)
-    return Boolean(credential?.disabled)
-  }).length
 
   // 凭据列表 / 搜索词 / 状态筛选任一变化时回到第一页（排序变化的重置在 handleSort 内）
   useEffect(() => {
@@ -336,34 +332,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setStatusFilter('all')
   }
 
-  // 批量删除（仅删除已禁用项）
+  // 批量删除
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) {
       toast.error(t('dashboard.toastSelectToDelete'))
       return
     }
 
-    const disabledIds = Array.from(selectedIds).filter(id => {
-      const credential = data?.credentials.find(c => c.id === id)
-      return Boolean(credential?.disabled)
-    })
+    const ids = Array.from(selectedIds)
 
-    if (disabledIds.length === 0) {
-      toast.error(t('dashboard.toastNoDisabledSelected'))
-      return
-    }
-
-    const skippedCount = selectedIds.size - disabledIds.length
-    const skippedText = skippedCount > 0 ? t('dashboard.skippedSuffix', { count: skippedCount }) : ''
-
-    if (!confirm(t('dashboard.confirmDeleteDisabled', { count: disabledIds.length, skipped: skippedText }))) {
+    if (!confirm(t('dashboard.confirmDeleteSelected', { count: ids.length }))) {
       return
     }
 
     let successCount = 0
     let failCount = 0
 
-    for (const id of disabledIds) {
+    for (const id of ids) {
       try {
         await new Promise<void>((resolve, reject) => {
           deleteCredential(id, {
@@ -382,12 +367,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
       }
     }
 
-    const skippedResultText = skippedCount > 0 ? t('dashboard.skippedResultSuffix', { count: skippedCount }) : ''
-
     if (failCount === 0) {
-      toast.success(t('dashboard.toastDeleteDisabledSuccess', { count: successCount, skipped: skippedResultText }))
+      toast.success(t('dashboard.toastDeleteSuccess', { count: successCount }))
     } else {
-      toast.warning(t('dashboard.toastDeleteDisabledPartial', { success: successCount, fail: failCount, skipped: skippedResultText }))
+      toast.warning(t('dashboard.toastDeletePartial', { success: successCount, fail: failCount }))
     }
 
     deselectAll()
@@ -830,7 +813,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
           isFiltered={isFiltered}
           clearFilters={clearFilters}
           selectedIds={selectedIds}
-          selectedDisabledCount={selectedDisabledCount}
           handleBatchVerify={handleBatchVerify}
           handleBatchResetFailure={handleBatchResetFailure}
           handleBatchDelete={handleBatchDelete}

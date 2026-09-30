@@ -1,5 +1,4 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { FOOT_BTN, PAGER_BTN, pageWindow } from '@/components/table-kit'
@@ -7,8 +6,6 @@ import { FOOT_BTN, PAGER_BTN, pageWindow } from '@/components/table-kit'
 export interface AccountPanelFootProps {
   /** 跨页累计的已选数量；0 时左区整体不渲染 */
   selectedCount: number
-  /** 已选中处于禁用态的数量；0 时批量删除不可用 */
-  selectedDisabledCount: number
   onBatchVerify: () => void
   onBatchRestore: () => void
   onBatchDelete: () => void
@@ -26,7 +23,6 @@ export interface AccountPanelFootProps {
 /** 面板脚（设计稿 .panel-foot）：左区批量操作（仅有选中时出现），右区计数 + 页码 + 每页条数 */
 export function AccountPanelFoot({
   selectedCount,
-  selectedDisabledCount,
   onBatchVerify,
   onBatchRestore,
   onBatchDelete,
@@ -39,8 +35,6 @@ export function AccountPanelFoot({
   onPageChange,
 }: AccountPanelFootProps) {
   const { t } = useTranslation()
-  const deleteBlocked = selectedDisabledCount === 0
-  const blockedReasonId = useId()
 
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-hairline bg-surface-2 px-[13px] py-[9px] text-[11.5px] text-ink-3">
@@ -53,24 +47,13 @@ export function AccountPanelFoot({
           <button type="button" className={FOOT_BTN} onClick={onBatchRestore}>
             {t('dashboard.batchRestore')}
           </button>
-          {/* 原生 disabled button 不派发 hover 事件，title 挂外层 span 才能读到禁用原因；
-              祖先 title 不被屏幕阅读器播报，另挂 aria-describedby 指向 sr-only 文本 */}
-          <span className="flex-none" title={deleteBlocked ? t('dashboard.deleteDisabledOnly') : undefined}>
-            <button
-              type="button"
-              className={`${FOOT_BTN} text-danger hover:bg-danger-soft hover:text-danger`}
-              onClick={onBatchDelete}
-              disabled={deleteBlocked}
-              aria-describedby={deleteBlocked ? blockedReasonId : undefined}
-            >
-              {t('dashboard.batchDelete')}
-            </button>
-            {deleteBlocked && (
-              <span id={blockedReasonId} className="sr-only">
-                {t('dashboard.deleteDisabledOnly')}
-              </span>
-            )}
-          </span>
+          <button
+            type="button"
+            className={`${FOOT_BTN} text-danger hover:bg-danger-soft hover:text-danger`}
+            onClick={onBatchDelete}
+          >
+            {t('dashboard.batchDelete')}
+          </button>
           <button type="button" className={FOOT_BTN} onClick={onDeselectAll}>
             {t('dashboard.deselectAll')}
           </button>

@@ -306,6 +306,7 @@ impl AdminService {
     ) -> Result<AddCredentialResponse, AdminServiceError> {
         // 构建账号对象
         let email = req.email.clone();
+        let initially_disabled = req.disabled;
         let new_cred = KiroCredentials {
             id: None,
             access_token: None,
@@ -330,7 +331,7 @@ impl AdminService {
             proxy_url: req.proxy_url,
             proxy_username: req.proxy_username,
             proxy_password: req.proxy_password,
-            disabled: false, // 新添加的账号默认启用
+            disabled: initially_disabled,
             endpoint: None,
             thinking_adaptive: false, // 新添加的账号默认不注入 thinking 字段
         };
@@ -342,20 +343,22 @@ impl AdminService {
             .await
             .map_err(|e| self.classify_add_error(e))?;
 
-        // 后台获取订阅等级，避免首次请求时 Free 账号绕过 Opus 模型过滤
-        let tm = self.token_manager.clone();
-        tokio::spawn(async move {
-            if let Err(e) = tm.get_usage_limits_for(credential_id).await {
-                if e.downcast_ref::<UsageLimitsUnsupportedError>().is_some() {
-                    tracing::debug!(
-                        "账号 #{} 不支持 getUsageLimits 查询（BuilderId 个人账号），跳过订阅等级获取",
-                        credential_id
-                    );
-                } else {
-                    tracing::warn!("添加账号后获取订阅等级失败（不影响账号添加）: {}", e);
+        // 导入流程会自行验活禁用账号，避免重复请求额度接口
+        if !initially_disabled {
+            let tm = self.token_manager.clone();
+            tokio::spawn(async move {
+                if let Err(e) = tm.get_usage_limits_for(credential_id).await {
+                    if e.downcast_ref::<UsageLimitsUnsupportedError>().is_some() {
+                        tracing::debug!(
+                            "账号 #{} 不支持 getUsageLimits 查询（BuilderId 个人账号），跳过订阅等级获取",
+                            credential_id
+                        );
+                    } else {
+                        tracing::warn!("添加账号后获取订阅等级失败（不影响账号添加）: {}", e);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         Ok(AddCredentialResponse {
             success: true,

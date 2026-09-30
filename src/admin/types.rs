@@ -115,6 +115,10 @@ pub struct AddCredentialRequest {
     #[serde(default)]
     pub priority: u32,
 
+    /// 是否以禁用状态创建（可选，默认 false）
+    #[serde(default)]
+    pub disabled: bool,
+
     /// 账号级 Region 配置（用于 OIDC token 刷新）
     /// 未配置时回退到 config.json 的全局 region
     pub region: Option<String>,
@@ -147,6 +151,27 @@ pub struct AddCredentialRequest {
 
 fn default_auth_method() -> String {
     "social".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AddCredentialRequest;
+
+    #[test]
+    fn add_credential_request_defaults_disabled_to_false() {
+        let request: AddCredentialRequest =
+            serde_json::from_str(r#"{"refreshToken":"token"}"#).unwrap();
+
+        assert!(!request.disabled);
+    }
+
+    #[test]
+    fn add_credential_request_accepts_disabled_true() {
+        let request: AddCredentialRequest =
+            serde_json::from_str(r#"{"refreshToken":"token","disabled":true}"#).unwrap();
+
+        assert!(request.disabled);
+    }
 }
 
 /// 添加账号成功响应

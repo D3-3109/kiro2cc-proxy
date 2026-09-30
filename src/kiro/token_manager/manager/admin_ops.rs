@@ -321,6 +321,7 @@ impl MultiTokenManager {
     pub async fn add_credential(&self, new_cred: KiroCredentials) -> anyhow::Result<u64> {
         // 1. 基本验证
         validate_refresh_token(&new_cred)?;
+        let initially_disabled = new_cred.disabled;
 
         // 2. 基于 refreshToken 的 SHA-256 哈希检测重复
         let new_refresh_token = new_cred
@@ -395,8 +396,8 @@ impl MultiTokenManager {
                 credentials: validated_cred,
                 failure_count: 0,
                 refresh_failure_count: 0,
-                disabled: false,
-                disabled_reason: None,
+                disabled: initially_disabled,
+                disabled_reason: initially_disabled.then_some(DisabledReason::Manual),
                 success_count: 0,
                 last_used_at: None,
                 throttle_count: 0,

@@ -45,7 +45,6 @@ interface CredentialListProps {
   isFiltered: boolean
   clearFilters: () => void
   selectedIds: Set<number>
-  selectedDisabledCount: number
   handleBatchVerify: () => void
   handleBatchResetFailure: () => void
   handleBatchDelete: () => void
@@ -98,7 +97,6 @@ export function CredentialList({
   isFiltered,
   clearFilters,
   selectedIds,
-  selectedDisabledCount,
   handleBatchVerify,
   handleBatchResetFailure,
   handleBatchDelete,
@@ -170,7 +168,6 @@ export function CredentialList({
               footer={
                 <AccountPanelFoot
                   selectedCount={selectedIds.size}
-                  selectedDisabledCount={selectedDisabledCount}
                   onBatchVerify={handleBatchVerify}
                   onBatchRestore={handleBatchResetFailure}
                   onBatchDelete={handleBatchDelete}

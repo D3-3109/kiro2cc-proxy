@@ -7,6 +7,7 @@ pub(crate) mod tests {
 
     use crate::kiro::model::credentials::{BUILDER_ID_PLACEHOLDER_PROFILE_ARN, KiroCredentials};
 
+    use crate::kiro::token_manager::DisabledReason;
     use crate::kiro::token_manager::tests::ext_idp::tests::{
         TempDirGuard, spawn_single_response_server,
     };
@@ -27,6 +28,34 @@ pub(crate) mod tests {
         let result = manager.add_credential(duplicate).await;
         assert!(result.is_err());
         assert!(result.err().unwrap().to_string().contains("账号已存在"));
+    }
+
+    #[tokio::test]
+    async fn test_add_credential_preserves_initial_disabled_state() {
+        let body = r#"{"access_token":"new-access-token","expires_in":3600}"#;
+        let endpoint = spawn_single_response_server(200, body).await;
+        let manager = MultiTokenManager::new(Config::default(), vec![], None, None, false).unwrap();
+        let new_cred = KiroCredentials {
+            auth_method: Some("external_idp".to_string()),
+            refresh_token: Some("a".repeat(150)),
+            client_id: Some("client-id".to_string()),
+            token_endpoint: Some(endpoint),
+            disabled: true,
+            ..Default::default()
+        };
+
+        let id = manager.add_credential(new_cred).await.unwrap();
+        let snapshot = manager.snapshot();
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+
+        assert!(entry.disabled);
+        assert_eq!(entry.disabled_reason, Some(DisabledReason::Manual));
+        assert_eq!(manager.available_count(), 0);
+        assert!(!manager.credential_ids().contains(&id));
     }
 
     /// 回归测试：账号删除后其 ID 不得被复用，否则新账号会"继承"已删除旧账号在

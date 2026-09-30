@@ -11,8 +11,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useCredentials, useAddCredential, useDeleteCredential } from '@/hooks/use-credentials'
-import { getCredentialBalance, setCredentialDisabled } from '@/api/credentials'
+import { useCredentials, useAddCredential, useSetDisabled } from '@/hooks/use-credentials'
+import { getCredentialBalance } from '@/api/credentials'
 import { KAM_RELEASES_URL } from '@/lib/constants'
 import { extractErrorMessage } from '@/lib/utils'
 import { sha256Hex } from '@/lib/hash'
@@ -37,13 +37,19 @@ interface CredentialInput {
 
 interface VerificationResult {
   index: number
-  status: 'pending' | 'checking' | 'verifying' | 'verified' | 'duplicate' | 'failed'
+  status:
+    | 'pending'
+    | 'checking'
+    | 'verifying'
+    | 'verified'
+    | 'added_unverified'
+    | 'activation_unknown'
+    | 'duplicate'
+    | 'failed'
   error?: string
   usage?: string
   email?: string
   credentialId?: number
-  rollbackStatus?: 'success' | 'failed' | 'skipped'
-  rollbackError?: string
 }
 
 export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps) {
@@ -56,28 +62,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
 
   const { data: existingCredentials } = useCredentials()
   const { mutateAsync: addCredential } = useAddCredential()
-  const { mutateAsync: deleteCredential } = useDeleteCredential()
-
-  const rollbackCredential = async (id: number): Promise<{ success: boolean; error?: string }> => {
-    try {
-      await setCredentialDisabled(id, true)
-    } catch (error) {
-      return {
-        success: false,
-        error: t('credentials.toastDisableFailed', { message: extractErrorMessage(error) }),
-      }
-    }
-
-    try {
-      await deleteCredential(id)
-      return { success: true }
-    } catch (error) {
-      return {
-        success: false,
-        error: t('credentials.toastDeleteFailed', { message: extractErrorMessage(error) }),
-      }
-    }
-  }
+  const { mutateAsync: setDisabled } = useSetDisabled()
 
   const resetForm = () => {
     setJsonInput('')
@@ -134,11 +119,10 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
       )
 
       let successCount = 0
+      let unverifiedCount = 0
+      let activationUnknownCount = 0
       let duplicateCount = 0
       let failCount = 0
-      let rollbackSuccessCount = 0
-      let rollbackFailedCount = 0
-      let rollbackSkippedCount = 0
 
       // 4. 导入并验活
       for (let i = 0; i < credentials.length; i++) {
@@ -179,8 +163,6 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
           return newResults
         })
 
-        let addedCredId: number | null = null
-
         try {
           // 添加凭据
           const clientId = cred.clientId?.trim() || undefined
@@ -203,50 +185,64 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
             profileArn: cred.profileArn?.trim() || undefined,
             priority: cred.priority || 0,
             machineId: cred.machineId?.trim() || undefined,
+            disabled: true,
           })
-
-          addedCredId = addedCred.credentialId
-
-          // 延迟 1 秒
-          await new Promise(resolve => setTimeout(resolve, 1000))
-
-          // 验活
-          const balance = await getCredentialBalance(addedCred.credentialId)
-
-          // 验活成功
-          successCount++
           existingTokenHashes.add(tokenHash)
-          setCurrentProcessing(t('credentials.verifySuccessPrefix', { name: addedCred.email || t('credentials.plainAccountIndex', { index: i + 1 }) }))
-          setResults(prev => {
-            const newResults = [...prev]
-            newResults[i] = {
-              ...newResults[i],
-              status: 'verified',
-              usage: `${balance.currentUsage}/${balance.usageLimit}`,
-              email: addedCred.email || undefined,
-              credentialId: addedCred.credentialId
-            }
-            return newResults
-          })
-        } catch (error) {
-          // 验活失败，尝试回滚（先禁用再删除）
-          let rollbackStatus: VerificationResult['rollbackStatus'] = 'skipped'
-          let rollbackError: string | undefined
 
-          if (addedCredId) {
-            const rollbackResult = await rollbackCredential(addedCredId)
-            if (rollbackResult.success) {
-              rollbackStatus = 'success'
-              rollbackSuccessCount++
-            } else {
-              rollbackStatus = 'failed'
-              rollbackFailedCount++
-              rollbackError = rollbackResult.error
+          try {
+            const balance = await getCredentialBalance(addedCred.credentialId)
+
+            try {
+              await setDisabled({ id: addedCred.credentialId, disabled: false })
+              successCount++
+              setCurrentProcessing(t('credentials.verifySuccessPrefix', {
+                name: addedCred.email || t('credentials.plainAccountIndex', { index: i + 1 }),
+              }))
+              setResults(prev => {
+                const newResults = [...prev]
+                newResults[i] = {
+                  ...newResults[i],
+                  status: 'verified',
+                  usage: `${balance.currentUsage}/${balance.usageLimit}`,
+                  email: addedCred.email || undefined,
+                  credentialId: addedCred.credentialId,
+                }
+                return newResults
+              })
+            } catch (error) {
+              activationUnknownCount++
+              setResults(prev => {
+                const newResults = [...prev]
+                newResults[i] = {
+                  ...newResults[i],
+                  status: 'activation_unknown',
+                  error: t('credentials.accountActivationUnknown', {
+                    message: extractErrorMessage(error),
+                  }),
+                  usage: `${balance.currentUsage}/${balance.usageLimit}`,
+                  email: addedCred.email || undefined,
+                  credentialId: addedCred.credentialId,
+                }
+                return newResults
+              })
             }
-          } else {
-            rollbackSkippedCount++
+          } catch (error) {
+            unverifiedCount++
+            setResults(prev => {
+              const newResults = [...prev]
+              newResults[i] = {
+                ...newResults[i],
+                status: 'added_unverified',
+                error: t('credentials.accountAddedVerificationFailed', {
+                  message: extractErrorMessage(error),
+                }),
+                email: cred.email?.trim() || undefined,
+                credentialId: addedCred.credentialId,
+              }
+              return newResults
+            })
           }
-
+        } catch (error) {
           failCount++
           setResults(prev => {
             const newResults = [...prev]
@@ -255,8 +251,6 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               status: 'failed',
               error: extractErrorMessage(error),
               email: undefined,
-              rollbackStatus,
-              rollbackError,
             }
             return newResults
           })
@@ -266,17 +260,21 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
       }
 
       // 显示结果
-      if (failCount === 0 && duplicateCount === 0) {
+      if (
+        failCount === 0
+        && unverifiedCount === 0
+        && activationUnknownCount === 0
+        && duplicateCount === 0
+      ) {
         toast.success(t('credentials.toastImportVerifySuccess', { count: successCount }))
       } else {
-        const failureSummary = failCount > 0
-          ? t('credentials.failureSummarySuffix', { count: failCount, excluded: rollbackSuccessCount, notExcluded: rollbackFailedCount, noNeedExclude: rollbackSkippedCount })
-          : ''
-        toast.info(t('credentials.toastVerifyCompleteSummary', { success: successCount, duplicate: duplicateCount, failureSummary }))
-
-        if (rollbackFailedCount > 0) {
-          toast.warning(t('credentials.toastRollbackIncomplete', { count: rollbackFailedCount }))
-        }
+        toast.info(t('credentials.toastVerifyCompleteSummary', {
+          success: successCount,
+          unverified: unverifiedCount,
+          activationUnknown: activationUnknownCount,
+          duplicate: duplicateCount,
+          failed: failCount,
+        }))
       }
     } catch (error) {
       toast.error(t('credentials.toastJsonError', { message: extractErrorMessage(error) }))
@@ -294,6 +292,10 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
         return <Loader2 className="w-5 h-5 animate-spin text-brand" />
       case 'verified':
         return <CheckCircle2 className="w-5 h-5 text-ok" />
+      case 'added_unverified':
+        return <AlertCircle className="w-5 h-5 text-warn" />
+      case 'activation_unknown':
+        return <AlertCircle className="w-5 h-5 text-danger" />
       case 'duplicate':
         return <AlertCircle className="w-5 h-5 text-warn" />
       case 'failed':
@@ -311,11 +313,13 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
         return t('credentials.statusVerifying')
       case 'verified':
         return t('credentials.statusVerified')
+      case 'added_unverified':
+        return t('credentials.statusAddedUnverified')
+      case 'activation_unknown':
+        return t('credentials.statusActivationUnknown')
       case 'duplicate':
         return t('credentials.statusDuplicate')
       case 'failed':
-        if (result.rollbackStatus === 'success') return t('credentials.statusFailedExcluded')
-        if (result.rollbackStatus === 'failed') return t('credentials.statusFailedNotExcluded')
         return t('credentials.statusFailedNotCreated')
     }
   }
@@ -380,6 +384,12 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
                   ✓ {t('credentials.statSuccessLabel')}: {results.filter(r => r.status === 'verified').length}
                 </span>
                 <span className="text-warn">
+                  ⚠ {t('credentials.statUnverifiedLabel')}: {results.filter(r => r.status === 'added_unverified').length}
+                </span>
+                <span className="text-danger">
+                  ! {t('credentials.statActivationUnknownLabel')}: {results.filter(r => r.status === 'activation_unknown').length}
+                </span>
+                <span className="text-warn">
                   ⚠ {t('credentials.statDuplicateLabel')}: {results.filter(r => r.status === 'duplicate').length}
                 </span>
                 <span className="text-danger">
@@ -410,11 +420,6 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
                         {result.error && (
                           <div className="mt-1 text-[11px] text-danger">
                             {result.error}
-                          </div>
-                        )}
-                        {result.rollbackError && (
-                          <div className="mt-1 text-[11px] text-danger">
-                            {t('credentials.rollbackFailedLabel', { error: result.rollbackError })}
                           </div>
                         )}
                       </div>

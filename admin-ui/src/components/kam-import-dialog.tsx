@@ -12,8 +12,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useCredentials, useAddCredential, useDeleteCredential } from '@/hooks/use-credentials'
-import { getCredentialBalance, setCredentialDisabled } from '@/api/credentials'
+import { useCredentials, useAddCredential, useSetDisabled } from '@/hooks/use-credentials'
+import { getCredentialBalance } from '@/api/credentials'
 import { KAM_RELEASES_URL } from '@/lib/constants'
 import { extractErrorMessage } from '@/lib/utils'
 import { sha256Hex } from '@/lib/hash'
@@ -42,13 +42,20 @@ interface KamAccount {
 
 interface VerificationResult {
   index: number
-  status: 'pending' | 'checking' | 'verifying' | 'verified' | 'duplicate' | 'failed' | 'skipped'
+  status:
+    | 'pending'
+    | 'checking'
+    | 'verifying'
+    | 'verified'
+    | 'added_unverified'
+    | 'activation_unknown'
+    | 'duplicate'
+    | 'failed'
+    | 'skipped'
   error?: string
   usage?: string
   email?: string
   credentialId?: number
-  rollbackStatus?: 'success' | 'failed' | 'skipped'
-  rollbackError?: string
 }
 
 // 校验元素是否为有效的 KAM 账号结构
@@ -131,21 +138,7 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
 
   const { data: existingCredentials } = useCredentials()
   const { mutateAsync: addCredential } = useAddCredential()
-  const { mutateAsync: deleteCredential } = useDeleteCredential()
-
-  const rollbackCredential = async (id: number): Promise<{ success: boolean; error?: string }> => {
-    try {
-      await setCredentialDisabled(id, true)
-    } catch (error) {
-      return { success: false, error: t('credentials.toastDisableFailed', { message: extractErrorMessage(error) }) }
-    }
-    try {
-      await deleteCredential(id)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: t('credentials.toastDeleteFailed', { message: extractErrorMessage(error) }) }
-    }
-  }
+  const { mutateAsync: setDisabled } = useSetDisabled()
 
   const resetForm = () => {
     setJsonInput('')
@@ -190,6 +183,8 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
       )
 
       let successCount = 0
+      let unverifiedCount = 0
+      let activationUnknownCount = 0
       let duplicateCount = 0
       let failCount = 0
       let skippedCount = 0
@@ -235,8 +230,6 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
           return next
         })
 
-        let addedCredId: number | null = null
-
         try {
           const clientId = cred.clientId?.trim() || undefined
           const clientSecret = cred.clientSecret?.trim() || undefined
@@ -255,42 +248,65 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
             clientId,
             clientSecret,
             machineId: account.machineId?.trim() || undefined,
+            disabled: true,
           })
-
-          addedCredId = addedCred.credentialId
-
-          await new Promise(resolve => setTimeout(resolve, 1000))
-
-          const balance = await getCredentialBalance(addedCred.credentialId)
-
-          successCount++
           existingTokenHashes.add(tokenHash)
-          setCurrentProcessing(t('credentials.verifySuccessPrefix', { name: addedCred.email || account.email || t('credentials.plainAccountIndex', { index: i + 1 }) }))
-          setResults(prev => {
-            const next = [...prev]
-            next[i] = {
-              ...next[i],
-              status: 'verified',
-              usage: `${balance.currentUsage}/${balance.usageLimit}`,
-              email: addedCred.email || account.email,
-              credentialId: addedCred.credentialId,
-            }
-            return next
-          })
-        } catch (error) {
-          let rollbackStatus: VerificationResult['rollbackStatus'] = 'skipped'
-          let rollbackError: string | undefined
 
-          if (addedCredId) {
-            const result = await rollbackCredential(addedCredId)
-            if (result.success) {
-              rollbackStatus = 'success'
-            } else {
-              rollbackStatus = 'failed'
-              rollbackError = result.error
+          try {
+            const balance = await getCredentialBalance(addedCred.credentialId)
+
+            try {
+              await setDisabled({ id: addedCred.credentialId, disabled: false })
+              successCount++
+              setCurrentProcessing(t('credentials.verifySuccessPrefix', {
+                name: addedCred.email || account.email
+                  || t('credentials.plainAccountIndex', { index: i + 1 }),
+              }))
+              setResults(prev => {
+                const next = [...prev]
+                next[i] = {
+                  ...next[i],
+                  status: 'verified',
+                  usage: `${balance.currentUsage}/${balance.usageLimit}`,
+                  email: addedCred.email || account.email,
+                  credentialId: addedCred.credentialId,
+                }
+                return next
+              })
+            } catch (error) {
+              activationUnknownCount++
+              setResults(prev => {
+                const next = [...prev]
+                next[i] = {
+                  ...next[i],
+                  status: 'activation_unknown',
+                  error: t('credentials.accountActivationUnknown', {
+                    message: extractErrorMessage(error),
+                  }),
+                  usage: `${balance.currentUsage}/${balance.usageLimit}`,
+                  email: addedCred.email || account.email,
+                  credentialId: addedCred.credentialId,
+                }
+                return next
+              })
             }
+          } catch (error) {
+            unverifiedCount++
+            setResults(prev => {
+              const next = [...prev]
+              next[i] = {
+                ...next[i],
+                status: 'added_unverified',
+                error: t('credentials.accountAddedVerificationFailed', {
+                  message: extractErrorMessage(error),
+                }),
+                email: account.email || account.nickname,
+                credentialId: addedCred.credentialId,
+              }
+              return next
+            })
           }
-
+        } catch (error) {
           failCount++
           setResults(prev => {
             const next = [...prev]
@@ -298,8 +314,6 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
               ...next[i],
               status: 'failed',
               error: extractErrorMessage(error),
-              rollbackStatus,
-              rollbackError,
             }
             return next
           })
@@ -311,11 +325,19 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
       // 汇总
       const parts: string[] = []
       if (successCount > 0) parts.push(t('credentials.summarySuccessCount', { count: successCount }))
+      if (unverifiedCount > 0) parts.push(t('credentials.summaryAddedUnverifiedCount', { count: unverifiedCount }))
+      if (activationUnknownCount > 0) parts.push(t('credentials.summaryActivationUnknownCount', { count: activationUnknownCount }))
       if (duplicateCount > 0) parts.push(t('credentials.summaryDuplicateCount', { count: duplicateCount }))
       if (failCount > 0) parts.push(t('credentials.summaryFailedCount', { count: failCount }))
       if (skippedCount > 0) parts.push(t('credentials.summarySkippedCount', { count: skippedCount }))
 
-      if (failCount === 0 && duplicateCount === 0 && skippedCount === 0) {
+      if (
+        failCount === 0
+        && unverifiedCount === 0
+        && activationUnknownCount === 0
+        && duplicateCount === 0
+        && skippedCount === 0
+      ) {
         toast.success(t('credentials.toastImportVerifySuccess', { count: successCount }))
       } else {
         toast.info(t('credentials.toastImportCompleteSummary', { summary: parts.join(t('common.listSeparator')) }))
@@ -336,6 +358,10 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
         return <Loader2 className="w-5 h-5 animate-spin text-brand" />
       case 'verified':
         return <CheckCircle2 className="w-5 h-5 text-ok" />
+      case 'added_unverified':
+        return <AlertCircle className="w-5 h-5 text-warn" />
+      case 'activation_unknown':
+        return <AlertCircle className="w-5 h-5 text-danger" />
       case 'duplicate':
         return <AlertCircle className="w-5 h-5 text-warn" />
       case 'skipped':
@@ -351,12 +377,11 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
       case 'checking': return t('credentials.statusChecking')
       case 'verifying': return t('credentials.statusVerifying')
       case 'verified': return t('credentials.statusVerified')
+      case 'added_unverified': return t('credentials.statusAddedUnverified')
+      case 'activation_unknown': return t('credentials.statusActivationUnknown')
       case 'duplicate': return t('credentials.statusDuplicate')
       case 'skipped': return t('credentials.statusSkippedError')
-      case 'failed':
-        if (result.rollbackStatus === 'success') return t('credentials.statusFailedExcluded')
-        if (result.rollbackStatus === 'failed') return t('credentials.statusFailedNotExcluded')
-        return t('credentials.statusFailedNotCreated')
+      case 'failed': return t('credentials.statusFailedNotCreated')
     }
   }
 
@@ -410,7 +435,7 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
               disabled={importing}
               className="min-h-[200px] w-full rounded-[7px] border border-hairline-2 bg-surface-2 px-2.5 py-2 font-mono text-[12px] text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-brand disabled:cursor-not-allowed disabled:opacity-50"
             />
-            <p className="text-[11px] leading-[1.55] text-ink-3">{t('credentials.kamImportHint')}</p>
+            <p className="text-[11px] leading-[1.55] text-ink-3">{t('credentials.batchImportHint')}</p>
           </div>
 
           {/* 解析预览 */}
@@ -461,6 +486,12 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
                   ✓ {t('credentials.statSuccessLabel')}: {results.filter(r => r.status === 'verified').length}
                 </span>
                 <span className="text-warn">
+                  ⚠ {t('credentials.statUnverifiedLabel')}: {results.filter(r => r.status === 'added_unverified').length}
+                </span>
+                <span className="text-danger">
+                  ! {t('credentials.statActivationUnknownLabel')}: {results.filter(r => r.status === 'activation_unknown').length}
+                </span>
+                <span className="text-warn">
                   ⚠ {t('credentials.statDuplicateLabel')}: {results.filter(r => r.status === 'duplicate').length}
                 </span>
                 <span className="text-danger">
@@ -490,9 +521,6 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
                         )}
                         {result.error && (
                           <div className="mt-1 text-[11px] text-danger">{result.error}</div>
-                        )}
-                        {result.rollbackError && (
-                          <div className="mt-1 text-[11px] text-danger">{t('credentials.rollbackFailedLabel', { error: result.rollbackError })}</div>
                         )}
                       </div>
                     </div>
