@@ -139,6 +139,7 @@ impl MultiTokenManager {
             entries: Mutex::new(entries),
             current_id: Mutex::new(initial_id),
             refresh_lock: TokioMutex::new(()),
+            credential_admin_lock: TokioMutex::new(()),
             credentials_path,
             is_multiple_format: AtomicBool::new(is_multiple_format),
             load_balancing_mode: Mutex::new(load_balancing_mode),
@@ -330,6 +331,9 @@ impl MultiTokenManager {
 
         let total = self.total_count();
         let mut tried_count = 0;
+        let is_opus = model
+            .map(|m| m.to_ascii_lowercase().contains("opus"))
+            .unwrap_or(false);
 
         loop {
             if tried_count >= total {
@@ -356,6 +360,7 @@ impl MultiTokenManager {
                             e.id == current_id
                                 && !e.disabled
                                 && Self::compute_health(e) != HealthStatus::Unhealthy
+                                && (!is_opus || e.credentials.supports_opus())
                         })
                         .map(|e| (e.id, e.credentials.clone()))
                 };
@@ -552,6 +557,10 @@ impl MultiTokenManager {
                 .is_some_and(|e| avoid_ids.contains(&e.credential_id))
         };
 
+        let is_opus = model
+            .map(|m| m.to_ascii_lowercase().contains("opus"))
+            .unwrap_or(false);
+
         // 步骤 ①②：从 sticky_cache 查找，验证 TTL + 健康状态
         let cached = {
             let cache = self.sticky_cache.lock();
@@ -573,6 +582,7 @@ impl MultiTokenManager {
                                     HealthStatus::Unhealthy | HealthStatus::Disabled
                                 )
                                 && (allowed_ids.is_empty() || allowed_ids.contains(&e.id))
+                                && (!is_opus || e.credentials.supports_opus())
                         })
                         .map(|e| (e.id, e.credentials.clone()))
                 } else {

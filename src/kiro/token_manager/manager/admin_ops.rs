@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use super::super::entry::{CredentialEntry, DisabledReason};
 use super::super::refresh::{
     get_usage_limits, is_token_expired, is_token_expiring_soon, list_available_models,
@@ -111,8 +113,57 @@ impl MultiTokenManager {
         }
     }
 
+    fn has_known_subscription(credentials: &KiroCredentials) -> bool {
+        credentials
+            .subscription_title
+            .as_deref()
+            .is_some_and(|title| !title.trim().is_empty())
+    }
+
+    /// 确保账号进入可用池前已获取订阅等级
+    async fn ensure_subscription_before_enable(&self, id: u64) -> anyhow::Result<()> {
+        let needs_lookup = {
+            let entries = self.entries.lock();
+            let entry = entries
+                .iter()
+                .find(|e| e.id == id)
+                .ok_or_else(|| anyhow::anyhow!("账号不存在: {}", id))?;
+            !Self::has_known_subscription(&entry.credentials)
+        };
+
+        if !needs_lookup {
+            return Ok(());
+        }
+
+        self.get_usage_limits_for(id)
+            .await
+            .with_context(|| format!("启用账号 #{} 前获取订阅/额度失败，账号保持禁用", id))?;
+
+        let has_subscription = {
+            let entries = self.entries.lock();
+            let entry = entries
+                .iter()
+                .find(|e| e.id == id)
+                .ok_or_else(|| anyhow::anyhow!("账号不存在: {}", id))?;
+            Self::has_known_subscription(&entry.credentials)
+        };
+
+        anyhow::ensure!(
+            has_subscription,
+            "账号 #{} 的订阅等级为空，账号保持禁用",
+            id
+        );
+        Ok(())
+    }
+
     /// 设置账号禁用状态（Admin API）
-    pub fn set_disabled(&self, id: u64, disabled: bool) -> anyhow::Result<()> {
+    pub async fn set_disabled(&self, id: u64, disabled: bool) -> anyhow::Result<()> {
+        let _operation_guard = self.credential_admin_lock.lock().await;
+
+        if !disabled {
+            self.ensure_subscription_before_enable(id).await?;
+        }
+
         {
             let mut entries = self.entries.lock();
             let entry = entries
@@ -158,7 +209,10 @@ impl MultiTokenManager {
     }
 
     /// 重置账号失败计数并重新启用（Admin API）
-    pub fn reset_and_enable(&self, id: u64) -> anyhow::Result<()> {
+    pub async fn reset_and_enable(&self, id: u64) -> anyhow::Result<()> {
+        let _operation_guard = self.credential_admin_lock.lock().await;
+        self.ensure_subscription_before_enable(id).await?;
+
         {
             let mut entries = self.entries.lock();
             let entry = entries
@@ -275,7 +329,10 @@ impl MultiTokenManager {
             get_usage_limits(&credentials, &self.config, &token, effective_proxy.as_ref()).await?;
 
         // 更新订阅等级到账号（仅在发生变化时持久化）
-        if let Some(subscription_title) = usage_limits.subscription_title() {
+        if let Some(subscription_title) = usage_limits
+            .subscription_title()
+            .filter(|title| !title.trim().is_empty())
+        {
             let changed = {
                 let mut entries = self.entries.lock();
                 if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
@@ -319,6 +376,8 @@ impl MultiTokenManager {
     /// - `Ok(u64)` - 新账号 ID
     /// - `Err(_)` - 验证失败或添加失败
     pub async fn add_credential(&self, new_cred: KiroCredentials) -> anyhow::Result<u64> {
+        let _operation_guard = self.credential_admin_lock.lock().await;
+
         // 1. 基本验证
         validate_refresh_token(&new_cred)?;
         let initially_disabled = new_cred.disabled;
@@ -438,6 +497,8 @@ impl MultiTokenManager {
         id: u64,
         update: crate::admin::types::UpdateCredentialRequest,
     ) -> anyhow::Result<()> {
+        let _operation_guard = self.credential_admin_lock.lock().await;
+
         // 检查账号是否存在
         let exists = {
             let entries = self.entries.lock();
@@ -620,7 +681,9 @@ impl MultiTokenManager {
     /// # 返回
     /// - `Ok(())` - 删除成功
     /// - `Err(_)` - 账号不存在或持久化失败
-    pub fn delete_credential(&self, id: u64) -> anyhow::Result<()> {
+    pub async fn delete_credential(&self, id: u64) -> anyhow::Result<()> {
+        let _operation_guard = self.credential_admin_lock.lock().await;
+
         {
             let mut entries = self.entries.lock();
             let mut current_id = self.current_id.lock();

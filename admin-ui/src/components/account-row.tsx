@@ -34,7 +34,7 @@ import {
 } from '@/hooks/use-credentials'
 import { ACCOUNT_STATE_VISUAL, accountLabel, deriveAccountState, maskEmail } from '@/lib/account-state'
 import { localeTag } from '@/lib/locale'
-import { getSubscriptionColor } from '@/lib/utils'
+import { extractErrorMessage, getSubscriptionColor } from '@/lib/utils'
 import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
 
 /** RPM 高压阈值：设计稿把 12 染成 danger、1–3 用 accent，取 10 作分界 */
@@ -130,7 +130,8 @@ export function AccountRow({
   const deleteCredential = useDeleteCredential()
   const updateCredential = useUpdateCredential()
 
-  const opFailed = (err: Error) => toast.error(t('credentials.toastOpFailed', { message: err.message }))
+  const opFailed = (err: Error) =>
+    toast.error(t('credentials.toastOpFailed', { message: extractErrorMessage(err) }))
 
   const handleToggleDisabled = () => {
     setDisabled.mutate(

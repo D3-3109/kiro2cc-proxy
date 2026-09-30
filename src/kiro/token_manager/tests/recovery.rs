@@ -165,8 +165,8 @@ pub(crate) mod tests {
         assert_eq!(manager.available_count(), 1);
     }
 
-    #[test]
-    fn test_describe_unavailable_distinguishes_reasons() {
+    #[tokio::test]
+    async fn test_describe_unavailable_distinguishes_reasons() {
         // 核心诊断能力：三种禁用原因不得塌缩成同一句"均已禁用"
         let config = Config::default();
         let manager = MultiTokenManager::new(
@@ -186,7 +186,7 @@ pub(crate) mod tests {
         for _ in 0..MAX_FAILURES_PER_CREDENTIAL {
             manager.report_failure(2);
         }
-        manager.set_disabled(3, true).unwrap();
+        manager.set_disabled(3, true).await.unwrap();
 
         let msg = manager.describe_unavailable(None, &[]);
         assert!(msg.contains("1 个额度用尽"), "实际: {}", msg);
@@ -198,6 +198,28 @@ pub(crate) mod tests {
             "混合原因不应标记为额度耗尽，实际: {}",
             msg
         );
+    }
+
+    #[tokio::test]
+    async fn test_priority_current_id_excludes_free_account_for_opus() {
+        let mut free = make_valid_cred("free-token");
+        free.priority = 0;
+        free.subscription_title = Some("KIRO FREE".to_string());
+
+        let mut pro = make_valid_cred("pro-token");
+        pro.priority = 1;
+        pro.subscription_title = Some("KIRO PRO".to_string());
+
+        let manager =
+            MultiTokenManager::new(Config::default(), vec![free, pro], None, None, false).unwrap();
+        assert_eq!(manager.snapshot().current_id, 1);
+
+        let context = manager
+            .acquire_context(Some("claude-opus-4-7"))
+            .await
+            .unwrap();
+
+        assert_eq!(context.id, 2);
     }
 
     #[test]

@@ -159,14 +159,21 @@ impl AdminService {
     }
 
     /// 设置账号禁用状态
-    pub fn set_disabled(&self, id: u64, disabled: bool) -> Result<(), AdminServiceError> {
+    pub async fn set_disabled(&self, id: u64, disabled: bool) -> Result<(), AdminServiceError> {
         // 先获取当前账号 ID，用于判断是否需要切换
         let snapshot = self.token_manager.snapshot();
         let current_id = snapshot.current_id;
 
         self.token_manager
             .set_disabled(id, disabled)
-            .map_err(|e| self.classify_error(e, id))?;
+            .await
+            .map_err(|e| {
+                if disabled {
+                    self.classify_error(e, id)
+                } else {
+                    self.classify_enable_error(e, id)
+                }
+            })?;
 
         // 只有禁用的是当前账号时才尝试切换到下一个
         if disabled && id == current_id {
@@ -183,10 +190,11 @@ impl AdminService {
     }
 
     /// 重置失败计数并重新启用
-    pub fn reset_and_enable(&self, id: u64) -> Result<(), AdminServiceError> {
+    pub async fn reset_and_enable(&self, id: u64) -> Result<(), AdminServiceError> {
         self.token_manager
             .reset_and_enable(id)
-            .map_err(|e| self.classify_error(e, id))
+            .await
+            .map_err(|e| self.classify_enable_error(e, id))
     }
 
     /// 获取账号余额（带缓存）
@@ -372,9 +380,10 @@ impl AdminService {
     }
 
     /// 删除账号
-    pub fn delete_credential(&self, id: u64) -> Result<(), AdminServiceError> {
+    pub async fn delete_credential(&self, id: u64) -> Result<(), AdminServiceError> {
         self.token_manager
             .delete_credential(id)
+            .await
             .map_err(|e| self.classify_delete_error(e, id))?;
 
         // 清理已删除账号的余额缓存
@@ -510,7 +519,7 @@ impl AdminService {
 
     // ============ 错误分类 ============
 
-    /// 分类简单操作错误（set_disabled, set_priority, reset_and_enable）
+    /// 分类不涉及上游请求的简单操作错误
     fn classify_error(&self, e: anyhow::Error, id: u64) -> AdminServiceError {
         let msg = e.to_string();
         if msg.contains("不存在") {
@@ -520,36 +529,50 @@ impl AdminService {
         }
     }
 
+    /// 分类启用账号前的订阅/额度校验错误
+    fn classify_enable_error(&self, e: anyhow::Error, id: u64) -> AdminServiceError {
+        let details = format!("{e:#}");
+        if e.downcast_ref::<UsageLimitsUnsupportedError>().is_some()
+            || details.contains("订阅等级为空")
+        {
+            return AdminServiceError::InvalidCredential(format!(
+                "无法确认账号 #{} 的订阅等级，账号未启用",
+                id
+            ));
+        }
+        self.classify_balance_error(e, id)
+    }
+
     /// 分类余额查询错误（可能涉及上游 API 调用）
     fn classify_balance_error(&self, e: anyhow::Error, id: u64) -> AdminServiceError {
-        let msg = e.to_string();
+        let details = format!("{e:#}");
 
         // 1. 账号不存在
-        if msg.contains("不存在") {
+        if details.contains("不存在") {
             return AdminServiceError::NotFound { id };
         }
 
         // 2. 上游服务错误特征：HTTP 响应错误或网络错误
         let is_upstream_error =
             // HTTP 响应错误（来自 refresh_*_token 的错误消息）
-            msg.contains("凭证已过期或无效") ||
-            msg.contains("权限不足") ||
-            msg.contains("已被限流") ||
-            msg.contains("服务器错误") ||
-            msg.contains("Token 刷新失败") ||
-            msg.contains("暂时不可用") ||
+            details.contains("凭证已过期或无效") ||
+            details.contains("权限不足") ||
+            details.contains("已被限流") ||
+            details.contains("服务器错误") ||
+            details.contains("Token 刷新失败") ||
+            details.contains("暂时不可用") ||
             // 网络错误（reqwest 错误）
-            msg.contains("error trying to connect") ||
-            msg.contains("connection") ||
-            msg.contains("timeout") ||
-            msg.contains("timed out");
+            details.contains("error trying to connect") ||
+            details.contains("connection") ||
+            details.contains("timeout") ||
+            details.contains("timed out");
 
         if is_upstream_error {
-            AdminServiceError::UpstreamError(msg)
+            AdminServiceError::UpstreamError(format!("账号 #{} 的上游服务暂时不可用", id))
         } else {
             // 3. 默认归类为内部错误（本地验证失败、配置错误等）
             // 包括：缺少 refreshToken、refreshToken 已被截断、无法生成 machineId 等
-            AdminServiceError::InternalError(msg)
+            AdminServiceError::InternalError(format!("账号 #{} 操作失败", id))
         }
     }
 
@@ -680,6 +703,41 @@ mod tests {
         let item = fallback_model_to_admin_item(model);
         assert_eq!(item.model.id, expected_id);
         assert_eq!(item.rate_multiplier, None);
+    }
+
+    #[test]
+    fn test_enable_classifies_unsupported_usage_query_as_invalid_credential() {
+        let manager = MultiTokenManager::new(Config::default(), vec![], None, None, false).unwrap();
+        let service = AdminService::new(Arc::new(manager));
+
+        let error =
+            service.classify_enable_error(anyhow::Error::new(UsageLimitsUnsupportedError), 1);
+
+        assert_eq!(error.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        match error {
+            AdminServiceError::InvalidCredential(message) => {
+                assert!(message.contains("账号未启用"));
+                assert!(message.contains("无法确认账号 #1 的订阅等级"));
+            }
+            other => panic!("预期 InvalidCredential，实际: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_enable_classification_uses_error_chain_without_exposing_details() {
+        let manager = MultiTokenManager::new(Config::default(), vec![], None, None, false).unwrap();
+        let service = AdminService::new(Arc::new(manager));
+        let error = anyhow::Error::msg("timed out: proxy=http://user:password@internal")
+            .context("启用前获取订阅/额度失败");
+
+        let classified = service.classify_enable_error(error, 1);
+
+        match classified {
+            AdminServiceError::UpstreamError(message) => {
+                assert_eq!(message, "账号 #1 的上游服务暂时不可用");
+            }
+            other => panic!("预期 UpstreamError，实际: {other:?}"),
+        }
     }
 
     #[test]

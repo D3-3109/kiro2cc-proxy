@@ -285,4 +285,52 @@ pub(crate) mod tests {
         // 返回另一个账号
         assert_ne!(ctx2.id, bound_id);
     }
+
+    #[tokio::test]
+    async fn test_sticky_cache_excludes_free_account_for_opus() {
+        let mut free = make_valid_cred("free-token");
+        free.priority = 0;
+        free.subscription_title = Some("KIRO FREE".to_string());
+
+        let mut pro = make_valid_cred("pro-token");
+        pro.priority = 1;
+        pro.subscription_title = Some("KIRO PRO".to_string());
+
+        let manager =
+            MultiTokenManager::new(Config::default(), vec![free, pro], None, None, false).unwrap();
+
+        let initial = manager
+            .acquire_context_sticky(
+                Some("claude-sonnet-4-6"),
+                &[],
+                Some("session-model-filter"),
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(initial.id, 1);
+        let (_, misses_before) = manager.sticky_metrics();
+
+        let opus = manager
+            .acquire_context_sticky(
+                Some("claude-opus-4-7"),
+                &[],
+                Some("session-model-filter"),
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(opus.id, 2);
+        assert_eq!(
+            manager
+                .sticky_cache
+                .lock()
+                .get("session-model-filter")
+                .map(|entry| entry.credential_id),
+            Some(2)
+        );
+        let (_, misses_after) = manager.sticky_metrics();
+        assert_eq!(misses_after, misses_before + 1);
+    }
 }
