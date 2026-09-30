@@ -201,6 +201,33 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn test_unknown_subscription_is_excluded_only_for_opus() {
+        let mut unknown = make_valid_cred("unknown-token");
+        unknown.priority = 0;
+        unknown.subscription_title = None;
+
+        let mut pro = make_valid_cred("pro-token");
+        pro.priority = 1;
+        pro.subscription_title = Some("KIRO PRO".to_string());
+
+        let manager =
+            MultiTokenManager::new(Config::default(), vec![unknown, pro], None, None, false)
+                .unwrap();
+
+        let sonnet = manager
+            .acquire_context(Some("claude-sonnet-4-6"))
+            .await
+            .unwrap();
+        assert_eq!(sonnet.id, 1);
+
+        let opus = manager
+            .acquire_context(Some("claude-opus-4-7"))
+            .await
+            .unwrap();
+        assert_eq!(opus.id, 2);
+    }
+
+    #[tokio::test]
     async fn test_priority_current_id_excludes_free_account_for_opus() {
         let mut free = make_valid_cred("free-token");
         free.priority = 0;
@@ -293,16 +320,12 @@ pub(crate) mod tests {
         // 健康账号时，不传 model 会被健康账号稀释掉 quota 计数，永远触发不了
         // 402 标记；传入 model 后必须正确排除不相关账号，判定为全部耗尽。
         let config = Config::default();
+        let mut opus_cred = make_valid_cred("opus1");
+        opus_cred.subscription_title = Some("KIRO PRO".to_string());
         let mut free_cred = make_valid_cred("free1");
         free_cred.subscription_title = Some("FREE".to_string());
-        let manager = MultiTokenManager::new(
-            config,
-            vec![make_valid_cred("opus1"), free_cred],
-            None,
-            None,
-            false,
-        )
-        .unwrap();
+        let manager =
+            MultiTokenManager::new(config, vec![opus_cred, free_cred], None, None, false).unwrap();
 
         manager.report_quota_exhausted(1);
 

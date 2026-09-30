@@ -120,6 +120,99 @@ impl MultiTokenManager {
             .is_some_and(|title| !title.trim().is_empty())
     }
 
+    fn update_changes_subscription_identity(
+        update: &crate::admin::types::UpdateCredentialRequest,
+    ) -> bool {
+        update.refresh_token.is_some()
+            || update.auth_method.is_some()
+            || update.client_id.is_some()
+            || update.client_secret.is_some()
+            || update.profile_arn.is_some()
+            || update.auth_region.is_some()
+            || update.api_region.is_some()
+            || update.machine_id.is_some()
+    }
+
+    fn has_same_subscription_identity(
+        current: &KiroCredentials,
+        queried: &KiroCredentials,
+    ) -> bool {
+        current.refresh_token == queried.refresh_token
+            && current.auth_method == queried.auth_method
+            && current.client_id == queried.client_id
+            && current.client_secret == queried.client_secret
+            && current.profile_arn == queried.profile_arn
+            && current.provider == queried.provider
+            && current.token_endpoint == queried.token_endpoint
+            && current.scopes == queried.scopes
+            && current.region == queried.region
+            && current.auth_region == queried.auth_region
+            && current.api_region == queried.api_region
+            && current.machine_id == queried.machine_id
+    }
+
+    pub(crate) fn commit_refreshed_credentials_if_identity_matches(
+        &self,
+        id: u64,
+        refreshing_credentials: &KiroCredentials,
+        refreshed_credentials: &KiroCredentials,
+    ) -> anyhow::Result<KiroCredentials> {
+        let mut entries = self.entries.lock();
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| anyhow::anyhow!("账号不存在: {}", id))?;
+
+        anyhow::ensure!(
+            Self::has_same_subscription_identity(&entry.credentials, refreshing_credentials,),
+            "账号 #{} 在 Token 刷新期间身份已变更，请重试",
+            id
+        );
+
+        entry.credentials.access_token = refreshed_credentials.access_token.clone();
+        entry.credentials.sso_access_token = refreshed_credentials.sso_access_token.clone();
+        entry.credentials.refresh_token = refreshed_credentials.refresh_token.clone();
+        entry.credentials.profile_arn = refreshed_credentials.profile_arn.clone();
+        entry.credentials.expires_at = refreshed_credentials.expires_at.clone();
+        entry.last_refreshed_at = Some(Instant::now());
+        entry.refresh_failure_count = 0;
+
+        Ok(entry.credentials.clone())
+    }
+
+    pub(crate) fn commit_subscription_title_if_identity_matches(
+        &self,
+        id: u64,
+        queried_credentials: &KiroCredentials,
+        subscription_title: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        let mut entries = self.entries.lock();
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| anyhow::anyhow!("账号不存在: {}", id))?;
+
+        anyhow::ensure!(
+            Self::has_same_subscription_identity(&entry.credentials, queried_credentials),
+            "账号 #{} 在订阅查询期间身份已变更，请重试",
+            id
+        );
+
+        if entry.credentials.subscription_title.as_deref() == subscription_title {
+            return Ok(false);
+        }
+
+        let old_title = entry.credentials.subscription_title.clone();
+        entry.credentials.subscription_title = subscription_title.map(str::to_string);
+        tracing::info!(
+            "账号 #{} 订阅等级已更新: {:?} -> {:?}",
+            id,
+            old_title,
+            subscription_title
+        );
+        Ok(true)
+    }
+
     /// 确保账号进入可用池前已获取订阅等级
     async fn ensure_subscription_before_enable(&self, id: u64) -> anyhow::Result<()> {
         let needs_lookup = {
@@ -250,6 +343,7 @@ impl MultiTokenManager {
 
         let token = if needs_refresh {
             let _guard = self.refresh_lock.lock().await;
+            let _identity_guard = self.credential_identity_lock.lock().await;
             let current_creds = {
                 let entries = self.entries.lock();
                 entries
@@ -278,21 +372,19 @@ impl MultiTokenManager {
                         .ok_or_else(|| anyhow::anyhow!("冷却期内无 access_token"))?
                 } else {
                     let effective_proxy = current_creds.effective_proxy(self.proxy.as_ref());
-                    let new_creds =
+                    let refreshed_creds =
                         refresh_token(&current_creds, &self.config, effective_proxy.as_ref())
                             .await?;
-                    {
-                        let mut entries = self.entries.lock();
-                        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-                            entry.credentials = new_creds.clone();
-                            entry.last_refreshed_at = Some(Instant::now());
-                        }
-                    }
+                    let committed_creds = self.commit_refreshed_credentials_if_identity_matches(
+                        id,
+                        &current_creds,
+                        &refreshed_creds,
+                    )?;
                     // 持久化失败只记录警告，不影响本次请求
                     if let Err(e) = self.persist_credentials() {
                         tracing::warn!("Token 刷新后持久化失败（不影响本次请求）: {}", e);
                     }
-                    new_creds
+                    committed_creds
                         .access_token
                         .ok_or_else(|| anyhow::anyhow!("刷新后无 access_token"))?
                 }
@@ -328,35 +420,18 @@ impl MultiTokenManager {
         let usage_limits =
             get_usage_limits(&credentials, &self.config, &token, effective_proxy.as_ref()).await?;
 
-        // 更新订阅等级到账号（仅在发生变化时持久化）
-        if let Some(subscription_title) = usage_limits
+        // 仅允许查询期间身份未变化的结果回写，防止旧凭据恢复过期订阅等级
+        let subscription_title = usage_limits
             .subscription_title()
-            .filter(|title| !title.trim().is_empty())
-        {
-            let changed = {
-                let mut entries = self.entries.lock();
-                if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-                    let old_title = entry.credentials.subscription_title.clone();
-                    if old_title.as_deref() != Some(subscription_title) {
-                        entry.credentials.subscription_title = Some(subscription_title.to_string());
-                        tracing::info!(
-                            "账号 #{} 订阅等级已更新: {:?} -> {}",
-                            id,
-                            old_title,
-                            subscription_title
-                        );
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            };
+            .filter(|title| !title.trim().is_empty());
+        let changed = self.commit_subscription_title_if_identity_matches(
+            id,
+            &credentials,
+            subscription_title,
+        )?;
 
-            if changed && let Err(e) = self.persist_credentials() {
-                tracing::warn!("订阅等级更新后持久化失败（不影响本次请求）: {}", e);
-            }
+        if changed && let Err(e) = self.persist_credentials() {
+            tracing::warn!("订阅等级更新后持久化失败（不影响本次请求）: {}", e);
         }
 
         Ok(usage_limits)
@@ -498,6 +573,11 @@ impl MultiTokenManager {
         update: crate::admin::types::UpdateCredentialRequest,
     ) -> anyhow::Result<()> {
         let _operation_guard = self.credential_admin_lock.lock().await;
+        let _identity_guard = if Self::update_changes_subscription_identity(&update) {
+            Some(self.credential_identity_lock.lock().await)
+        } else {
+            None
+        };
 
         // 检查账号是否存在
         let exists = {
@@ -584,6 +664,8 @@ impl MultiTokenManager {
         cred: &mut KiroCredentials,
         update: &crate::admin::types::UpdateCredentialRequest,
     ) {
+        let identity_updated = Self::update_changes_subscription_identity(update);
+
         if let Some(ref am) = update.auth_method {
             cred.auth_method = Some(canonicalize_auth_method_value(am).to_string());
         }
@@ -666,6 +748,9 @@ impl MultiTokenManager {
         }
         if let Some(ta) = update.thinking_adaptive {
             cred.thinking_adaptive = ta;
+        }
+        if identity_updated {
+            cred.subscription_title = None;
         }
     }
 

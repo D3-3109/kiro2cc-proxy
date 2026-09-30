@@ -88,6 +88,8 @@ pub struct MultiTokenManager {
     pub(crate) current_id: Mutex<u64>,
     /// Token 刷新锁，确保同一时间只有一个刷新操作
     pub(crate) refresh_lock: TokioMutex<()>,
+    /// 身份更新锁，避免 Token 刷新期间修改认证身份而丢失轮换结果
+    pub(crate) credential_identity_lock: TokioMutex<()>,
     /// 账号管理操作锁，避免启用校验期间被并发禁用、更新或删除
     pub(crate) credential_admin_lock: TokioMutex<()>,
     /// 账号文件路径（用于回写）

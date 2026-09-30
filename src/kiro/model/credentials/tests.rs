@@ -11,6 +11,28 @@ mod tests {
     use crate::model::config::Config;
 
     #[test]
+    fn test_supports_opus_requires_known_non_free_subscription() {
+        let cases = [
+            (None, false),
+            (Some(""), false),
+            (Some("   "), false),
+            (Some("KIRO FREE"), false),
+            (Some("  Kiro Free  "), false),
+            (Some("KIRO PRO"), true),
+            (Some("Kiro Pro+"), true),
+            (Some("ENTERPRISE"), true),
+        ];
+
+        for (title, expected) in cases {
+            let credentials = KiroCredentials {
+                subscription_title: title.map(str::to_string),
+                ..Default::default()
+            };
+            assert_eq!(credentials.supports_opus(), expected, "title={title:?}");
+        }
+    }
+
+    #[test]
     fn test_from_json() {
         let json = r#"{
             "accessToken": "test_token",
