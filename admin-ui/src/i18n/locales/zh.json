@@ -279,7 +279,7 @@
     "statFailedLabel": "失败",
     "usageLabel": "用量: {{usage}}",
     "verifyingButton": "验活中...",
-    "startImportVerifyButton": "开始导入并验活",
+    "startImportVerifyButton": "导入",
     "accountAddedVerificationFailed": "账号已添加并自动禁用，但额度验活失败：{{message}}。请检查账号配置；企业版 IdC 账号需要在编辑账号中填写真实 Profile ARN。",
     "accountActivationUnknown": "额度验活成功，但启用请求失败：{{message}}。账号当前启用状态未知，请在账号列表中确认后再使用。",
     "downloadKamButton": "KAM下载",

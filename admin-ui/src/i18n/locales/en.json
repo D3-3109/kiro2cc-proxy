@@ -279,7 +279,7 @@
     "statFailedLabel": "Failed",
     "usageLabel": "Usage: {{usage}}",
     "verifyingButton": "Verifying...",
-    "startImportVerifyButton": "Start Import & Verify",
+    "startImportVerifyButton": "Import",
     "accountAddedVerificationFailed": "The account was added and automatically disabled, but quota verification failed: {{message}}. Check the account configuration; enterprise IdC accounts require their real Profile ARN in the account editor.",
     "accountActivationUnknown": "Quota verification succeeded, but the enable request failed: {{message}}. The account's activation state is unknown; confirm it in the account list before use.",
     "downloadKamButton": "Download KAM",
