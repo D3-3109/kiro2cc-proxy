@@ -17,7 +17,7 @@
 //! - `fields`: additionalModelRequestFields 构建
 //! - `thinking`: thinking 前缀生成与模型谓词
 //! - `history`: 历史消息构建与合并
-//! - `tests/`: 原内联测试按被测子模块拆分为目录（model/schema/pdf/prompt/fields/session/websearch/tools/thinking_gpt/history_cache）
+//! - `tests/`: 原内联测试按被测子模块拆分为目录（model/schema/pdf/prompt/fields/session/websearch/tools/thinking_gpt/history_cache/message）
 
 mod cache;
 mod convert;
@@ -82,6 +82,7 @@ mod tests {
 
     mod fields;
     mod history_cache;
+    mod message;
     mod model;
     mod pdf;
     mod prompt;

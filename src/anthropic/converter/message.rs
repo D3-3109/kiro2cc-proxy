@@ -65,7 +65,26 @@ pub(super) fn process_message_content(
                         }
                         "tool_result" => {
                             if let Some(tool_use_id) = block.tool_use_id {
-                                let result_content = extract_tool_result_content(&block.content);
+                                let (mut result_content, result_images) =
+                                    extract_tool_result_parts(&block.content);
+                                // Kiro 的 ToolResult 只接受文本 content，图片块无法内嵌。
+                                // 图片挂到所在 user 消息的 images 上（与 user 消息图片
+                                // 同一通路，Kiro 仅在该字段接受图片），并在工具结果文本
+                                // 末尾留占位，让模型知道图片与该工具结果的对应关系
+                                if !result_images.is_empty() {
+                                    let marker = if result_images.len() == 1 {
+                                        "[image attached]".to_string()
+                                    } else {
+                                        format!("[{} images attached]", result_images.len())
+                                    };
+                                    if result_content.trim().is_empty() {
+                                        result_content = marker;
+                                    } else {
+                                        result_content.push('\n');
+                                        result_content.push_str(&marker);
+                                    }
+                                    images.extend(result_images);
+                                }
                                 let is_error = block.is_error.unwrap_or(false);
 
                                 let mut result = if is_error {
@@ -103,20 +122,36 @@ pub(super) fn get_image_format(media_type: &str) -> Option<String> {
     }
 }
 
-/// 提取工具结果内容
-fn extract_tool_result_content(content: &Option<serde_json::Value>) -> String {
+/// 提取工具结果内容：文本部分拼接为字符串，图片块单独收集
+///
+/// Kiro 的 ToolResult.content 只接受 `{text}` 形态，不支持内嵌图片；
+/// 图片由调用方挂到所在 user 消息的 images 上转发（同 user 消息图片通路）。
+/// 与顶层 image 块同一口径：仅支持 base64 + jpeg/png/gif/webp，其余静默忽略。
+fn extract_tool_result_parts(content: &Option<serde_json::Value>) -> (String, Vec<KiroImage>) {
     match content {
-        Some(serde_json::Value::String(s)) => s.clone(),
         Some(serde_json::Value::Array(arr)) => {
             let mut parts = Vec::new();
+            let mut images = Vec::new();
             for item in arr {
-                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                if let Ok(block) = serde_json::from_value::<ContentBlock>(item.clone()) {
+                    if block.block_type == "image"
+                        && let Some(source) = block.source
+                        && let Some(format) = get_image_format(&source.media_type)
+                    {
+                        images.push(KiroImage::from_base64(format, source.data));
+                        continue;
+                    }
+                    if let Some(text) = block.text {
+                        parts.push(text);
+                    }
+                } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
                     parts.push(text.to_string());
                 }
             }
-            parts.join("\n")
+            (parts.join("\n"), images)
         }
-        Some(v) => v.to_string(),
-        None => String::new(),
+        Some(serde_json::Value::String(s)) => (s.clone(), Vec::new()),
+        Some(v) => (v.to_string(), Vec::new()),
+        None => (String::new(), Vec::new()),
     }
 }
