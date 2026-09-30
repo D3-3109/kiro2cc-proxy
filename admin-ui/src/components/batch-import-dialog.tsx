@@ -340,7 +340,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
           <DialogTitle>{t('credentials.batchImportDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto space-y-4 py-4">
+        <div className="flex-1 overflow-y-auto space-y-4 pb-4">
           <div className="space-y-2">
             <label className="text-[11.5px] font-medium text-ink-2">
               {t('credentials.jsonFormatAccountsLabel')}

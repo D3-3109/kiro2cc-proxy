@@ -162,7 +162,7 @@ After setup, `app/config/config.json` is generated, the service starts, and the 
 
 ### Step 5: Add Kiro Accounts
 
-After the service starts, open the admin panel at `http://127.0.0.1:5678/admin` and add accounts exported from Kiro.
+After the service starts, open the admin panel at `http://127.0.0.1:5678/admin` and click **KAM Account Import** on the accounts management page. This entry supports both single-account and multi-account KAM export JSON. Paste JSON text or drag in a `.json` file. After you click **Import**, accounts are created disabled and quota verification runs automatically; successfully verified accounts are enabled, while accounts that fail verification remain retained and disabled.
 
 Alternatively, create `app/config/credentials.json` directly — see the "Getting Kiro Accounts" section.
 
@@ -262,7 +262,7 @@ After setup, `app\config\config.json` is generated, the service starts, and the 
 
 ### Step 5: Add Kiro Accounts
 
-After the service starts, open the admin panel at `http://127.0.0.1:5678/admin` and add accounts exported from Kiro.
+After the service starts, open the admin panel at `http://127.0.0.1:5678/admin` and click **KAM Account Import** on the accounts management page. This entry supports both single-account and multi-account KAM export JSON. Paste JSON text or drag in a `.json` file. After you click **Import**, accounts are created disabled and quota verification runs automatically; successfully verified accounts are enabled, while accounts that fail verification remain retained and disabled.
 
 ### Stop the Service
 
@@ -394,13 +394,15 @@ Using an overseas server is recommended — no proxy needed.
 
 Follow the "Local Deployment" or "Server Deployment" section to start the service and confirm it is running.
 
-**Step 3: Import accounts via the Admin Panel (recommended)**
+**Step 3: Import accounts with KAM Account Import (recommended)**
 
 1. Open the admin panel: `http://127.0.0.1:5678/admin` (**replace with your server IP for server deployments**)
 2. **Log in with the `adminPsw` (Admin Password) configured in `config.json`**
 3. Go to the accounts management page
-4. **Paste** the exported JSON content into the input field, or **drag and drop** the JSON file onto the page
-5. The panel automatically recognizes the account info and displays it — confirm to save
+4. Click **KAM Account Import**; the same entry supports both single-account and multi-account KAM export JSON
+5. **Paste** the exported JSON content into the input field, or **drag and drop** the `.json` file onto the page
+6. Click **Import**; accounts are created disabled, then the panel automatically runs quota verification
+7. Successfully verified accounts are enabled automatically; accounts that fail verification remain retained and disabled for configuration review
 
 > ℹ️ **Importing accounts over HTTP**
 >
@@ -748,6 +750,7 @@ When `adminPsw` is configured, access the admin panel at `http://127.0.0.1:5678/
 Features:
 - View all account statuses (validity, failure count, etc.)
 - Add / delete accounts
+- Import one or multiple KAM accounts through **KAM Account Import** with automatic quota verification
 - Enable / disable individual accounts
 - Adjust account priority
 - Check account balance
