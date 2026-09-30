@@ -63,7 +63,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [modelsCredentialId, setModelsCredentialId] = useState<number | null>(null)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [batchImportDialogOpen, setBatchImportDialogOpen] = useState(false)
-  const [kamImportDialogOpen, setKamImportDialogOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -789,7 +788,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
           queryingInfo={queryingInfo}
           queryInfoProgress={queryInfoProgress}
           handleClearAll={handleClearAll}
-          openKamImport={() => setKamImportDialogOpen(true)}
           openBatchImport={() => setBatchImportDialogOpen(true)}
           verifying={verifying}
           verifyDialogOpen={verifyDialogOpen}
@@ -851,8 +849,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
         setAddDialogOpen={setAddDialogOpen}
         batchImportDialogOpen={batchImportDialogOpen}
         setBatchImportDialogOpen={setBatchImportDialogOpen}
-        kamImportDialogOpen={kamImportDialogOpen}
-        setKamImportDialogOpen={setKamImportDialogOpen}
         verifyDialogOpen={verifyDialogOpen}
         setVerifyDialogOpen={setVerifyDialogOpen}
         verifying={verifying}

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // Dashboard 凭据操作条区块（自 dashboard.tsx 拆出，纯代码搬移）
 import { useTranslation } from 'react-i18next'
-import { RefreshCw, Info, Trash2, FileInput, CheckCircle2, Plus } from 'lucide-react'
+import { RefreshCw, Info, Trash2, CheckCircle2, Plus } from 'lucide-react'
 import { ACTION_BTN, ACTION_BTN_DANGER, ACTION_BTN_PRIMARY, ACTION_VDIV } from '@/components/dashboard/panel-constants'
 
 interface CredentialActionBarProps {
@@ -12,7 +12,6 @@ interface CredentialActionBarProps {
   queryingInfo: boolean
   queryInfoProgress: { current: number; total: number }
   handleClearAll: () => void
-  openKamImport: () => void
   openBatchImport: () => void
   verifying: boolean
   verifyDialogOpen: boolean
@@ -39,7 +38,6 @@ export function CredentialActionBar({
   queryingInfo,
   queryInfoProgress,
   handleClearAll,
-  openKamImport,
   openBatchImport,
   verifying,
   verifyDialogOpen,
@@ -89,15 +87,6 @@ export function CredentialActionBar({
                   <span aria-hidden="true" className={ACTION_VDIV} />
                 </>
               )}
-              <button
-                type="button"
-                onClick={openKamImport}
-                aria-label={t('dashboard.kamImport')}
-                className={ACTION_BTN}
-              >
-                <FileInput />
-                <span className="hidden sm:inline">{t('dashboard.kamImport')}</span>
-              </button>
               <button
                 type="button"
                 onClick={openBatchImport}
