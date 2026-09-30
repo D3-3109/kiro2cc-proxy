@@ -139,6 +139,8 @@ impl MultiTokenManager {
             entries: Mutex::new(entries),
             current_id: Mutex::new(initial_id),
             refresh_lock: TokioMutex::new(()),
+            credential_identity_lock: TokioMutex::new(()),
+            credential_admin_lock: TokioMutex::new(()),
             credentials_path,
             is_multiple_format: AtomicBool::new(is_multiple_format),
             load_balancing_mode: Mutex::new(load_balancing_mode),
@@ -330,6 +332,9 @@ impl MultiTokenManager {
 
         let total = self.total_count();
         let mut tried_count = 0;
+        let is_opus = model
+            .map(|m| m.to_ascii_lowercase().contains("opus"))
+            .unwrap_or(false);
 
         loop {
             if tried_count >= total {
@@ -356,6 +361,7 @@ impl MultiTokenManager {
                             e.id == current_id
                                 && !e.disabled
                                 && Self::compute_health(e) != HealthStatus::Unhealthy
+                                && (!is_opus || e.credentials.supports_opus())
                         })
                         .map(|e| (e.id, e.credentials.clone()))
                 };
@@ -552,6 +558,10 @@ impl MultiTokenManager {
                 .is_some_and(|e| avoid_ids.contains(&e.credential_id))
         };
 
+        let is_opus = model
+            .map(|m| m.to_ascii_lowercase().contains("opus"))
+            .unwrap_or(false);
+
         // 步骤 ①②：从 sticky_cache 查找，验证 TTL + 健康状态
         let cached = {
             let cache = self.sticky_cache.lock();
@@ -573,6 +583,7 @@ impl MultiTokenManager {
                                     HealthStatus::Unhealthy | HealthStatus::Disabled
                                 )
                                 && (allowed_ids.is_empty() || allowed_ids.contains(&e.id))
+                                && (!is_opus || e.credentials.supports_opus())
                         })
                         .map(|e| (e.id, e.credentials.clone()))
                 } else {
@@ -755,6 +766,7 @@ impl MultiTokenManager {
         let creds = if needs_refresh {
             // 获取刷新锁，确保同一时间只有一个刷新操作
             let _guard = self.refresh_lock.lock().await;
+            let _identity_guard = self.credential_identity_lock.lock().await;
 
             // 第二次检查：获取锁后重新读取账号，因为其他请求可能已经完成刷新
             let current_creds = {
@@ -783,30 +795,26 @@ impl MultiTokenManager {
                 } else {
                     // 确实需要刷新
                     let effective_proxy = current_creds.effective_proxy(self.proxy.as_ref());
-                    let new_creds =
+                    let refreshed_creds =
                         refresh_token(&current_creds, &self.config, effective_proxy.as_ref())
                             .await?;
 
-                    if is_token_expired(&new_creds) {
+                    if is_token_expired(&refreshed_creds) {
                         anyhow::bail!("刷新后的 Token 仍然无效或已过期");
                     }
 
-                    // 更新账号 + 记录刷新时间
-                    {
-                        let mut entries = self.entries.lock();
-                        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-                            entry.credentials = new_creds.clone();
-                            entry.last_refreshed_at = Some(Instant::now());
-                            entry.refresh_failure_count = 0;
-                        }
-                    }
+                    let committed_creds = self.commit_refreshed_credentials_if_identity_matches(
+                        id,
+                        &current_creds,
+                        &refreshed_creds,
+                    )?;
 
                     // 回写账号到文件（仅多账号格式），失败只记录警告
                     if let Err(e) = self.persist_credentials() {
                         tracing::warn!("Token 刷新后持久化失败（不影响本次请求）: {}", e);
                     }
 
-                    new_creds
+                    committed_creds
                 }
             } else {
                 // 其他请求已经完成刷新，直接使用新账号

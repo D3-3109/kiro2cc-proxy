@@ -19,7 +19,6 @@ interface CredentialListProps {
   queryingInfo: boolean
   queryInfoProgress: { current: number; total: number }
   handleClearAll: () => void
-  openKamImport: () => void
   openBatchImport: () => void
   verifying: boolean
   verifyDialogOpen: boolean
@@ -73,7 +72,6 @@ export function CredentialList({
   queryingInfo,
   queryInfoProgress,
   handleClearAll,
-  openKamImport,
   openBatchImport,
   verifying,
   verifyDialogOpen,
@@ -129,7 +127,6 @@ export function CredentialList({
             queryingInfo={queryingInfo}
             queryInfoProgress={queryInfoProgress}
             handleClearAll={handleClearAll}
-            openKamImport={openKamImport}
             openBatchImport={openBatchImport}
             verifying={verifying}
             verifyDialogOpen={verifyDialogOpen}

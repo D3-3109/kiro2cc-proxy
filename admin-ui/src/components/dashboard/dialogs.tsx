@@ -4,7 +4,6 @@ import { BalanceDialog } from '@/components/balance-dialog'
 import { ModelsDialog } from '@/components/models-dialog'
 import { AddCredentialDialog } from '@/components/add-credential-dialog'
 import { BatchImportDialog } from '@/components/batch-import-dialog'
-import { KamImportDialog } from '@/components/kam-import-dialog'
 import { BatchVerifyDialog } from '@/components/batch-verify-dialog'
 import type { VerifyResult } from '@/components/batch-verify-dialog'
 
@@ -19,8 +18,6 @@ interface DashboardDialogsProps {
   setAddDialogOpen: (v: boolean) => void
   batchImportDialogOpen: boolean
   setBatchImportDialogOpen: (v: boolean) => void
-  kamImportDialogOpen: boolean
-  setKamImportDialogOpen: (v: boolean) => void
   verifyDialogOpen: boolean
   setVerifyDialogOpen: (v: boolean) => void
   verifying: boolean
@@ -40,8 +37,6 @@ export function DashboardDialogs({
   setAddDialogOpen,
   batchImportDialogOpen,
   setBatchImportDialogOpen,
-  kamImportDialogOpen,
-  setKamImportDialogOpen,
   verifyDialogOpen,
   setVerifyDialogOpen,
   verifying,
@@ -75,12 +70,6 @@ export function DashboardDialogs({
       <BatchImportDialog
         open={batchImportDialogOpen}
         onOpenChange={setBatchImportDialogOpen}
-      />
-
-      {/* KAM 账号导入对话框 */}
-      <KamImportDialog
-        open={kamImportDialogOpen}
-        onOpenChange={setKamImportDialogOpen}
       />
 
       {/* 批量验活对话框 */}

@@ -15,6 +15,7 @@ pub(crate) mod tests {
     use crate::kiro::token_manager::tests::sticky::tests::make_valid_cred;
     use crate::model::config::Config;
     use chrono::{Duration, Utc};
+    use std::sync::Arc;
 
     #[test]
     fn test_multi_token_manager_new() {
@@ -254,10 +255,11 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn test_set_disabled_enable_clears_refresh_failure_count() {
+    #[tokio::test]
+    async fn test_set_disabled_enable_clears_refresh_failure_count() {
         let config = Config::default();
-        let cred1 = KiroCredentials::default();
+        let mut cred1 = KiroCredentials::default();
+        cred1.subscription_title = Some("KIRO PRO".to_string());
 
         let manager = MultiTokenManager::new(config, vec![cred1], None, None, false).unwrap();
 
@@ -266,7 +268,7 @@ pub(crate) mod tests {
         }
         assert_eq!(manager.available_count(), 0);
 
-        manager.set_disabled(1, false).unwrap();
+        manager.set_disabled(1, false).await.unwrap();
 
         let entries = manager.entries.lock();
         assert_eq!(entries[0].refresh_failure_count, 0);
@@ -274,10 +276,11 @@ pub(crate) mod tests {
         assert_eq!(entries[0].disabled_reason, None);
     }
 
-    #[test]
-    fn test_reset_and_enable_clears_refresh_failure_count() {
+    #[tokio::test]
+    async fn test_reset_and_enable_clears_refresh_failure_count() {
         let config = Config::default();
-        let cred1 = KiroCredentials::default();
+        let mut cred1 = KiroCredentials::default();
+        cred1.subscription_title = Some("KIRO PRO".to_string());
 
         let manager = MultiTokenManager::new(config, vec![cred1], None, None, false).unwrap();
 
@@ -286,12 +289,98 @@ pub(crate) mod tests {
         }
         assert_eq!(manager.available_count(), 0);
 
-        manager.reset_and_enable(1).unwrap();
+        manager.reset_and_enable(1).await.unwrap();
 
         let entries = manager.entries.lock();
         assert_eq!(entries[0].refresh_failure_count, 0);
         assert!(!entries[0].disabled);
         assert_eq!(entries[0].disabled_reason, None);
+    }
+
+    #[tokio::test]
+    async fn test_set_disabled_enable_lookup_failure_keeps_disabled_state() {
+        let mut credential = KiroCredentials {
+            disabled: true,
+            ..Default::default()
+        };
+        credential.subscription_title = Some("   ".to_string());
+        let manager =
+            MultiTokenManager::new(Config::default(), vec![credential], None, None, false).unwrap();
+
+        {
+            let mut entries = manager.entries.lock();
+            let entry = &mut entries[0];
+            entry.failure_count = 2;
+            entry.refresh_failure_count = 3;
+            entry.disabled_reason = Some(DisabledReason::Manual);
+        }
+
+        let error = manager.set_disabled(1, false).await.unwrap_err();
+        assert!(error.to_string().contains("账号保持禁用"));
+
+        let entries = manager.entries.lock();
+        let entry = &entries[0];
+        assert!(entry.disabled);
+        assert_eq!(entry.failure_count, 2);
+        assert_eq!(entry.refresh_failure_count, 3);
+        assert_eq!(entry.disabled_reason, Some(DisabledReason::Manual));
+        drop(entries);
+        assert_eq!(manager.available_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_reset_and_enable_lookup_failure_keeps_disabled_state() {
+        let mut credential = KiroCredentials {
+            disabled: true,
+            ..Default::default()
+        };
+        credential.subscription_title = None;
+        let manager =
+            MultiTokenManager::new(Config::default(), vec![credential], None, None, false).unwrap();
+
+        {
+            let mut entries = manager.entries.lock();
+            let entry = &mut entries[0];
+            entry.failure_count = 2;
+            entry.refresh_failure_count = 3;
+            entry.disabled_reason = Some(DisabledReason::Manual);
+        }
+
+        let error = manager.reset_and_enable(1).await.unwrap_err();
+        assert!(error.to_string().contains("账号保持禁用"));
+
+        let entries = manager.entries.lock();
+        let entry = &entries[0];
+        assert!(entry.disabled);
+        assert_eq!(entry.failure_count, 2);
+        assert_eq!(entry.refresh_failure_count, 3);
+        assert_eq!(entry.disabled_reason, Some(DisabledReason::Manual));
+        drop(entries);
+        assert_eq!(manager.available_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_set_disabled_waits_for_credential_admin_lock() {
+        let mut credential = KiroCredentials {
+            disabled: true,
+            ..Default::default()
+        };
+        credential.subscription_title = Some("KIRO PRO".to_string());
+        let manager = Arc::new(
+            MultiTokenManager::new(Config::default(), vec![credential], None, None, false).unwrap(),
+        );
+
+        let guard = manager.credential_admin_lock.lock().await;
+        let task = tokio::spawn({
+            let manager = Arc::clone(&manager);
+            async move { manager.set_disabled(1, false).await }
+        });
+        tokio::task::yield_now().await;
+
+        assert!(!task.is_finished());
+        drop(guard);
+        task.await.unwrap().unwrap();
+        assert!(!manager.entries.lock()[0].disabled);
     }
 
     #[test]

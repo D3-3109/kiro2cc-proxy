@@ -81,7 +81,7 @@ pub(crate) mod tests {
         let manager =
             MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
 
-        manager.delete_credential(2).unwrap();
+        manager.delete_credential(2).await.unwrap();
         assert_eq!(manager.total_count(), 1);
 
         // 新增账号：走 external_idp 刷新路径，指向本地 mock server
@@ -128,7 +128,7 @@ pub(crate) mod tests {
         .unwrap();
 
         // 删除启用中的账号 #2，并持久化
-        manager.delete_credential(2).unwrap();
+        manager.delete_credential(2).await.unwrap();
         manager.persist_credentials().unwrap();
         assert_eq!(manager.total_count(), 1);
 
@@ -161,8 +161,8 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn test_delete_enabled_current_credential_switches_to_highest_priority_available() {
+    #[tokio::test]
+    async fn test_delete_enabled_current_credential_switches_to_highest_priority_available() {
         let current = KiroCredentials {
             id: Some(1),
             priority: 1,
@@ -190,15 +190,15 @@ pub(crate) mod tests {
 
         assert_eq!(manager.snapshot().current_id, 1);
 
-        manager.delete_credential(1).unwrap();
+        manager.delete_credential(1).await.unwrap();
 
         let snapshot = manager.snapshot();
         assert_eq!(snapshot.current_id, 2);
         assert!(!snapshot.entries.iter().any(|entry| entry.id == 1));
     }
 
-    #[test]
-    fn test_delete_enabled_non_current_credential_keeps_current_id() {
+    #[tokio::test]
+    async fn test_delete_enabled_non_current_credential_keeps_current_id() {
         let current = KiroCredentials {
             id: Some(1),
             priority: 1,
@@ -214,7 +214,7 @@ pub(crate) mod tests {
             MultiTokenManager::new(Config::default(), vec![current, deleted], None, None, false)
                 .unwrap();
 
-        manager.delete_credential(2).unwrap();
+        manager.delete_credential(2).await.unwrap();
 
         let snapshot = manager.snapshot();
         assert_eq!(snapshot.current_id, 1);
@@ -222,8 +222,8 @@ pub(crate) mod tests {
         assert_eq!(snapshot.entries[0].id, 1);
     }
 
-    #[test]
-    fn test_delete_missing_credential_preserves_current_state() {
+    #[tokio::test]
+    async fn test_delete_missing_credential_preserves_current_state() {
         let current = KiroCredentials {
             id: Some(1),
             ..Default::default()
@@ -232,7 +232,7 @@ pub(crate) mod tests {
         let manager =
             MultiTokenManager::new(Config::default(), vec![current], None, None, false).unwrap();
 
-        assert!(manager.delete_credential(2).is_err());
+        assert!(manager.delete_credential(2).await.is_err());
 
         let snapshot = manager.snapshot();
         assert_eq!(snapshot.current_id, 1);
@@ -240,8 +240,8 @@ pub(crate) mod tests {
         assert_eq!(snapshot.entries[0].id, 1);
     }
 
-    #[test]
-    fn test_delete_current_credential_resets_current_id_without_available_replacement() {
+    #[tokio::test]
+    async fn test_delete_current_credential_resets_current_id_without_available_replacement() {
         let current = KiroCredentials {
             id: Some(1),
             priority: 1,
@@ -263,7 +263,7 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        manager.delete_credential(1).unwrap();
+        manager.delete_credential(1).await.unwrap();
 
         let snapshot = manager.snapshot();
         assert_eq!(snapshot.current_id, 0);
