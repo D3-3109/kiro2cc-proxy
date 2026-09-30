@@ -6,6 +6,104 @@ mod tests {
         SseEvent, StreamContext, find_real_thinking_end_tag, find_real_thinking_start_tag,
     };
 
+    fn upstream_event(name: &str, payload: serde_json::Value) -> crate::kiro::model::events::Event {
+        use crate::kiro::parser::frame::Frame;
+        use crate::kiro::parser::header::{HeaderValue, Headers};
+
+        let mut headers = Headers::new();
+        headers.insert(":event-type".into(), HeaderValue::String(name.into()));
+        crate::kiro::model::events::Event::from_frame(Frame {
+            headers,
+            payload: serde_json::to_vec(&payload).unwrap(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn test_native_reasoning_frames_preserve_text_signature_and_boundaries() {
+        use serde_json::json;
+
+        for model in ["claude-opus-4.6", "claude-opus-5", "claude-sonnet-5"] {
+            for boundary in ["text", "tool", "eof"] {
+                let mut ctx = StreamContext::new_with_thinking(model, 100, true);
+                let mut events = ctx.generate_initial_events();
+                for payload in [
+                    json!({"text": "\n推理"}),
+                    json!({"text": "<thinking>原样</thinking>\n", "signature": "real-"}),
+                    json!({"signature": "signature"}),
+                ] {
+                    events.extend(
+                        ctx.process_kiro_event(&upstream_event("reasoningContentEvent", payload)),
+                    );
+                }
+                assert_eq!(ctx.visible_chars_cn + ctx.visible_chars_other, 0);
+                assert!(ctx.output_chars_cn + ctx.output_chars_other > 0);
+
+                match boundary {
+                    "text" => events.extend(ctx.process_kiro_event(&upstream_event(
+                        "assistantResponseEvent",
+                        json!({"content": "答案"}),
+                    ))),
+                    "tool" => events.extend(ctx.process_kiro_event(&upstream_event(
+                        "toolUseEvent",
+                        json!({
+                            "toolUseId": "tool-1", "name": "Read",
+                            "input": "{}", "stop": true
+                        }),
+                    ))),
+                    _ => {}
+                }
+                events.extend(ctx.generate_final_events());
+
+                let thinking: String = events
+                    .iter()
+                    .filter_map(|e| e.data["delta"]["thinking"].as_str())
+                    .collect();
+                let signature: String = events
+                    .iter()
+                    .filter_map(|e| e.data["delta"]["signature"].as_str())
+                    .collect();
+                assert_eq!(thinking, "\n推理<thinking>原样</thinking>\n");
+                assert_eq!(signature, "real-signature");
+
+                let stop = events
+                    .iter()
+                    .position(|e| e.event == "content_block_stop" && e.data["index"] == 0)
+                    .unwrap();
+                let last_signature = events
+                    .iter()
+                    .rposition(|e| e.data["delta"]["type"] == "signature_delta")
+                    .unwrap();
+                let next_start = events
+                    .iter()
+                    .position(|e| e.event == "content_block_start" && e.data["index"] == 1)
+                    .unwrap();
+                assert!(last_signature < stop && stop < next_start);
+                assert!(
+                    !events[stop + 1..]
+                        .iter()
+                        .any(|e| { e.event == "content_block_delta" && e.data["index"] == 0 })
+                );
+                assert_eq!(
+                    events.iter().filter(|e| e.event == "message_stop").count(),
+                    1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_native_reasoning_respects_disabled_thinking() {
+        let mut ctx = StreamContext::new_with_thinking("claude-opus-5", 100, false);
+        ctx.generate_initial_events();
+        let events = ctx.process_kiro_event(&upstream_event(
+            "reasoningContentEvent",
+            serde_json::json!({"text": "不应暴露", "signature": "real-signature"}),
+        ));
+        assert!(events.is_empty());
+        assert_eq!(ctx.visible_chars_cn + ctx.visible_chars_other, 0);
+    }
+
     #[test]
     fn test_find_real_thinking_start_tag_basic() {
         // 基本情况：正常的开始标签

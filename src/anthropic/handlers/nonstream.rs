@@ -3,7 +3,7 @@
 
 use crate::anthropic::types::ErrorResponse;
 
-use crate::kiro::model::events::Event;
+use crate::kiro::model::events::{Event, ReasoningContentEvent};
 use crate::kiro::model::requests::conversation::ConversationState;
 use crate::kiro::parser::decoder::EventStreamDecoder;
 use crate::token;
@@ -42,8 +42,7 @@ pub(crate) fn build_non_stream_content(
 
     let mut content: Vec<serde_json::Value> = Vec::new();
 
-    // thinking 块必须排在可见内容之前。上游不返回真实签名，沿用流式路径同一份
-    // 伪造实现，保证两端 thinking 块结构一致。
+    // 旧文本标签路径没有真实签名，保留原有兼容实现。
     if !thinking_content.is_empty() {
         content.push(json!({
             "type": "thinking",
@@ -62,6 +61,63 @@ pub(crate) fn build_non_stream_content(
 
     content.extend(tool_uses);
     (content, thinking_only)
+}
+
+fn flush_native_reasoning(
+    pending: &mut ReasoningContentEvent,
+    blocks: &mut Vec<serde_json::Value>,
+) {
+    if pending.text.is_empty() && pending.signature.is_empty() {
+        return;
+    }
+    let reasoning = std::mem::take(pending);
+    blocks.push(json!({
+        "type": "thinking",
+        "thinking": reasoning.text,
+        "signature": reasoning.signature
+    }));
+}
+
+fn collect_native_reasoning(
+    event: &Event,
+    pending: &mut ReasoningContentEvent,
+    blocks: &mut Vec<serde_json::Value>,
+) {
+    match event {
+        Event::ReasoningContent(reasoning) => {
+            pending.text.push_str(&reasoning.text);
+            pending.signature.push_str(&reasoning.signature);
+        }
+        Event::AssistantResponse(response) if !response.content.is_empty() => {
+            flush_native_reasoning(pending, blocks);
+        }
+        Event::ToolUse(_) => flush_native_reasoning(pending, blocks),
+        _ => {}
+    }
+}
+
+fn split_non_stream_thinking(text_content: &str, has_native_thinking: bool) -> (String, String) {
+    if has_native_thinking {
+        (String::new(), text_content.to_string())
+    } else {
+        super::super::stream::split_thinking_and_visible(text_content)
+    }
+}
+
+fn build_non_stream_content_with_native(
+    mut native_blocks: Vec<serde_json::Value>,
+    thinking_content: &str,
+    text_content: &str,
+    tool_uses: Vec<serde_json::Value>,
+) -> (Vec<serde_json::Value>, bool) {
+    let native_only = !native_blocks.is_empty() && text_content.is_empty() && tool_uses.is_empty();
+    let (mut content, thinking_only) =
+        build_non_stream_content(thinking_content, text_content, tool_uses);
+    if native_only && content.is_empty() {
+        content.push(json!({"type": "text", "text": " "}));
+    }
+    native_blocks.append(&mut content);
+    (native_blocks, thinking_only || native_only)
 }
 
 /// 非流式桥接的单步状态转移（D4 非流式段）
@@ -178,6 +234,8 @@ pub(crate) async fn handle_non_stream_request(
 
     // ---- 事件收集状态（首次请求与每轮续请求共用）----
     let mut text_content = String::new();
+    let mut native_reasoning = ReasoningContentEvent::default();
+    let mut native_thinking_blocks = Vec::new();
     let mut tool_uses: Vec<serde_json::Value> = Vec::new();
     let mut has_tool_use = false;
     let mut stop_reason = "end_turn".to_string();
@@ -225,6 +283,11 @@ pub(crate) async fn handle_non_stream_request(
             match result {
                 Ok(frame) => {
                     if let Ok(event) = Event::from_frame(frame) {
+                        collect_native_reasoning(
+                            &event,
+                            &mut native_reasoning,
+                            &mut native_thinking_blocks,
+                        );
                         match event {
                             Event::AssistantResponse(resp) => {
                                 text_content.push_str(&resp.content);
@@ -320,6 +383,8 @@ pub(crate) async fn handle_non_stream_request(
                 }
             }
         }
+
+        flush_native_reasoning(&mut native_reasoning, &mut native_thinking_blocks);
 
         // 事件读取完毕：无待执行搜索 → 全部轮次结束，退出收集循环
         // （thinking 剥离与 JSON 组装在循环后统一进行，见下方）
@@ -433,12 +498,9 @@ pub(crate) async fn handle_non_stream_request(
         stop_reason = "tool_use".to_string();
     }
 
-    // 上游把推理内容内联在 AssistantResponse.content 的 <thinking> 标签里（与是否
-    // 流式无关）。流式路径由 process_content_with_thinking 剥离；非流式此前直接把
-    // 整段当可见文本，导致标签原文发给客户端、混入 output_tokens，并让
-    // strip_json_fences 无法产出可解析的结构化输出。
+    // 原生推理已独立收集，正文标签保持原样；仅旧协议需要从正文提取思考。
     let (thinking_content, visible_text) =
-        super::super::stream::split_thinking_and_visible(&text_content);
+        split_non_stream_thinking(&text_content, !native_thinking_blocks.is_empty());
     text_content = visible_text;
 
     // JSON schema 结构化输出：去除模型可能添加的 Markdown 代码围栏
@@ -447,8 +509,12 @@ pub(crate) async fn handle_non_stream_request(
     }
 
     // 构建响应内容
-    let (mut content, thinking_only) =
-        build_non_stream_content(&thinking_content, &text_content, tool_uses);
+    let (mut content, thinking_only) = build_non_stream_content_with_native(
+        native_thinking_blocks,
+        &thinking_content,
+        &text_content,
+        tool_uses,
+    );
 
     // 估算输出 tokens——必须先于可见性块拼接（H2）：server_tool_use /
     // web_search_tool_result 是桥接可见性元数据，不代表模型真实输出量。
@@ -581,4 +647,71 @@ pub(crate) async fn handle_non_stream_request(
     });
 
     (StatusCode::OK, Json(response_body)).into_response()
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+
+    #[test]
+    fn test_native_reasoning_nonstream_keeps_signatures_per_block() {
+        let mut pending = ReasoningContentEvent::default();
+        let mut blocks = Vec::new();
+        for (text, signature) in [("第一轮", "sig-1"), ("第二轮", "sig-2")] {
+            collect_native_reasoning(
+                &Event::ReasoningContent(ReasoningContentEvent {
+                    text: text.into(),
+                    signature: String::new(),
+                }),
+                &mut pending,
+                &mut blocks,
+            );
+            collect_native_reasoning(
+                &Event::ReasoningContent(ReasoningContentEvent {
+                    text: String::new(),
+                    signature: signature.into(),
+                }),
+                &mut pending,
+                &mut blocks,
+            );
+            flush_native_reasoning(&mut pending, &mut blocks);
+        }
+        let (content, thinking_only) =
+            build_non_stream_content_with_native(blocks, "", "答案", Vec::new());
+        assert!(!thinking_only);
+        assert_eq!(content.len(), 3);
+        assert_eq!(content[0]["thinking"], "第一轮");
+        assert_eq!(content[0]["signature"], "sig-1");
+        assert_eq!(content[1]["thinking"], "第二轮");
+        assert_eq!(content[1]["signature"], "sig-2");
+        assert_eq!(content[2]["text"], "答案");
+
+        let (content, thinking_only) =
+            build_non_stream_content_with_native(vec![content[0].clone()], "", "", Vec::new());
+        assert!(thinking_only);
+        assert_eq!(content[1]["text"], " ");
+    }
+
+    #[test]
+    fn test_native_reasoning_nonstream_preserves_body_tags() {
+        let body = "<thinking>\n正文中的标签示例</thinking>\n\n答案";
+        let native = json!({
+            "type": "thinking",
+            "thinking": "真实推理",
+            "signature": "真实签名"
+        });
+        let (thinking, text) = split_non_stream_thinking(body, true);
+        let (content, thinking_only) = build_non_stream_content_with_native(
+            vec![native.clone()],
+            &thinking,
+            &text,
+            Vec::new(),
+        );
+        assert!(!thinking_only);
+        assert_eq!(content, vec![native, json!({"type": "text", "text": body})]);
+
+        let (thinking, text) = split_non_stream_thinking(body, false);
+        assert_eq!(thinking.trim(), "正文中的标签示例");
+        assert_eq!(text.trim(), "答案");
+    }
 }
