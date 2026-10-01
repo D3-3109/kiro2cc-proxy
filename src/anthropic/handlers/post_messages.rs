@@ -283,11 +283,21 @@ fn dump_kiro_request_body(request_body: &str) {
         .map(|d| d.as_millis())
         .unwrap_or_default();
     let path = dir.join(format!("body-{ts}.json"));
-    use std::os::unix::fs::OpenOptionsExt;
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    // 0600 权限仅 Unix 有意义；Windows 依赖目录 ACL（用户目录默认私有）
+    #[cfg(unix)]
+    let open = {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true).mode(0o600);
+        o
+    };
+    #[cfg(not(unix))]
+    let open = {
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        o
+    };
+    match open
         .open(&path)
         .and_then(|mut f| f.write_all(request_body.as_bytes()))
     {
