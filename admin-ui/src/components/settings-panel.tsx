@@ -2,7 +2,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
-import { Monitor, Moon, Pencil, Server, ShieldCheck, Sun, type LucideIcon } from 'lucide-react'
+import { History, Info, Monitor, Moon, Pencil, Server, ShieldCheck, Sun, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageHead } from '@/components/page-head'
@@ -167,6 +167,7 @@ interface SettingsPanelProps {
   onToggleTheme: (x?: number, y?: number) => void
   sidebarCollapsed: boolean
   onToggleSidebarCollapsed: () => void
+  onOpenChangelog: () => void
 }
 
 export function SettingsPanel({
@@ -174,6 +175,7 @@ export function SettingsPanel({
   onToggleTheme,
   sidebarCollapsed,
   onToggleSidebarCollapsed,
+  onOpenChangelog,
 }: SettingsPanelProps) {
   const { t, i18n } = useTranslation()
   const { data: loadBalancingData, isLoading: isLoadingMode } = useLoadBalancingMode()
@@ -317,6 +319,15 @@ export function SettingsPanel({
               on={sidebarCollapsed}
               onToggle={onToggleSidebarCollapsed}
             />
+          </Row>
+        </Section>
+
+        <Section icon={Info} title={t('settings.capAbout')}>
+          <Row label={t('settings.changelog')} desc={t('settings.changelogDesc')}>
+            <Button type="button" variant="ghost" onClick={onOpenChangelog}>
+              <History aria-hidden="true" />
+              {t('settings.openChangelog')}
+            </Button>
           </Row>
         </Section>
       </div>

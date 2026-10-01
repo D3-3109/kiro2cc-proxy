@@ -56,7 +56,6 @@
     "navDailyStats": "Daily Stats",
     "navModels": "Supported Models",
     "navLogs": "Logs",
-    "navChangelog": "Changelog",
     "navSettings": "Settings",
     "toggleLightMode": "Switch to light mode",
     "toggleDarkMode": "Switch to dark mode",
@@ -639,6 +638,7 @@
     "capService": "Service",
     "capSecurity": "Auth & Security",
     "capUi": "Interface",
+    "capAbout": "About",
     "adminPassword": "Admin Password",
     "adminPasswordPlaceholder": "Enter a new Admin Password",
     "adminPasswordUpdated": "Admin Password updated. Please log in again with the new password.",
@@ -657,6 +657,9 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "sidebarCollapsed": "Collapse Sidebar",
-    "sidebarCollapsedDesc": "Immediately collapses the left navigation to icon mode; the preference is stored in your browser."
+    "sidebarCollapsedDesc": "Immediately collapses the left navigation to icon mode; the preference is stored in your browser.",
+    "changelog": "Changelog",
+    "changelogDesc": "View version history and release changes.",
+    "openChangelog": "View changelog"
   }
 }

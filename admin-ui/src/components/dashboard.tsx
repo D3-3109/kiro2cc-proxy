@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState, useEffect, useMemo, useRef } from 'react'
-import {Server, Key, Settings, BarChart2, ScrollText, Boxes, History} from 'lucide-react'
+import {Server, Key, Settings, BarChart2, ScrollText, Boxes} from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -679,7 +679,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
       title: t('dashboard.navSystem'),
       items: [
         { key: 'logs', label: t('dashboard.navLogs'), icon: ScrollText, count: undefined, active: activeTab === 'logs', onClick: () => { setActiveTab('logs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
-        { key: 'changelog', label: t('dashboard.navChangelog'), icon: History, count: undefined, active: activeTab === 'changelog', onClick: () => { setActiveTab('changelog'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'settings', label: t('dashboard.navSettings'), icon: Settings, count: undefined, active: activeTab === 'settings', onClick: () => { setActiveTab('settings'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
       ],
     },
@@ -712,11 +711,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
             onToggleTheme={toggleTheme}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebarCollapsed={toggleSidebarCollapsed}
+            onOpenChangelog={() => {
+              setActiveTab('changelog')
+              setDetailKeyId(null)
+              setDetailCredentialId(null)
+              setDailyView(null)
+            }}
           />
         ) : activeTab === 'models' ? (
           <ModelListPage />
         ) : activeTab === 'changelog' ? (
-          <ChangelogPage />
+          <ChangelogPage onBack={() => setActiveTab('settings')} />
         ) : activeTab === 'apikeys' ? (
           detailKeyId !== null ? (
             <ApiKeyDetailPage

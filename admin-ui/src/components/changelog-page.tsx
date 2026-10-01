@@ -138,7 +138,11 @@ function buildIndex(notes: ReleaseNote[]): { recent: IndexEntry[]; archive: Inde
   }
 }
 
-export function ChangelogPage() {
+interface ChangelogPageProps {
+  onBack: () => void
+}
+
+export function ChangelogPage({ onBack }: ChangelogPageProps) {
   const { t, i18n } = useTranslation()
   const { data, isLoading, isError, error, refetch } = useChangelog()
   const { data: serverInfo } = useServerInfo()
@@ -199,6 +203,7 @@ export function ChangelogPage() {
     <div>
       <div className="sticky top-0 z-20 -mx-9 bg-background px-9 pt-7">
         <PageHead
+          onBack={onBack}
           crumb={[t('dashboard.navSystem'), t('changelog.pageTitle')]}
           title={t('changelog.pageTitle')}
           note={t('changelog.headNote')}
