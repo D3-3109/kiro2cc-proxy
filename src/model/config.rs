@@ -152,6 +152,11 @@ pub struct Config {
     #[serde(default)]
     pub cache_simulation: CacheSimulationConfig,
 
+    /// 客户端 token 直通（true 时 usage 字段 1:1 上报真实值，不再按
+    /// CLIENT_TOKEN_DISPLAY_SCALE 缩放）。默认 false 维持既有展示缩放。
+    #[serde(default)]
+    pub client_token_passthrough: bool,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -226,6 +231,7 @@ impl Default for Config {
             max_rpm_per_credential: default_max_rpm_per_credential(),
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
+            client_token_passthrough: false,
             config_path: None,
         }
     }
@@ -324,6 +330,11 @@ impl Config {
         {
             self.model_cache_ttl_secs = n;
         }
+        if let Ok(v) = env::var("CLIENT_TOKEN_PASSTHROUGH")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.client_token_passthrough = b;
+        }
 
         // CacheSimulationConfig 嵌套字段覆盖
         if let Ok(v) = env::var("CACHE_SIMULATION_FINGERPRINT_ENABLED")
@@ -376,5 +387,33 @@ mod tests {
     fn test_model_cache_ttl_deserialize_explicit() {
         let config: Config = serde_json::from_str(r#"{"modelCacheTtlSecs": 60}"#).unwrap();
         assert_eq!(config.model_cache_ttl_secs, 60);
+    }
+
+    #[test]
+    fn test_client_token_passthrough_default_false() {
+        // 缺省该字段时必须为 false（维持展示缩放，Issue #44 修复的默认零回归前提）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(!config.client_token_passthrough);
+    }
+
+    #[test]
+    fn test_client_token_passthrough_deserialize_explicit() {
+        let config: Config = serde_json::from_str(r#"{"clientTokenPassthrough": true}"#).unwrap();
+        assert!(config.client_token_passthrough);
+    }
+
+    #[test]
+    fn test_client_token_passthrough_env_override() {
+        // 环境变量覆盖 config.json（容器化部署场景）
+        // SAFETY: 单元测试内串行修改进程级环境变量；Rust 2024 要求 unsafe block
+        unsafe {
+            env::set_var("CLIENT_TOKEN_PASSTHROUGH", "true");
+        }
+        let mut config: Config = serde_json::from_str("{}").unwrap();
+        config.apply_env_overrides();
+        assert!(config.client_token_passthrough);
+        unsafe {
+            env::remove_var("CLIENT_TOKEN_PASSTHROUGH");
+        }
     }
 }

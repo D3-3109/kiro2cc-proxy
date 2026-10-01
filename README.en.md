@@ -482,6 +482,7 @@ Lower `priority` value = higher priority. Up to 3 retries per account, 9 per req
 | `proxyPassword` | No | — | Proxy password |
 | `tlsBackend` | No | `rustls` | TLS backend: `rustls` or `native-tls` |
 | `loadBalancingMode` | No | `priority` | `priority` (by priority) or `balanced` (round-robin) |
+| `clientTokenPassthrough` | No | `false` | Client token passthrough: when `true`, `usage` fields returned to the client are reported 1:1 with real values instead of being scaled by the display factor (~0.7). Intended for third-party clients that compute context usage from displayed values (e.g. Pi agent, see Issue #44). Enabling this makes Claude Code's auto-compact trigger earlier — Claude Code users should keep the default; can be overridden with the `CLIENT_TOKEN_PASSTHROUGH` env var |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -495,7 +496,8 @@ Full example:
   "adminPsw": "my-admin-password",
   "proxyUrl": "http://127.0.0.1:7890",
   "tlsBackend": "rustls",
-  "loadBalancingMode": "priority"
+  "loadBalancingMode": "priority",
+  "clientTokenPassthrough": false
 }
 ```
 

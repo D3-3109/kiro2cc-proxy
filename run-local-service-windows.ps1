@@ -64,11 +64,16 @@ function Setup-Config {
     Write-Host "  [代理设置] Kiro API 需要通过代理访问（国内必须配置）"
     $input_proxy_port = Read-Host "  本地 HTTP 代理端口（直接回车跳过，例如: 7890 / 10089）"
 
+    Write-Host ""
+    Write-Host "  [客户端 token 直通] 开启后 usage 字段 1:1 上报真实值（第三方客户端适用；"
+    Write-Host "  Claude Code 用户建议关闭）"
+    $input_passthrough = Read-Host "  是否启用？[y/N，默认 N]"
     $config = @{
         host      = "127.0.0.1"
         port      = $PORT_INPUT
         tlsBackend = "rustls"
         region    = $REGION_INPUT
+        clientTokenPassthrough = ($input_passthrough -eq "y" -or $input_passthrough -eq "Y")
     }
     if (-not [string]::IsNullOrWhiteSpace($ADMIN_KEY_INPUT)) {
         $config.adminPsw = $ADMIN_KEY_INPUT

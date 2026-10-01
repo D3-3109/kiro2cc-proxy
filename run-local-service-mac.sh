@@ -78,12 +78,22 @@ setup_config() {
   \"adminPsw\": \"$ADMIN_KEY_INPUT\""
     fi
 
+    echo ""
+    echo "  [客户端 token 直通] 开启后 usage 字段 1:1 上报真实值（第三方客户端适用；"
+    read -p "  Claude Code 用户建议关闭。是否启用？[y/N，默认 N]: " input_passthrough
+    PASSTHROUGH_BLOCK=",
+  \"clientTokenPassthrough\": false"
+    if [ "$input_passthrough" = "y" ] || [ "$input_passthrough" = "Y" ]; then
+        PASSTHROUGH_BLOCK=",
+  \"clientTokenPassthrough\": true"
+    fi
+
     cat > "$CONFIG_FILE" <<EOF
 {
   "host": "127.0.0.1",
   "port": $PORT_INPUT,
   "tlsBackend": "rustls",
-  "region": "$REGION_INPUT"$ADMIN_BLOCK$PROXY_BLOCK
+  "region": "$REGION_INPUT"$ADMIN_BLOCK$PROXY_BLOCK$PASSTHROUGH_BLOCK
 }
 EOF
     echo ""
