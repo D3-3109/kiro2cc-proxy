@@ -129,6 +129,196 @@ fn reminder_request(system: Option<&str>, messages: serde_json::Value) -> Messag
     }
 }
 
+fn system_history(result: &ConversionResult) -> &str {
+    let Message::User(user) = &result.conversation_state.history[0] else {
+        panic!("系统指令应进入历史 user 消息");
+    };
+    &user.user_input_message.content
+}
+
+#[test]
+fn test_inline_system_preserves_order_duplicates_and_current_user() {
+    let req = reminder_request(
+        Some("TOP"),
+        serde_json::json!([
+            {"role": "system", "content": " A "},
+            {"role": "user", "content": "first"},
+            {"role": "system", "content": [{"type": "text", "text": "B"}]},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "current"},
+            {"role": "system", "content": [
+                {"type": "text", "text": " A "}, {"type": "text", "text": ""}
+            ]}
+        ]),
+    );
+    let result = convert_request(&req).unwrap();
+    assert_eq!(system_history(&result), "TOP\n A \nB\n A \n");
+    assert_eq!(result.conversation_state.history.len(), 4);
+    assert_eq!(
+        result
+            .conversation_state
+            .current_message
+            .user_input_message
+            .content,
+        "current"
+    );
+}
+
+#[test]
+fn test_inline_system_after_user_survives_without_top_level_system() {
+    for content in [
+        serde_json::json!("技能与 agent 说明"),
+        serde_json::json!([{"type": "text", "text": "技能与 agent 说明"}]),
+    ] {
+        let req = reminder_request(
+            None,
+            serde_json::json!([
+                {"role": "user", "content": "任务"},
+                {"role": "system", "content": content}
+            ]),
+        );
+        let result = convert_request(&req).unwrap();
+        assert_eq!(system_history(&result), "技能与 agent 说明");
+        assert_eq!(
+            result
+                .conversation_state
+                .current_message
+                .user_input_message
+                .content,
+            "任务"
+        );
+    }
+}
+
+#[test]
+fn test_inline_system_survives_assistant_prefill_trimming() {
+    let req = reminder_request(
+        None,
+        serde_json::json!([
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "kept reply"},
+            {"role": "user", "content": "current"},
+            {"role": "assistant", "content": "discarded prefill 1"},
+            {"role": "system", "content": "instructions"},
+            {"role": "assistant", "content": "discarded prefill 2"}
+        ]),
+    );
+    let result = convert_request(&req).unwrap();
+    assert_eq!(system_history(&result), "instructions");
+    let serialized = serde_json::to_string(&result.conversation_state).unwrap();
+    assert!(serialized.contains("kept reply"));
+    assert!(!serialized.contains("discarded prefill"));
+}
+
+#[test]
+fn test_inline_system_rejects_unknown_roles_before_trimming() {
+    for index in 0..=3 {
+        let mut messages = serde_json::json!([
+            {"role": "user", "content": "task"},
+            {"role": "system", "content": "rules"},
+            {"role": "assistant", "content": "prefill"}
+        ])
+        .as_array()
+        .unwrap()
+        .clone();
+        messages.insert(
+            index,
+            serde_json::json!({"role": "developer", "content": "private"}),
+        );
+        let req = reminder_request(None, serde_json::json!(messages));
+        let error = convert_request(&req).expect_err("未知角色不能被裁剪或忽略");
+        assert!(error.to_string().contains(&format!("messages[{index}]")));
+        assert!(!error.to_string().contains("private"));
+    }
+}
+
+#[test]
+fn test_inline_system_rejects_non_text_content() {
+    for content in [
+        serde_json::json!(null),
+        serde_json::json!(42),
+        serde_json::json!({"text": "private"}),
+        serde_json::json!([{"type": "image", "source": {}}]),
+        serde_json::json!([{"type": "tool_use", "name": "Read"}]),
+        serde_json::json!([{"type": "text"}]),
+        serde_json::json!([{"type": "text", "text": 42}]),
+        serde_json::json!([{"type": "text", "text": "private"}, {"type": "image"}]),
+    ] {
+        let req = reminder_request(
+            None,
+            serde_json::json!([
+                {"role": "user", "content": "task"},
+                {"role": "system", "content": content},
+                {"role": "assistant", "content": "prefill"}
+            ]),
+        );
+        let error = convert_request(&req).expect_err("无效 system 不能被静默丢弃");
+        assert!(error.to_string().contains("messages[1]"));
+        assert!(!error.to_string().contains("private"));
+    }
+}
+
+#[test]
+fn test_inline_system_requires_user_message() {
+    for messages in [
+        serde_json::json!([]),
+        serde_json::json!([{"role": "system", "content": "rules"}]),
+        serde_json::json!([{"role": "assistant", "content": "prefill"}]),
+        serde_json::json!([
+            {"role": "system", "content": "rules"},
+            {"role": "assistant", "content": "prefill"}
+        ]),
+    ] {
+        assert!(convert_request(&reminder_request(None, messages)).is_err());
+    }
+}
+
+#[test]
+fn test_inline_system_cache_and_session_identity() {
+    use super::super::session::derive_fallback_conversation_id;
+
+    for metadata in [false, true] {
+        let make_request = |rules: &str, extended: bool| {
+            let mut messages = vec![
+                serde_json::json!({"role": "system", "content": "initial"}),
+                serde_json::json!({"role": "user", "content": "first"}),
+                serde_json::json!({"role": "system", "content": rules}),
+            ];
+            if extended {
+                messages.extend([
+                    serde_json::json!({"role": "assistant", "content": "reply"}),
+                    serde_json::json!({"role": "user", "content": "next"}),
+                ]);
+            }
+            let req = reminder_request(Some("TOP"), serde_json::json!(messages));
+            MessagesRequest {
+                metadata: if metadata { req.metadata.clone() } else { None },
+                ..req
+            }
+        };
+        let first_req = make_request("rules-v1", false);
+        let original_messages = serde_json::to_value(&first_req.messages).unwrap();
+        let expected_id = if metadata {
+            "23083fc0-9423-4a8b-9f54-28667ec939fe".to_string()
+        } else {
+            derive_fallback_conversation_id(&first_req).unwrap()
+        };
+        let first = convert_request(&first_req).unwrap();
+        let grown = convert_request(&make_request("rules-v1", true)).unwrap();
+        let updated = convert_request(&make_request("rules-v2", true)).unwrap();
+        assert_eq!(system_history(&first), "TOP\ninitial\nrules-v1");
+        assert_eq!(system_history(&first), system_history(&grown));
+        assert_eq!(system_history(&updated), "TOP\ninitial\nrules-v2");
+        for result in [&first, &grown, &updated] {
+            assert_eq!(result.conversation_state.conversation_id, expected_id);
+        }
+        assert_eq!(
+            serde_json::to_value(&first_req.messages).unwrap(),
+            original_messages
+        );
+    }
+}
+
 #[test]
 fn test_current_reminders_preserve_text_with_or_without_system() {
     let texts = [

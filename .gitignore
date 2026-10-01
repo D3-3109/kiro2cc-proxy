@@ -40,4 +40,5 @@ server.env
 /verify-*.png
 /sidebar-footer-*.png
 
-.history
+/.history/
+/app/config/kiro-body-dump/

@@ -31,6 +31,9 @@ pub struct ConversionResult {
 pub enum ConversionError {
     UnsupportedModel(String),
     EmptyMessages,
+    MissingUserMessage,
+    UnsupportedRole { index: usize },
+    InvalidSystemContent { index: usize },
 }
 
 impl std::fmt::Display for ConversionError {
@@ -38,6 +41,16 @@ impl std::fmt::Display for ConversionError {
         match self {
             ConversionError::UnsupportedModel(model) => write!(f, "模型不支持: {}", model),
             ConversionError::EmptyMessages => write!(f, "消息列表为空"),
+            ConversionError::MissingUserMessage => write!(f, "消息列表缺少 user 消息"),
+            ConversionError::UnsupportedRole { index } => {
+                write!(f, "messages[{index}].role 仅支持 user、assistant 或 system")
+            }
+            ConversionError::InvalidSystemContent { index } => {
+                write!(
+                    f,
+                    "messages[{index}].content 必须为字符串或仅含 text 块的 system 内容"
+                )
+            }
         }
     }
 }

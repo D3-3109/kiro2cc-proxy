@@ -114,6 +114,11 @@ pub async fn post_messages_cc(
                 ConversionError::EmptyMessages => {
                     ("invalid_request_error", "消息列表为空".to_string())
                 }
+                ConversionError::MissingUserMessage
+                | ConversionError::UnsupportedRole { .. }
+                | ConversionError::InvalidSystemContent { .. } => {
+                    ("invalid_request_error", e.to_string())
+                }
             };
             tracing::warn!("请求转换失败: {}", e);
             return (

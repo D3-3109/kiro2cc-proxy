@@ -22,14 +22,14 @@ use super::thinking::{generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_th
 /// 构建历史消息
 ///
 /// # Arguments
-/// * `req` - 原始请求，用于读取 `system`、`thinking` 等配置字段
-/// * `messages` - 经过 prefill 预处理的消息切片，末尾必定是 user 消息。
-///   注意：该切片与 `req.messages` 可能不同（prefill 时会截断末尾的 assistant 消息），
-///   调用方应始终使用此参数而非 `req.messages`。
+/// * `req` - 原始请求，用于读取 `thinking` 等配置字段
+/// * `messages` - 移除内联 system 和末尾 assistant prefill 后的消息引用，末尾必为 user。
+/// * `system` - 顶层 system 与内联 system 按顺序归并后的文本，不改变原请求。
 /// * `model_id` - 已映射的 Kiro 模型 ID
 pub(super) fn build_history(
     req: &MessagesRequest,
-    messages: &[crate::anthropic::types::Message],
+    messages: &[&crate::anthropic::types::Message],
+    system: Option<&[&str]>,
     model_id: &str,
     session_id: &str,
 ) -> Result<Vec<Message>, ConversionError> {
@@ -41,12 +41,8 @@ pub(super) fn build_history(
     let anti_pseudo_tag_hint = gpt_anti_pseudo_tag_hint(req, model_id);
 
     // 1. 处理系统消息
-    if let Some(ref system) = req.system {
-        let system_content: String = system
-            .iter()
-            .map(|s| s.text.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
+    if let Some(system) = system {
+        let system_content = system.join("\n");
 
         if !system_content.is_empty() {
             // 注入thinking标签到系统消息最前面（如果需要且不存在）
