@@ -1,23 +1,11 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! 工具定义转换、Write/Edit 描述后缀与 tool_use/tool_result 配对校验
+//! 工具定义转换与 tool_use/tool_result 配对校验
 
 use crate::kiro::model::requests::conversation::Message;
 use crate::kiro::model::requests::tool::{InputSchema, Tool, ToolResult, ToolSpecification};
 
 use super::schema::normalize_json_schema;
 
-/// 追加到 Write 工具 description 末尾的内容
-const WRITE_TOOL_DESCRIPTION_SUFFIX: &str = "- IMPORTANT: If the content to write exceeds 150 lines, you MUST only write the first 50 lines using this tool, then use `Edit` tool to append the remaining content in chunks of no more than 50 lines each. If needed, leave a unique placeholder to help append content. Do NOT attempt to write all content at once.";
-
-/// 追加到 Edit 工具 description 末尾的内容
-const EDIT_TOOL_DESCRIPTION_SUFFIX: &str = "- IMPORTANT: If the `new_string` content exceeds 50 lines, you MUST split it into multiple Edit calls, each replacing no more than 50 lines at a time. If used to append content, leave a unique placeholder to help append content. On the final chunk, do NOT include the placeholder.";
-
-/// 追加到系统提示词的分块写入策略
-pub(super) const SYSTEM_CHUNKED_POLICY: &str = "\
-When the Write or Edit tool has content size limits, always comply silently. \
-Never suggest bypassing these limits via alternative tools. \
-Never ask the user whether to switch approaches. \
-Complete all chunked operations without commentary.";
 /// 验证并过滤 tool_use/tool_result 配对
 ///
 /// 收集所有 tool_use_id，验证 tool_result 是否匹配
@@ -163,17 +151,6 @@ pub(super) fn convert_tools(tools: &Option<Vec<crate::anthropic::types::Tool>>) 
         let mut description = t.description.trim().to_string();
         if description.is_empty() {
             description = format!("Tool available to the assistant: {}", name);
-        }
-
-        // 对 Write/Edit 工具追加自定义描述后缀
-        let suffix = match name {
-            "Write" => WRITE_TOOL_DESCRIPTION_SUFFIX,
-            "Edit" => EDIT_TOOL_DESCRIPTION_SUFFIX,
-            _ => "",
-        };
-        if !suffix.is_empty() {
-            description.push('\n');
-            description.push_str(suffix);
         }
 
         // 限制描述长度为 10000 字符（安全截断 UTF-8，单次遍历）

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::anthropic::types::MessagesRequest;
 use crate::kiro::model::requests::conversation::{
-    ConversationState, CurrentMessage, UserInputMessage, UserInputMessageContext,
+    ConversationState, CurrentMessage, Message, UserInputMessage, UserInputMessageContext,
 };
 
 use super::fields::build_additional_model_request_fields;
@@ -175,6 +175,8 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
         .with_current_message(current_message)
         .with_history(history);
 
+    log_rule_diagnostics(req, &conversation_state);
+
     let additional_model_request_fields = build_additional_model_request_fields(req, &model_id);
     let is_compact = is_compact_request(messages);
     if is_compact {
@@ -194,6 +196,101 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
             .map(|t| t.thinking_type == "adaptive")
             .unwrap_or(false),
     })
+}
+
+// 临时诊断：定位后删除；只记录元数据，不输出提示词或工具参数。
+fn log_rule_diagnostics(req: &MessagesRequest, state: &ConversationState) {
+    let span = tracing::info_span!(
+        "rule_diag",
+        session = %state.conversation_id,
+        diagnostic_id = %Uuid::new_v4(),
+        message_count = req.messages.len()
+    );
+    let _guard = span.enter();
+    let output_texts: Vec<&str> = state
+        .history
+        .iter()
+        .filter_map(|message| match message {
+            Message::User(user) => Some(user.user_input_message.content.as_str()),
+            Message::Assistant(_) => None,
+        })
+        .chain(std::iter::once(
+            state.current_message.user_input_message.content.as_str(),
+        ))
+        .collect();
+    let watched_texts: Vec<_> = req
+        .system
+        .iter()
+        .flatten()
+        .map(|block| ("system", block.text.as_str()))
+        .chain(
+            req.messages
+                .iter()
+                .filter(|message| message.role == "user")
+                .flat_map(|message| {
+                    message.content.as_str().into_iter().chain(
+                        message
+                            .content
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|block| {
+                                block.get("type").and_then(|v| v.as_str()) == Some("text")
+                            })
+                            .filter_map(|block| block.get("text").and_then(|v| v.as_str())),
+                    )
+                })
+                .map(|text| ("user", text)),
+        )
+        .filter(|(source, text)| {
+            *source == "system"
+                || text.contains("<system-reminder>")
+                || text.contains("00-change-gate.md")
+        })
+        .collect();
+    tracing::info!(
+        watched_text_blocks = watched_texts.len(),
+        input_tool_count = req.tools.as_ref().map_or(0, Vec::len),
+        tool_choice_present = req.tool_choice.is_some(),
+        "[RULE-DIAG] 请求概况"
+    );
+    for (index, (source, text)) in watched_texts.iter().enumerate() {
+        tracing::info!(
+            source = *source,
+            watched_text_index = index,
+            input_chars = text.chars().count(),
+            reminder_count = text.matches("<system-reminder>").count(),
+            has_cr_rule_file = text.contains("00-change-gate.md"),
+            exact_text_present = output_texts.iter().any(|output| output.contains(*text)),
+            "[RULE-DIAG] 规则候选文本"
+        );
+    }
+    let output_tools = &state
+        .current_message
+        .user_input_message
+        .user_input_message_context
+        .tools;
+    for name in ["Agent", "Task", "AskUserQuestion", "ToolSearch"] {
+        let input = req
+            .tools
+            .iter()
+            .flatten()
+            .find(|tool| tool.name.trim().eq_ignore_ascii_case(name));
+        let output = output_tools
+            .iter()
+            .map(|tool| &tool.tool_specification)
+            .find(|tool| tool.name.eq_ignore_ascii_case(name));
+        tracing::info!(
+            tool = name,
+            input_present = input.is_some(),
+            output_present = output.is_some(),
+            defer_loading = ?input.and_then(|tool| tool.defer_loading),
+            input_description_chars = ?input.map(|tool| tool.description.trim().chars().count()),
+            output_description_chars = ?output.map(|tool| tool.description.chars().count()),
+            description_matches = ?input.zip(output).map(|(a, b)| a.description.trim() == b.description),
+            "[RULE-DIAG] 关键工具"
+        );
+    }
 }
 
 /// 确定聊天触发类型

@@ -324,7 +324,14 @@ fn create_sse_stream(
                             Some((stream::iter(bytes), (body_stream, ctx, decoder, false, ping_interval, deadline, bridge, bridge_ctx, provider, round_in_flight)))
                         }
                         Some(Err(e)) => {
-                            tracing::error!("读取响应流失败: {}", e);
+                            let e = e.without_url();
+                            tracing::error!(
+                                error = ?e,
+                                is_timeout = e.is_timeout(),
+                                is_body = e.is_body(),
+                                is_decode = e.is_decode(),
+                                "读取响应流失败"
+                            );
                             let final_events = if ctx.is_empty_response() {
                                 let oversized = ctx.empty_response_is_oversized_context();
                                 tracing::warn!(

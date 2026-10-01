@@ -6,7 +6,6 @@ use crate::kiro::model::requests::conversation::KiroImage;
 use crate::kiro::model::requests::tool::ToolResult;
 
 use super::pdf::extract_pdf_text_from_base64;
-use super::prompt::strip_system_reminders;
 use super::result::ConversionError;
 
 /// 处理消息内容，提取文本、图片和工具结果
@@ -18,22 +17,18 @@ pub(super) fn process_message_content(
     let mut tool_results = Vec::new();
 
     match content {
-        serde_json::Value::String(s) => {
-            let stripped = strip_system_reminders(s);
-            if !stripped.trim().is_empty() {
-                text_parts.push(stripped);
-            }
+        serde_json::Value::String(s) if !s.trim().is_empty() => {
+            text_parts.push(s.clone());
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
                 if let Ok(block) = serde_json::from_value::<ContentBlock>(item.clone()) {
                     match block.block_type.as_str() {
                         "text" => {
-                            if let Some(text) = block.text {
-                                let stripped = strip_system_reminders(&text);
-                                if !stripped.trim().is_empty() {
-                                    text_parts.push(stripped);
-                                }
+                            if let Some(text) = block.text
+                                && !text.trim().is_empty()
+                            {
+                                text_parts.push(text);
                             }
                         }
                         "image" => {
