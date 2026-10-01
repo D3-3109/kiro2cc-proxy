@@ -21,8 +21,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -380,38 +378,22 @@ export function AccountRow({
             <SwitchPrimitive.Thumb className="block size-3 translate-x-[2px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.28)] transition-transform data-[state=checked]:translate-x-[18px]" />
           </SwitchPrimitive.Root>
           <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
-          {/* 账号级 thinking adaptive 注入：文字 Badge 按钮直接显示当前状态，点击弹单选菜单（默认不注入 / 注入 adaptive） */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                disabled={updateCredential.isPending}
-                aria-label={t('credentials.toggleThinkingAdaptive')}
-                title={t('credentials.toggleThinkingAdaptive')}
-                className={`grid size-[26px] flex-none place-items-center rounded-[6px] text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50 data-[adaptive=on]:text-brand`}
-                data-adaptive={credential.thinkingAdaptive ? 'on' : 'off'}
-              >
-                {credential.thinkingAdaptive ? (
-                  <Lightbulb className="size-[14px]" strokeWidth={2} />
-                ) : (
-                  <LightbulbOff className="size-[14px]" strokeWidth={1.75} />
-                )}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuRadioGroup
-                value={credential.thinkingAdaptive ? 'on' : 'off'}
-                onValueChange={(v) => handleToggleThinkingAdaptive(v === 'on')}
-              >
-                <DropdownMenuRadioItem value="off">
-                  {t('credentials.thinkingAdaptiveOffOption')}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="on">
-                  {t('credentials.thinkingAdaptiveOnOption')}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* 账号级 thinking adaptive 注入：点击直接切换，图标与颜色显示当前状态 */}
+          <button
+            type="button"
+            disabled={updateCredential.isPending}
+            aria-label={t('credentials.toggleThinkingAdaptive')}
+            title={t('credentials.toggleThinkingAdaptive')}
+            onClick={() => handleToggleThinkingAdaptive(!credential.thinkingAdaptive)}
+            className="grid size-[26px] flex-none place-items-center rounded-[6px] text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50 data-[adaptive=on]:text-brand"
+            data-adaptive={credential.thinkingAdaptive ? 'on' : 'off'}
+          >
+            {credential.thinkingAdaptive ? (
+              <Lightbulb className="size-[14px]" strokeWidth={2} />
+            ) : (
+              <LightbulbOff className="size-[14px]" strokeWidth={1.75} />
+            )}
+          </button>
           <button
             type="button"
             className={ICON_BTN}
