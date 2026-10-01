@@ -238,8 +238,8 @@ pub(super) fn convert_assistant_message(
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
-                if let Ok(block) = serde_json::from_value::<ContentBlock>(item.clone()) {
-                    match block.block_type.as_str() {
+                match serde_json::from_value::<ContentBlock>(item.clone()) {
+                    Ok(block) => match block.block_type.as_str() {
                         // 历史消息中剥离 thinking 内容：thinking 仅对当轮推理有意义，
                         // 保留在 history 中会导致 payload 膨胀（Opus 每轮可产生数万字符），
                         // 触发 Kiro 400 "Improperly formed request"。
@@ -256,6 +256,9 @@ pub(super) fn convert_assistant_message(
                             }
                         }
                         _ => {}
+                    },
+                    Err(e) => {
+                        tracing::warn!("历史内容块反序列化失败，块被丢弃: {}", e);
                     }
                 }
             }

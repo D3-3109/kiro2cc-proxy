@@ -22,8 +22,8 @@ pub(super) fn process_message_content(
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
-                if let Ok(block) = serde_json::from_value::<ContentBlock>(item.clone()) {
-                    match block.block_type.as_str() {
+                match serde_json::from_value::<ContentBlock>(item.clone()) {
+                    Ok(block) => match block.block_type.as_str() {
                         "text" => {
                             if let Some(text) = block.text
                                 && !text.trim().is_empty()
@@ -77,7 +77,12 @@ pub(super) fn process_message_content(
                         "tool_use" => {
                             // tool_use 在 assistant 消息中处理，这里忽略
                         }
-                        _ => {}
+                        other => {
+                            tracing::warn!("丢弃未支持的内容块类型: {}", other);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("内容块反序列化失败，块被丢弃: {}", e);
                     }
                 }
             }

@@ -296,8 +296,8 @@ fn create_sse_stream(
                             let mut events = Vec::new();
                             for result in decoder.decode_iter() {
                                 match result {
-                                    Ok(frame) => {
-                                        if let Ok(event) = Event::from_frame(frame) {
+                                    Ok(frame) => match Event::from_frame(frame) {
+                                        Ok(event) => {
                                             // 桥接截获优先：web_search toolUse 不透传为
                                             // 普通 tool_use SSE，改为客户端可见性块（D4/D8）
                                             let (consumed, mut bridge_events) =
@@ -308,7 +308,13 @@ fn create_sse_stream(
                                             }
                                             events.extend(bridge_events);
                                         }
-                                    }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "事件帧解析失败，帧内容被丢弃: {}",
+                                                e
+                                            );
+                                        }
+                                    },
                                     Err(e) => {
                                         tracing::warn!("解码事件失败: {}", e);
                                     }
