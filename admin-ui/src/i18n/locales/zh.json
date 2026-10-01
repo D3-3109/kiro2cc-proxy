@@ -96,7 +96,8 @@
     "toastQueryPartial": "查询完成：成功 {{success}} 个，失败 {{fail}} 个",
     "toastSelectToVerify": "请先选择要验活的账号",
     "toastVerifyCancelled": "已取消验活",
-    "toastVerifyDone": "验活完成：成功 {{success}}/{{total}}"
+    "toastVerifyDone": "验活完成：成功 {{success}}/{{total}}",
+    "updateAvailable": "有新版本可用，点击前往 Releases 下载"
   },
   "credentials": {
     "metricPoolLabel": "账号池",

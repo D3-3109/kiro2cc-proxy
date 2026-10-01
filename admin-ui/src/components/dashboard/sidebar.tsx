@@ -5,6 +5,7 @@ import { Languages, LogOut, Server, PanelLeftClose, PanelLeftOpen, Sun, Moon } f
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { LANG_STORAGE_KEY } from '@/i18n'
+import { useLatestGitHubVersion, isNewerVersion } from '@/hooks/use-credentials'
 
 export interface NavItem {
   key: string
@@ -57,6 +58,10 @@ export function Sidebar({
   const serverStatusLabel = serverHealthy
     ? `kiro2cc-proxy v${serverInfo.version} · ${t('dashboard.serviceRunning')}`
     : t('dashboard.serviceUnknown')
+
+  // 更新红点：本地版本低于 GitHub 最新 release 时提示（查询失败静默不展示）
+  const { data: latestVersion } = useLatestGitHubVersion()
+  const hasUpdate = !!serverInfo?.version && !!latestVersion && isNewerVersion(latestVersion, serverInfo.version)
 
   return (
       <aside className={`${sidebarCollapsed ? 'w-16' : 'w-[232px]'} bg-sidebar bg-grid-dot border-r border-hairline fixed top-0 left-0 bottom-0 flex flex-col z-10 transition-all duration-200`}>
@@ -200,6 +205,13 @@ export function Sidebar({
               className="truncate text-[10.5px] text-ink-3 hover:text-brand transition-colors"
             >
               kiro2cc-proxy v{serverInfo.version}
+              {hasUpdate && (
+                <span
+                  className="ml-1 inline-block h-2 w-2 rounded-full bg-danger align-super"
+                  title={t('dashboard.updateAvailable')}
+                  aria-label={t('dashboard.updateAvailable')}
+                />
+              )}
             </a>
           )}
           <Button

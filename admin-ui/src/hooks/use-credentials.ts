@@ -313,6 +313,37 @@ export function useCredentialModels(id: number | null) {
 
 // ============ 更新日志 Hooks ============
 
+// 查询 GitHub 最新 release 版本号（用于侧栏版本号旁的更新红点）
+// 请求失败 / 无 release 时返回 undefined，红点静默不展示
+export function useLatestGitHubVersion() {
+  return useQuery({
+    queryKey: ['latestGitHubVersion'],
+    queryFn: async (): Promise<string | null> => {
+      const res = await fetch('https://api.github.com/repos/TsinHzl/kiro2cc-proxy/releases/latest')
+      if (!res.ok) return null
+      const data = (await res.json()) as { tag_name?: string }
+      const tag = data.tag_name?.trim()
+      return tag ? tag.replace(/^v/i, '') : null
+    },
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  })
+}
+
+// 语义化版本比较：a 是否大于 b（纯数字逐段比较，缺段按 0 处理）
+export function isNewerVersion(a: string, b: string): boolean {
+  const pa = a.split('.')
+  const pb = b.split('.')
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const na = Number(pa[i]) || 0
+    const nb = Number(pb[i]) || 0
+    if (na > nb) return true
+    if (na < nb) return false
+  }
+  return false
+}
+
 export function useChangelog() {
   return useQuery({
     queryKey: ['changelog'],
