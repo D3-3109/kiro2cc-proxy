@@ -503,6 +503,7 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 | `proxyPassword` | 否 | — | 代理密码 |
 | `tlsBackend` | 否 | `rustls` | TLS 后端：`rustls` 或 `native-tls` |
 | `loadBalancingMode` | 否 | `priority` | `priority`（按优先级）或 `balanced`（轮询） |
+| `clientTokenPassthrough` | 否 | `false` | 客户端 token 直通：`true` 时返回给客户端的 `usage` 字段 1:1 上报真实值，不再按展示缩放系数（约 0.7）缩放。面向按显示值计算上下文占用的第三方客户端（如 Pi agent，见 Issue #44）。开启后 Claude Code 的 auto-compact 会提前触发，Claude Code 用户建议保持默认；可用环境变量 `CLIENT_TOKEN_PASSTHROUGH` 覆盖 |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
 
@@ -516,7 +517,8 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
   "adminPsw": "my-admin-password",
   "proxyUrl": "http://127.0.0.1:7890",
   "tlsBackend": "rustls",
-  "loadBalancingMode": "priority"
+  "loadBalancingMode": "priority",
+  "clientTokenPassthrough": false
 }
 ```
 

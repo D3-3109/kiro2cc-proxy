@@ -45,6 +45,20 @@ pub(crate) const NEAR_EMPTY_OUTPUT_THRESHOLD: i32 = 30;
 /// Ctx 100%，已回滚 —— Claude Code 对 opus 的 Ctx% 分母同为 200K，不是 1M。
 const CLIENT_TOKEN_DISPLAY_SCALE: f64 = 0.6657;
 
+/// 客户端 token 直通开关（config `clientTokenPassthrough`，启动时设置一次）。
+///
+/// true 时 `scale_for_client` 跳过展示缩放、1:1 上报真实值——面向按显示值
+/// 计算上下文占用的第三方客户端（Issue #44：缩放导致其统计严重偏低）。
+/// false（默认）维持 0.6657 缩放，Claude Code auto-compact 触发时机不变。
+/// 运行期只读，用 AtomicBool 而非纯 static bool 以支持无 &self 的调用点。
+static CLIENT_TOKEN_PASSTHROUGH: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 启动时设置客户端 token 直通开关（仅 main.rs 在配置加载后调用一次）。
+pub fn set_client_token_passthrough(enabled: bool) {
+    CLIENT_TOKEN_PASSTHROUGH.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Claude Code 计算 Ctx% 时假设的上下文窗口（分母）。
 ///
 /// 与 `CLIENT_TOKEN_DISPLAY_SCALE` 同属「客户端展示口径」——客户端对所有模型
@@ -55,6 +69,20 @@ pub(crate) const CLIENT_ASSUMED_CONTEXT_WINDOW: i32 = 200_000;
 
 /// 对客户端展示用的 token 值缩放（向上取整保证非零）。
 pub(crate) fn scale_for_client(n: i32, _model: &str) -> i32 {
+    scale_for_client_with(
+        n,
+        CLIENT_TOKEN_PASSTHROUGH.load(std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+/// 按 passthrough 开关缩放（纯函数，测试不触碰全局标志）。
+///
+/// - passthrough=true：1:1 返回真实值（Issue #44 修复路径）
+/// - passthrough=false：维持既有 × 0.6657 展示缩放
+pub(crate) fn scale_for_client_with(n: i32, passthrough: bool) -> i32 {
+    if passthrough {
+        return n.max(0);
+    }
     if n <= 0 {
         return n.max(0);
     }

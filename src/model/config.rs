@@ -152,6 +152,11 @@ pub struct Config {
     #[serde(default)]
     pub cache_simulation: CacheSimulationConfig,
 
+    /// 客户端 token 直通（true 时 usage 字段 1:1 上报真实值，不再按
+    /// CLIENT_TOKEN_DISPLAY_SCALE 缩放）。默认 false 维持既有展示缩放。
+    #[serde(default)]
+    pub client_token_passthrough: bool,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -226,6 +231,7 @@ impl Default for Config {
             max_rpm_per_credential: default_max_rpm_per_credential(),
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
+            client_token_passthrough: false,
             config_path: None,
         }
     }
@@ -324,6 +330,11 @@ impl Config {
         {
             self.model_cache_ttl_secs = n;
         }
+        if let Ok(v) = env::var("CLIENT_TOKEN_PASSTHROUGH")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.client_token_passthrough = b;
+        }
 
         // CacheSimulationConfig 嵌套字段覆盖
         if let Ok(v) = env::var("CACHE_SIMULATION_FINGERPRINT_ENABLED")
@@ -376,5 +387,47 @@ mod tests {
     fn test_model_cache_ttl_deserialize_explicit() {
         let config: Config = serde_json::from_str(r#"{"modelCacheTtlSecs": 60}"#).unwrap();
         assert_eq!(config.model_cache_ttl_secs, 60);
+    }
+
+    #[test]
+    fn test_client_token_passthrough_default_false() {
+        // 缺省该字段时必须为 false（维持展示缩放，Issue #44 修复的默认零回归前提）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(!config.client_token_passthrough);
+    }
+
+    #[test]
+    fn test_client_token_passthrough_deserialize_explicit() {
+        let config: Config = serde_json::from_str(r#"{"clientTokenPassthrough": true}"#).unwrap();
+        assert!(config.client_token_passthrough);
+    }
+
+    #[test]
+    fn test_client_token_passthrough_env_override() {
+        // 环境变量覆盖 config.json（容器化部署场景）。
+        // 通过子进程注入环境变量验证：cargo test 默认并行运行其他测试，
+        // 在测试进程内 set_var/remove_var（Rust 2024 unsafe）与系统库并发
+        // 读取环境存在 UB 风险，子进程隔离可完全规避。
+        const CHILD_MARKER: &str = "KIRO_CONFIG_ENV_TEST_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            // 子进程分支：父进程已注入 CLIENT_TOKEN_PASSTHROUGH
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.apply_env_overrides();
+            assert!(config.client_token_passthrough);
+            return;
+        }
+
+        // 父进程分支：以子进程模式重启自身测试二进制
+        let status = std::process::Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model::config::tests::test_client_token_passthrough_env_override",
+                "--test-threads=1",
+            ])
+            .env(CHILD_MARKER, "1")
+            .env("CLIENT_TOKEN_PASSTHROUGH", "true")
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 }

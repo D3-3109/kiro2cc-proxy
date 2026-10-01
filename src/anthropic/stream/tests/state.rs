@@ -4,7 +4,7 @@
 mod tests {
     use crate::anthropic::stream::{
         SseEvent, SseStateManager, StreamContext, count_token_chars, scale_for_client,
-        split_thinking_and_visible, tokens_from_chars,
+        scale_for_client_with, split_thinking_and_visible, tokens_from_chars,
     };
     use crate::cache::PromptCacheUsage;
     use serde_json::json;
@@ -230,6 +230,31 @@ mod tests {
         assert!(r > 0 && r < i32::MAX);
         let r2 = scale_for_client(i32::MAX, "claude-opus-4-8");
         assert!(r2 > 0 && r2 < i32::MAX);
+    }
+
+    #[test]
+    fn test_scale_for_client_with_passthrough() {
+        // passthrough=true：1:1 返回真实值（Issue #44 修复路径）
+        assert_eq!(scale_for_client_with(100_000, true), 100_000);
+        assert_eq!(scale_for_client_with(66_570, true), 66_570);
+        // 0 / 负数边界：不放大也不 panic
+        assert_eq!(scale_for_client_with(0, true), 0);
+        assert_eq!(scale_for_client_with(-5, true), 0);
+        // i32::MAX 不溢出
+        assert_eq!(scale_for_client_with(i32::MAX, true), i32::MAX);
+    }
+
+    #[test]
+    fn test_scale_for_client_with_scaling() {
+        // passthrough=false：维持既有 0.6657 展示缩放
+        assert_eq!(scale_for_client_with(100_000, false), 66_570);
+        assert_eq!(scale_for_client_with(11, false), 8);
+        // 0 / 负数边界
+        assert_eq!(scale_for_client_with(0, false), 0);
+        assert_eq!(scale_for_client_with(-5, false), 0);
+        // i32::MAX 不溢出
+        let r = scale_for_client_with(i32::MAX, false);
+        assert!(r > 0 && r < i32::MAX);
     }
 
     #[test]

@@ -62,6 +62,14 @@ async fn main() {
     let mut config = config;
     config.apply_env_overrides();
 
+    // 客户端 token 直通开关（true 时 usage 字段 1:1 上报，见 Issue #44）
+    anthropic::set_client_token_passthrough(config.client_token_passthrough);
+    if config.client_token_passthrough {
+        tracing::info!(
+            "已启用客户端 token 直通（clientTokenPassthrough），usage 字段将 1:1 上报真实值"
+        );
+    }
+
     // 加载凭证（支持单对象或数组格式）
     let credentials_path = args
         .credentials

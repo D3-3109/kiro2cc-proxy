@@ -12,7 +12,7 @@ impl StreamContext {
         &mut self,
         reasoning: &ReasoningContentEvent,
     ) -> Vec<SseEvent> {
-        tracing::info!(
+        tracing::debug!(
             model = %self.model,
             message_id = %self.message_id,
             text_chars = reasoning.text.chars().count(),
@@ -70,7 +70,7 @@ impl StreamContext {
                     }),
                 )
             {
-                tracing::info!(
+                tracing::debug!(
                     model = %self.model,
                     message_id = %self.message_id,
                     block_index = index,
