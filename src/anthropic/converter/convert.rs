@@ -35,18 +35,57 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
         return Err(ConversionError::EmptyMessages);
     }
 
-    // 2.5. 预处理 prefill：Kiro 不支持末尾 assistant prefill
-    let messages: &[_] = if req.messages.last().is_some_and(|m| m.role != "user") {
-        tracing::info!("检测到末尾 assistant 消息（prefill），静默丢弃");
-        let last_user_idx = req
-            .messages
+    // 2.5. 内联 system 按原顺序追加到系统区，先校验全部角色，避免 prefill 掩盖无效输入。
+    // 只借用原文；会话 ID、诊断仍使用原始 req，不复制图片或工具结果。
+    let mut system = req.system.as_ref().map(|blocks| {
+        blocks
             .iter()
-            .rposition(|m| m.role == "user")
-            .ok_or(ConversionError::EmptyMessages)?;
-        &req.messages[..=last_user_idx]
-    } else {
-        &req.messages
-    };
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+    });
+    let mut messages = Vec::with_capacity(req.messages.len());
+    for (index, message) in req.messages.iter().enumerate() {
+        match message.role.as_str() {
+            "user" | "assistant" => messages.push(message),
+            "system" => {
+                let texts = system.get_or_insert_with(Vec::new);
+                match &message.content {
+                    serde_json::Value::String(text) => texts.push(text.as_str()),
+                    serde_json::Value::Array(blocks) => {
+                        for block in blocks {
+                            if block.get("type").and_then(|v| v.as_str()) != Some("text") {
+                                return Err(ConversionError::InvalidSystemContent { index });
+                            }
+                            let text = block
+                                .get("text")
+                                .and_then(|v| v.as_str())
+                                .ok_or(ConversionError::InvalidSystemContent { index })?;
+                            texts.push(text);
+                        }
+                    }
+                    _ => return Err(ConversionError::InvalidSystemContent { index }),
+                }
+            }
+            _ => return Err(ConversionError::UnsupportedRole { index }),
+        }
+    }
+    // Kiro 不支持末尾 assistant prefill；system 已归并，不能再按“非 user”裁剪。
+    let message_count = messages.len();
+    while messages
+        .last()
+        .is_some_and(|message| message.role == "assistant")
+    {
+        messages.pop();
+    }
+    if messages.is_empty() {
+        return Err(ConversionError::MissingUserMessage);
+    }
+    if message_count != messages.len() {
+        tracing::info!(
+            discarded_messages = message_count - messages.len(),
+            "丢弃末尾 assistant prefill"
+        );
+    }
 
     // 3. 生成会话 ID 和代理 ID
     // 优先级：
@@ -107,7 +146,13 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
     }
 
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
-    let mut history = build_history(req, messages, &model_id, &conversation_id)?;
+    let mut history = build_history(
+        req,
+        &messages,
+        system.as_deref(),
+        &model_id,
+        &conversation_id,
+    )?;
 
     // 8. 验证并过滤 tool_use/tool_result 配对
     // 移除孤立的 tool_result（没有对应的 tool_use）
@@ -176,7 +221,7 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
         .with_history(history);
 
     let additional_model_request_fields = build_additional_model_request_fields(req, &model_id);
-    let is_compact = is_compact_request(messages);
+    let is_compact = is_compact_request(&req.messages);
     if is_compact {
         tracing::info!(
             "[COMPACT] 检测到 /compact 压缩请求，将使用压缩超时（见 provider::COMPACT_TIMEOUT_SECS）"

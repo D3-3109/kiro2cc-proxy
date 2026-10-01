@@ -240,6 +240,7 @@ impl SseStateManager {
                 }),
             ));
         }
+        tracing::debug!("收到未知块 {} 的 stop 事件", index);
         None
     }
 

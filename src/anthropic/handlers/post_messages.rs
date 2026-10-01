@@ -108,6 +108,11 @@ pub async fn post_messages(
                 ConversionError::EmptyMessages => {
                     ("invalid_request_error", "消息列表为空".to_string())
                 }
+                ConversionError::MissingUserMessage
+                | ConversionError::UnsupportedRole { .. }
+                | ConversionError::InvalidSystemContent { .. } => {
+                    ("invalid_request_error", e.to_string())
+                }
             };
             tracing::warn!("请求转换失败: {}", e);
             return (
@@ -154,6 +159,11 @@ pub async fn post_messages(
     };
 
     // 请求体可能包含 API Key 与敏感上下文，禁止整包入日志（cr-result C3）
+
+    // 临时取证：KIRO_DUMP_BODY=1 时把最终发往 Kiro 的 body 写入独立文件（定位后删除）
+    if std::env::var_os("KIRO_DUMP_BODY").is_some_and(|v| v == "1") {
+        dump_kiro_request_body(&request_body);
+    }
 
     // 构造 fingerprint profile（在消耗 payload 前 clone system/messages）
     let fp_tracker = state.fingerprint_tracker.clone();
@@ -254,5 +264,44 @@ pub async fn post_messages(
             effort,
         )
         .await
+    }
+}
+
+// 临时取证：把最终发往 Kiro 的完整请求体落盘，仅 KIRO_DUMP_BODY=1 时启用。
+// 文件落在 app/config/kiro-body-dump/（gitignore 目录），权限 0600，定位后删除。
+fn dump_kiro_request_body(request_body: &str) {
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let dir = std::path::Path::new("app/config/kiro-body-dump");
+    if std::fs::create_dir_all(dir).is_err() {
+        tracing::warn!("[BODY-DUMP] 创建 dump 目录失败");
+        return;
+    }
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let path = dir.join(format!("body-{ts}.json"));
+    // 0600 权限仅 Unix 有意义；Windows 依赖目录 ACL（用户目录默认私有）
+    #[cfg(unix)]
+    let open = {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true).mode(0o600);
+        o
+    };
+    #[cfg(not(unix))]
+    let open = {
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        o
+    };
+    match open
+        .open(&path)
+        .and_then(|mut f| f.write_all(request_body.as_bytes()))
+    {
+        Ok(()) => tracing::info!("[BODY-DUMP] 已写入 {}", path.display()),
+        Err(e) => tracing::warn!("[BODY-DUMP] 写入失败: {}", e),
     }
 }

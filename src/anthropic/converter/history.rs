@@ -15,22 +15,21 @@ use crate::kiro::model::requests::tool::ToolUseEntry;
 
 use super::cache::{CacheEntry, PREV_H0, evict_oldest_if_full};
 use super::message::process_message_content;
-use super::prompt::{extract_system_reminders, normalize_billing_header};
+use super::prompt::normalize_billing_header;
 use super::result::ConversionError;
 use super::thinking::{generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags};
-use super::tools::SYSTEM_CHUNKED_POLICY;
 
 /// 构建历史消息
 ///
 /// # Arguments
-/// * `req` - 原始请求，用于读取 `system`、`thinking` 等配置字段
-/// * `messages` - 经过 prefill 预处理的消息切片，末尾必定是 user 消息。
-///   注意：该切片与 `req.messages` 可能不同（prefill 时会截断末尾的 assistant 消息），
-///   调用方应始终使用此参数而非 `req.messages`。
+/// * `req` - 原始请求，用于读取 `thinking` 等配置字段
+/// * `messages` - 移除内联 system 和末尾 assistant prefill 后的消息引用，末尾必为 user。
+/// * `system` - 顶层 system 与内联 system 按顺序归并后的文本，不改变原请求。
 /// * `model_id` - 已映射的 Kiro 模型 ID
 pub(super) fn build_history(
     req: &MessagesRequest,
-    messages: &[crate::anthropic::types::Message],
+    messages: &[&crate::anthropic::types::Message],
+    system: Option<&[&str]>,
     model_id: &str,
     session_id: &str,
 ) -> Result<Vec<Message>, ConversionError> {
@@ -42,25 +41,19 @@ pub(super) fn build_history(
     let anti_pseudo_tag_hint = gpt_anti_pseudo_tag_hint(req, model_id);
 
     // 1. 处理系统消息
-    if let Some(ref system) = req.system {
-        let system_content: String = system
-            .iter()
-            .map(|s| s.text.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
+    if let Some(system) = system {
+        let system_content = system.join("\n");
 
         if !system_content.is_empty() {
-            let static_content = format!("{}\n{}", system_content, SYSTEM_CHUNKED_POLICY);
-
             // 注入thinking标签到系统消息最前面（如果需要且不存在）
             let static_content = if let Some(ref prefix) = thinking_prefix {
-                if !has_thinking_tags(&static_content) {
-                    format!("{}\n{}", prefix, static_content)
+                if !has_thinking_tags(&system_content) {
+                    format!("{}\n{}", prefix, system_content)
                 } else {
-                    static_content
+                    system_content
                 }
             } else {
-                static_content
+                system_content
             };
 
             // 追加 GPT 反伪标签引导语（仅当请求携带 thinking 配置时）
@@ -73,10 +66,8 @@ pub(super) fn build_history(
             // 将 cch= 固定为 0，使 history[0] 跨请求稳定，命中 Kiro prompt cache。
             let cache_content = normalize_billing_header(final_content);
 
-            let reminders = extract_system_reminders(messages);
-
-            // 只冻结稳定系统内容；动态 reminder 每轮重新追加，避免 compact 后继续
-            // 发送上一轮冻结的过期提醒。完整内容参与 key，避免前缀相同的辅助请求串槽。
+            // 只冻结稳定系统内容；reminder 保留在原消息中，不搬入系统缓存。
+            // 完整内容参与 key，避免前缀相同的辅助请求串槽。
             let final_content = {
                 let cache = PREV_H0.get_or_init(|| Mutex::new(HashMap::new()));
                 let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -88,7 +79,7 @@ pub(super) fn build_history(
                     &format!("{:x}", hasher.finalize())[..16]
                 );
 
-                let stable_content = if let Some(entry) = map.get_mut(&h0_key) {
+                if let Some(entry) = map.get_mut(&h0_key) {
                     entry.last_used = Instant::now();
                     tracing::info!(
                         "[exp2] history[0] frozen hash={} len={} session={}",
@@ -107,12 +98,6 @@ pub(super) fn build_history(
                     map.insert(h0_key, CacheEntry::new(cache_content.clone()));
                     evict_oldest_if_full(&mut map);
                     cache_content
-                };
-
-                if reminders.is_empty() {
-                    stable_content
-                } else {
-                    format!("{}\n{}", stable_content, reminders)
                 }
             };
 
@@ -253,8 +238,8 @@ pub(super) fn convert_assistant_message(
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
-                if let Ok(block) = serde_json::from_value::<ContentBlock>(item.clone()) {
-                    match block.block_type.as_str() {
+                match serde_json::from_value::<ContentBlock>(item.clone()) {
+                    Ok(block) => match block.block_type.as_str() {
                         // 历史消息中剥离 thinking 内容：thinking 仅对当轮推理有意义，
                         // 保留在 history 中会导致 payload 膨胀（Opus 每轮可产生数万字符），
                         // 触发 Kiro 400 "Improperly formed request"。
@@ -271,6 +256,9 @@ pub(super) fn convert_assistant_message(
                             }
                         }
                         _ => {}
+                    },
+                    Err(e) => {
+                        tracing::warn!("历史内容块反序列化失败，块被丢弃: {}", e);
                     }
                 }
             }

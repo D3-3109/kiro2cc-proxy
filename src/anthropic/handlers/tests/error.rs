@@ -44,6 +44,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_invalid_inline_system_and_roles_return_400_on_both_endpoints() {
+        use crate::anthropic::handlers::{post_messages, post_messages_cc};
+        use crate::anthropic::middleware::AppState;
+        use crate::kiro::model::credentials::KiroCredentials;
+        use crate::kiro::provider::KiroProvider;
+        use crate::kiro::token_manager::MultiTokenManager;
+        use crate::model::config::Config;
+        use axum::extract::{ConnectInfo, State};
+        use std::sync::Arc;
+
+        // 仅内存凭据，没有 token 或刷新能力；即使误入 provider 也不会请求上游。
+        let manager = MultiTokenManager::new(
+            Config::default(),
+            vec![KiroCredentials::default()],
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        let state = AppState::new().with_kiro_provider(KiroProvider::new(Arc::new(manager)));
+        for messages in [
+            json!([
+                {"role": "user", "content": "task"},
+                {"role": "system", "content": [{"type": "image", "text": "PRIVATE_CONTENT"}]}
+            ]),
+            json!([
+                {"role": "user", "content": "task"},
+                {"role": "unknown", "content": "PRIVATE_CONTENT"}
+            ]),
+            json!([{"role": "system", "content": "PRIVATE_CONTENT"}]),
+        ] {
+            let body = bytes::Bytes::from(
+                serde_json::to_vec(&json!({
+                    "model": "claude-sonnet-4", "max_tokens": 1024, "messages": messages
+                }))
+                .unwrap(),
+            );
+            let address = "127.0.0.1:12345".parse().unwrap();
+            let responses = [
+                post_messages(
+                    State(state.clone()),
+                    None,
+                    ConnectInfo(address),
+                    Default::default(),
+                    body.clone(),
+                )
+                .await,
+                post_messages_cc(
+                    State(state.clone()),
+                    None,
+                    ConnectInfo(address),
+                    Default::default(),
+                    body,
+                )
+                .await,
+            ];
+            for response in responses {
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+                let text = response_body_text(response).await;
+                let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(value["error"]["type"], "invalid_request_error");
+                assert!(!text.contains("PRIVATE_CONTENT"));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_map_provider_error_quota_marker_returns_402() {
         let err = anyhow::anyhow!("绑定的账号本月请求额度已用尽（共 1 个）[QUOTA_EXHAUSTED_ALL]");
         let resp = map_provider_error_with_context(err, "claude-sonnet-4-6", 100);
