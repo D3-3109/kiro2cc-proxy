@@ -404,16 +404,30 @@ mod tests {
 
     #[test]
     fn test_client_token_passthrough_env_override() {
-        // 环境变量覆盖 config.json（容器化部署场景）
-        // SAFETY: 单元测试内串行修改进程级环境变量；Rust 2024 要求 unsafe block
-        unsafe {
-            env::set_var("CLIENT_TOKEN_PASSTHROUGH", "true");
+        // 环境变量覆盖 config.json（容器化部署场景）。
+        // 通过子进程注入环境变量验证：cargo test 默认并行运行其他测试，
+        // 在测试进程内 set_var/remove_var（Rust 2024 unsafe）与系统库并发
+        // 读取环境存在 UB 风险，子进程隔离可完全规避。
+        const CHILD_MARKER: &str = "KIRO_CONFIG_ENV_TEST_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            // 子进程分支：父进程已注入 CLIENT_TOKEN_PASSTHROUGH
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.apply_env_overrides();
+            assert!(config.client_token_passthrough);
+            return;
         }
-        let mut config: Config = serde_json::from_str("{}").unwrap();
-        config.apply_env_overrides();
-        assert!(config.client_token_passthrough);
-        unsafe {
-            env::remove_var("CLIENT_TOKEN_PASSTHROUGH");
-        }
+
+        // 父进程分支：以子进程模式重启自身测试二进制
+        let status = std::process::Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model::config::tests::test_client_token_passthrough_env_override",
+                "--test-threads=1",
+            ])
+            .env(CHILD_MARKER, "1")
+            .env("CLIENT_TOKEN_PASSTHROUGH", "true")
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 }
