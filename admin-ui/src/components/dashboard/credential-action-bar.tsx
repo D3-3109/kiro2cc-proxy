@@ -1,17 +1,15 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // Dashboard 凭据操作条区块（自 dashboard.tsx 拆出，纯代码搬移）
 import { useTranslation } from 'react-i18next'
-import { RefreshCw, Info, Trash2, CheckCircle2, Plus } from 'lucide-react'
-import { ACTION_BTN, ACTION_BTN_DANGER, ACTION_BTN_PRIMARY, ACTION_VDIV } from '@/components/dashboard/panel-constants'
+import { RefreshCw, Info, CheckCircle2, Plus } from 'lucide-react'
+import { ACTION_BTN, ACTION_BTN_PRIMARY } from '@/components/dashboard/panel-constants'
 
 interface CredentialActionBarProps {
   allCredentials: unknown[]
-  disabledCredentialCount: number
   handleRefresh: () => void
   handleQueryCurrentPageInfo: () => void
   queryingInfo: boolean
   queryInfoProgress: { current: number; total: number }
-  handleClearAll: () => void
   openBatchImport: () => void
   verifying: boolean
   verifyDialogOpen: boolean
@@ -32,12 +30,10 @@ function BatchImportIcon() {
 
 export function CredentialActionBar({
   allCredentials,
-  disabledCredentialCount,
   handleRefresh,
   handleQueryCurrentPageInfo,
   queryingInfo,
   queryInfoProgress,
-  handleClearAll,
   openBatchImport,
   verifying,
   verifyDialogOpen,
@@ -68,24 +64,6 @@ export function CredentialActionBar({
                       : t('dashboard.queryInfo')}
                   </span>
                 </button>
-              )}
-              {/* 「清除已禁用」两侧的竖线随按钮一起显隐，空列表时不留孤立分隔线 */}
-              {allCredentials.length > 0 && (
-                <>
-                  <span aria-hidden="true" className={ACTION_VDIV} />
-                  <button
-                    type="button"
-                    onClick={handleClearAll}
-                    disabled={disabledCredentialCount === 0}
-                    title={disabledCredentialCount === 0 ? t('dashboard.noClearableDisabled') : undefined}
-                    aria-label={t('dashboard.clearDisabled')}
-                    className={ACTION_BTN_DANGER}
-                  >
-                    <Trash2 />
-                    <span className="hidden sm:inline">{t('dashboard.clearDisabled')}</span>
-                  </button>
-                  <span aria-hidden="true" className={ACTION_VDIV} />
-                </>
               )}
               <button
                 type="button"

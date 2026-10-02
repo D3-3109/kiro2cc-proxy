@@ -423,55 +423,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
     deselectAll()
   }
 
-  // 一键清除所有已禁用凭据
-  const handleClearAll = async () => {
-    if (!data?.credentials || data.credentials.length === 0) {
-      toast.error(t('dashboard.toastNoClearable'))
-      return
-    }
-
-    const disabledCredentials = data.credentials.filter(credential => credential.disabled)
-
-    if (disabledCredentials.length === 0) {
-      toast.error(t('dashboard.noClearableDisabled'))
-      return
-    }
-
-    if (!confirm(t('dashboard.confirmClearAll', { count: disabledCredentials.length }))) {
-      return
-    }
-
-    let successCount = 0
-    let failCount = 0
-
-    for (const credential of disabledCredentials) {
-      try {
-        await new Promise<void>((resolve, reject) => {
-          deleteCredential(credential.id, {
-            onSuccess: () => {
-              successCount++
-              resolve()
-            },
-            onError: (err) => {
-              failCount++
-              reject(err)
-            }
-          })
-        })
-      } catch (error) {
-        // 错误已在 onError 中处理
-      }
-    }
-
-    if (failCount === 0) {
-      toast.success(t('dashboard.toastClearAllSuccess', { count: successCount }))
-    } else {
-      toast.warning(t('dashboard.toastClearAllPartial', { success: successCount, fail: failCount }))
-    }
-
-    deselectAll()
-  }
-
   // 查询所有凭据信息（逐个查询，避免瞬时并发）
   const handleQueryCurrentPageInfo = async () => {
     const allCredentials = data?.credentials || []
@@ -787,12 +738,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
         {/* 凭据列表（自本文件拆出，纯代码搬移） */}
         <CredentialList
           allCredentials={allCredentials}
-          disabledCredentialCount={disabledCredentialCount}
           handleRefresh={handleRefresh}
           handleQueryCurrentPageInfo={handleQueryCurrentPageInfo}
           queryingInfo={queryingInfo}
           queryInfoProgress={queryInfoProgress}
-          handleClearAll={handleClearAll}
           openBatchImport={() => setBatchImportDialogOpen(true)}
           verifying={verifying}
           verifyDialogOpen={verifyDialogOpen}

@@ -12,13 +12,11 @@ import type { CredentialStatusItem, BalanceResponse } from '@/types/api'
 
 interface CredentialListProps {
   allCredentials: CredentialStatusItem[]
-  disabledCredentialCount: number
   // 操作条
   handleRefresh: () => void
   handleQueryCurrentPageInfo: () => void
   queryingInfo: boolean
   queryInfoProgress: { current: number; total: number }
-  handleClearAll: () => void
   openBatchImport: () => void
   verifying: boolean
   verifyDialogOpen: boolean
@@ -66,12 +64,10 @@ interface CredentialListProps {
 
 export function CredentialList({
   allCredentials,
-  disabledCredentialCount,
   handleRefresh,
   handleQueryCurrentPageInfo,
   queryingInfo,
   queryInfoProgress,
-  handleClearAll,
   openBatchImport,
   verifying,
   verifyDialogOpen,
@@ -121,12 +117,10 @@ export function CredentialList({
           {/* 操作条（设计稿 .actionbar）：6 项常驻操作，危险操作用竖分隔线隔离并染红 */}
           <CredentialActionBar
             allCredentials={allCredentials}
-            disabledCredentialCount={disabledCredentialCount}
             handleRefresh={handleRefresh}
             handleQueryCurrentPageInfo={handleQueryCurrentPageInfo}
             queryingInfo={queryingInfo}
             queryInfoProgress={queryInfoProgress}
-            handleClearAll={handleClearAll}
             openBatchImport={openBatchImport}
             verifying={verifying}
             verifyDialogOpen={verifyDialogOpen}
