@@ -61,10 +61,23 @@ pub(super) fn build_additional_model_request_fields(
 
     let mut fields = serde_json::Map::new();
 
-    // thinking 字段不发送：Kiro CLI 经 ListAvailableModels schema 解析后，
-    // 对 claude-sonnet-4.6 等模型只发 output_config.effort，不发 thinking 字段。
-    // 发 thinking 字段会让 Kiro 后端走额外的 thinking 调度路径，显著增加 TTFB。
-    // Kiro 后端的 thinking 行为由其自身默认值控制，无需代理显式指定。
+    // thinking 注入：客户端请求携带 thinking（enabled 或 adaptive，CC 常规请求走
+    // enabled）且模型为 Claude 系时，注入 `thinking: {"type": "adaptive"}`——这是
+    // Kiro 私有协议唯一实证接受的原生 thinking 形态（见
+    // `provider/errors.rs::rewrite_request_body` 现有实现），使上游产出
+    // reasoningContentEvent，进而经 `process_native_reasoning` 转发 thinking_delta。
+    // 注入值统一为 adaptive 型：文本标签协议的 enabled 型不适用于该结构化字段，
+    // 客户端请求的语义是"要思考"，上游协议形态由本代理决定。
+    // 账号级豁免（`thinkingAdaptive` 开关）在 provider 层按实际选中账号执行
+    // （converter 层不持有凭据），此处仅做模型侧判定。
+    if req
+        .thinking
+        .as_ref()
+        .map(|t| t.is_enabled())
+        .unwrap_or(false)
+    {
+        fields.insert("thinking".into(), serde_json::json!({ "type": "adaptive" }));
+    }
 
     // effort 透传 + 默认注入：客户端显式携带 output_config 时按原值转发；
     // 未携带时默认注入 effort="low"。

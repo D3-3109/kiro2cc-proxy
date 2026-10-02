@@ -98,6 +98,4 @@ mod websearch;
 pub use convert::convert_request;
 pub use result::{ConversionError, ConversionResult};
 
-pub(crate) use thinking::additional_fields_skipped;
-pub(crate) use thinking::is_gpt_model;
 pub(crate) use thinking::is_luna_model;

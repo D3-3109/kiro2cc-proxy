@@ -222,62 +222,21 @@ mod tests {
     }
 
     #[test]
-    fn test_inject_thinking_adaptive_injects_when_enabled_and_requested() {
-        // 开关开启 + 客户端请求 adaptive + 非 4.5/GPT 模型 → 注入 thinking 字段
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}}}"#;
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
-        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert_eq!(
-            v["additionalModelRequestFields"]["thinking"]["type"],
-            serde_json::json!("adaptive")
-        );
-    }
-
-    #[test]
-    fn test_inject_thinking_adaptive_not_injected_when_switch_off() {
-        // 客户端请求 adaptive 但账号开关关闭 → 不注入
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}}}"#;
+    fn test_thinking_adaptive_switch_off_strips_field() {
+        // 开关关闭 + 请求体已含 thinking（converter 注入）→ 剥离
+        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}},"additionalModelRequestFields":{"thinking":{"type":"adaptive"}}}"#;
         let cred = KiroCredentials::default(); // thinking_adaptive = false
         let result = KiroProvider::rewrite_request_body(body, &cred, true);
         let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(v.get("additionalModelRequestFields").is_none());
+        assert!(v["additionalModelRequestFields"]["thinking"].is_null());
     }
 
     #[test]
-    fn test_inject_thinking_adaptive_not_injected_when_not_requested() {
-        // 开关开启但客户端未请求 adaptive（enabled / 不传）→ 不注入
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}}}"#;
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), false);
-        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(v.get("additionalModelRequestFields").is_none());
-    }
-
-    #[test]
-    fn test_inject_thinking_adaptive_skipped_for_4_5_models() {
-        // "4.5" 代际模型 → 保持与 converter 整体跳过一致，不注入
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4.5"}}}}"#;
+    fn test_thinking_adaptive_switch_on_keeps_field() {
+        // 开关开启 + 请求体已含 thinking → 保留（converter 注入，provider 不重复注入）
+        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}},"additionalModelRequestFields":{"thinking":{"type":"adaptive"}}}"#;
         let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
         let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(v.get("additionalModelRequestFields").is_none());
-    }
-
-    #[test]
-    fn test_inject_thinking_adaptive_skipped_for_gpt_models() {
-        // GPT 系模型通过 reasoning.effort 传递配置，不走 Kiro thinking 协议，
-        // 所以 rewrite_request_body 不应注入 thinking.type=adaptive。
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"gpt-5.6-luna"}}}}"#;
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
-        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(v.get("additionalModelRequestFields").is_none());
-    }
-
-    #[test]
-    fn test_inject_thinking_adaptive_creates_fields_when_missing() {
-        // additionalModelRequestFields 不存在 → 创建新对象并插入 thinking
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-opus-4-6"}}}}"#;
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
-        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(v["additionalModelRequestFields"].is_object());
         assert_eq!(
             v["additionalModelRequestFields"]["thinking"]["type"],
             serde_json::json!("adaptive")
@@ -285,32 +244,21 @@ mod tests {
     }
 
     #[test]
-    fn test_inject_thinking_adaptive_merges_into_existing_fields() {
-        // additionalModelRequestFields 已存在 → 保留既有键，追加 thinking
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-opus-4-6"}}},"additionalModelRequestFields":{"max_tokens":8192}}"#;
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
-        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
-        let fields = &v["additionalModelRequestFields"];
-        assert_eq!(fields["max_tokens"], serde_json::json!(8192));
-        assert_eq!(fields["thinking"]["type"], serde_json::json!("adaptive"));
-    }
-
-    #[test]
-    fn test_inject_thinking_adaptive_invalid_json_passthrough() {
-        // JSON 解析失败 → 原样返回
-        let body = "not-a-json";
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
-        assert_eq!(result, body);
-    }
-
-    #[test]
-    fn test_inject_thinking_adaptive_skipped_when_model_id_missing() {
-        // fail-closed：modelId 路径缺失（取不到模型）→ 跳过注入
-        let body =
-            r#"{"conversationState":{"currentMessage":{"userInputMessage":{"content":"hi"}}}}"#;
+    fn test_thinking_adaptive_not_injected_when_absent() {
+        // 请求体不含 thinking（converter 未注入，如 4.5/GPT/无 thinking 请求）→
+        // provider 不创建 additionalModelRequestFields，不补充注入
+        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}}}"#;
         let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
         let v: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert!(v.get("additionalModelRequestFields").is_none());
+    }
+
+    #[test]
+    fn test_rewrite_request_body_invalid_json_passthrough() {
+        // JSON 解析失败 → 原样返回（不阻断请求）
+        let body = "not-json";
+        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
+        assert_eq!(result, "not-json");
     }
 
     #[test]
