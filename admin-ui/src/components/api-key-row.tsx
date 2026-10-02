@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useTranslation } from 'react-i18next'
-import * as SwitchPrimitive from '@radix-ui/react-switch'
 import {
   BarChart3,
   Check,
@@ -10,6 +9,7 @@ import {
   Link2,
   MoreHorizontal,
   Pencil,
+  Power,
   RotateCcw,
   Trash2,
 } from 'lucide-react'
@@ -72,6 +72,8 @@ export interface ApiKeyRowProps {
   onEdit: () => void
   onDelete: () => void
   onToggleEnabled: () => void
+  /** 启停请求进行中：禁用按钮防重复点击 */
+  togglePending: boolean
   onResetUsage: () => void
 }
 
@@ -95,6 +97,7 @@ export function ApiKeyRow({
   onEdit,
   onDelete,
   onToggleEnabled,
+  togglePending,
   onResetUsage,
 }: ApiKeyRowProps) {
   const { t } = useTranslation()
@@ -281,14 +284,21 @@ export function ApiKeyRow({
       {/* 操作（设计稿 .rowops）：开关 → 分隔 → 图标钮 → ⋯ 菜单；破坏性操作只在菜单内 */}
       <td className={`${CELL} text-right`}>
         <div className="flex items-center justify-end gap-[2px]">
-          <SwitchPrimitive.Root
-            checked={apiKey.enabled}
-            onCheckedChange={onToggleEnabled}
+          {/* 启停按钮（替代原 Switch 滑块）：动作语义——启用中显示「禁用」（danger 弱底高亮），禁用后显示「启用」（弱化），与账号管理页一致 */}
+          <button
+            type="button"
+            onClick={onToggleEnabled}
+            disabled={togglePending}
             aria-label={t('apiKeys.toggleEnabledLabel', { name: apiKey.name })}
-            className="relative flex h-[18px] w-8 flex-none items-center rounded-[10px] bg-track transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand data-[state=checked]:bg-brand"
+            className={
+              !apiKey.enabled
+                ? 'inline-flex h-[26px] flex-none items-center gap-[5px] rounded-[6px] px-[8px] text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50'
+                : 'inline-flex h-[26px] flex-none items-center gap-[5px] rounded-[6px] px-[8px] text-[11.5px] font-semibold text-[#D93025] transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50'
+            }
           >
-            <SwitchPrimitive.Thumb className="block size-3 translate-x-[2px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.28)] transition-transform data-[state=checked]:translate-x-[18px]" />
-          </SwitchPrimitive.Root>
+            <Power className="size-[13px]" strokeWidth={1.7} />
+            {apiKey.enabled ? t('apiKeys.disableAction') : t('apiKeys.enableAction')}
+          </button>
           <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
           {/* cc-switch 一键导入：Claude Code 与 Codex 是两个独立供应商，各占一条深链接 */}
           <button

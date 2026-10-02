@@ -3,8 +3,7 @@ import { useState } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import * as SwitchPrimitive from '@radix-ui/react-switch'
-import { Boxes, FileText, Lightbulb, LightbulbOff, MoreHorizontal, Pencil, RefreshCw, Trash2, Wallet } from 'lucide-react'
+import { Boxes, FileText, Lightbulb, LightbulbOff, MoreHorizontal, Pencil, Power, RefreshCw, Trash2, Wallet } from 'lucide-react'
 import { EditCredentialDialog } from '@/components/edit-credential-dialog'
 import { CELL, DataCheckbox, ICON_BTN } from '@/components/table-kit'
 import { Button } from '@/components/ui/button'
@@ -368,15 +367,21 @@ export function AccountRow({
       {/* 操作（设计稿 .rowops）：开关 → 分隔 → 3 个常规图标 → ⋯ 菜单；破坏性操作只在菜单内 */}
       <td className={`${CELL} text-right`}>
         <div className="flex items-center justify-end gap-[2px]">
-          <SwitchPrimitive.Root
-            checked={!credential.disabled}
-            onCheckedChange={handleToggleDisabled}
+          {/* 启停按钮（替代原 Switch 滑块）：启用中显示「禁用」（danger 弱底高亮），禁用后显示「启用」（弱化） */}
+          <button
+            type="button"
+            onClick={handleToggleDisabled}
             disabled={setDisabled.isPending}
             aria-label={t('credentials.toggleEnabled', { name: label })}
-            className="relative flex h-[18px] w-8 flex-none items-center rounded-[10px] bg-track transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-brand"
+            className={
+              credential.disabled
+                ? 'inline-flex h-[26px] flex-none items-center gap-[5px] rounded-[6px] px-[8px] text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50'
+                : 'inline-flex h-[26px] flex-none items-center gap-[5px] rounded-[6px] px-[8px] text-[11.5px] font-semibold text-danger transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50'
+            }
           >
-            <SwitchPrimitive.Thumb className="block size-3 translate-x-[2px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.28)] transition-transform data-[state=checked]:translate-x-[18px]" />
-          </SwitchPrimitive.Root>
+            <Power className="size-[13px]" strokeWidth={1.7} />
+            {credential.disabled ? t('credentials.stateActionEnable') : t('credentials.stateActionDisable')}
+          </button>
           <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
           {/* 账号级 thinking adaptive 注入：点击直接切换，图标与颜色显示当前状态 */}
           <button

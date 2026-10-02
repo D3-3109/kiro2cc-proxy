@@ -91,7 +91,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
   const { data: dailyUsageData } = useDailyUsage()
   const queryClient = useQueryClient()
   const { mutate: createKey, isPending: isCreating } = useCreateApiKey()
-  const { mutate: updateKey } = useUpdateApiKey()
+  const { mutate: updateKey, isPending: isUpdatingKey } = useUpdateApiKey()
   const { mutate: deleteKey } = useDeleteApiKey()
   const { mutate: resetUsage } = useResetKeyUsage()
 
@@ -775,6 +775,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             onEdit={() => openEdit(apiKey)}
             onDelete={() => handleDelete(apiKey)}
             onToggleEnabled={() => handleToggleEnabled(apiKey)}
+            togglePending={isUpdatingKey}
             onResetUsage={() => handleResetUsage(apiKey)}
           />
         ))}
