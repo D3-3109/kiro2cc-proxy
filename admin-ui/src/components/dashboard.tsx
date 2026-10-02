@@ -325,20 +325,25 @@ export function Dashboard({ onLogout }: DashboardProps) {
   // 同列再点切换升降序，换列一律从升序开始；第三次点击（同列同向再点）回到默认排序；
   // 排序改变后回到第一页；每次变化同步持久化到 localStorage
   const handleSort = (key: AccountSortKey) => {
-    if (sortKey === key && sortDir === 'desc') {
-      // 同列已两次点击（asc→desc），再点恢复默认排序
-      setSortKey(null)
-      setSortDir('asc')
-      localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY)
-      localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY_DIR)
-    } else if (sortKey === key) {
-      setSortDir('desc')
-      localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY_DIR, 'desc')
-    } else {
-      setSortKey(key)
-      setSortDir('asc')
-      localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY, key)
-      localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY_DIR)
+    // 持久化失败（如配额耗尽）不应中断内存中的排序与页码重置
+    try {
+      if (sortKey === key && sortDir === 'desc') {
+        // 同列已两次点击（asc→desc），再点恢复默认排序
+        setSortKey(null)
+        setSortDir('asc')
+        localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY)
+        localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY_DIR)
+      } else if (sortKey === key) {
+        setSortDir('desc')
+        localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY_DIR, 'desc')
+      } else {
+        setSortKey(key)
+        setSortDir('asc')
+        localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY, key)
+        localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY_DIR)
+      }
+    } catch (error) {
+      console.warn('账号排序偏好保存失败', error)
     }
     setCurrentPage(1)
   }

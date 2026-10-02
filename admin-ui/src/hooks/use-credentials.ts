@@ -324,16 +324,19 @@ export function useLatestGitHubVersion() {
       if (rel.ok) {
         const data = (await rel.json()) as { tag_name?: string }
         const tag = data.tag_name?.trim().replace(/^v/i, '') ?? ''
-        if (/^\d+(\.\d+)*$/.test(tag)) return tag
+        return /^\d+(\.\d+)*$/.test(tag) ? tag : null
       }
-      const res = await fetch('https://api.github.com/repos/TsinHzl/kiro2cc-proxy/tags?per_page=10')
+      // 仅在明确不存在正式 Release（404）时才回退 tags；其他错误状态不能证明无 Release，红点静默
+      if (rel.status !== 404) return null
+      const res = await fetch('https://api.github.com/repos/TsinHzl/kiro2cc-proxy/tags?per_page=100')
       if (!res.ok) return null
       const tags = (await res.json()) as { name?: string }[]
       const versions = tags
         .map(t => t.name?.trim().replace(/^v/i, '') ?? '')
         .filter(v => /^\d+(\.\d+)*$/.test(v))
       if (versions.length === 0) return null
-      // tags 端点按创建时间倒序返回，取首个即最新；仍做一次比较避免顺序意外
+      // tags 端点按创建时间倒序返回；per_page=100 取首页即可覆盖全部 tag，避免前 10 个非
+      // semver tag（如 rc）挤占窗口导致漏报；仍做一次比较避免顺序意外
       return versions.reduce((a, b) => (isNewerVersion(b, a) ? b : a))
     },
     staleTime: 60 * 60 * 1000,
