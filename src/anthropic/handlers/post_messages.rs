@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 //! Anthropic API Handler 函数
 
-use crate::anthropic::converter::{ConversionError, convert_request};
+use crate::anthropic::converter::{
+    ConversionError, additional_fields_skipped, convert_request, is_gpt_model, is_luna_model,
+};
 use crate::anthropic::middleware::{ApiKeyContext, AppState};
 use crate::anthropic::types::ErrorResponse;
 
@@ -191,6 +193,36 @@ pub async fn post_messages(
     // 估算输入 tokens（复用上方已计算的 prefix_estimated_tokens，避免重复编码历史消息）
     // 先取出 thinking_enabled 判断所需字段，避免 payload.tools 等被移动后无法整体借用
     let thinking_enabled = resolve_thinking_enabled(&payload.model, &payload.thinking);
+    // 每请求仅此一条 thinking 状态日志（流式 token 转发阶段不再输出）。
+    // 双维度区分"客户端请求"与"实际生效"：
+    // - 请求：客户端是否携带 thinking（enabled/adaptive），未携带 = 关闭
+    // - 生效：请求开启且模型代际支持注入（4.5 代际整体跳过字段、GPT 系走
+    //   reasoning.effort、luna 强制关闭，见 converter/thinking.rs 与
+    //   resolve_thinking_enabled），否则标注不生效原因
+    let requested = payload
+        .thinking
+        .as_ref()
+        .map(|t| t.is_enabled())
+        .unwrap_or(false);
+    let effective = if !requested {
+        "关闭"
+    } else if thinking_enabled {
+        "开启"
+    } else if is_luna_model(&payload.model) {
+        "不生效(luna不支持)"
+    } else if is_gpt_model(&payload.model) {
+        "不生效(GPT系走reasoning.effort)"
+    } else if additional_fields_skipped(&payload.model) {
+        "不生效(4.5代际跳过)"
+    } else {
+        "不生效(模型不支持)"
+    };
+    tracing::info!(
+        model = %payload.model,
+        request = if requested { "开启" } else { "关闭" },
+        effective,
+        "[THINKING] 深度思考状态"
+    );
     let input_tokens = token::count_all_tokens_with_prefix(
         payload.model.clone(),
         payload.system,
