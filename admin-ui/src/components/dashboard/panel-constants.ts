@@ -30,6 +30,10 @@ export const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} border-transparent bg-bran
 export const ACTION_VDIV = 'mx-0.5 h-[19px] w-px shrink-0 bg-hairline-2'
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebar-collapsed'
+/** 账号表排序持久化：列 key（account/remaining），缺省即默认排序 */
+export const ACCOUNT_SORT_STORAGE_KEY = 'account-sort-key'
+/** 账号表排序持久化：方向（asc/desc），换列/恢复默认时移除 */
+export const ACCOUNT_SORT_STORAGE_KEY_DIR = 'account-sort-dir'
 // 与 aside/main 的 Tailwind `duration-200` 宽度过渡保持一致，Logo 头部布局延迟这么久才跟随切换
 export const SIDEBAR_TRANSITION_MS = 200
 

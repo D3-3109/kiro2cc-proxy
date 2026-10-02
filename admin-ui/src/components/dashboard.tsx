@@ -37,7 +37,7 @@ import { type VerifyResult } from '@/components/batch-verify-dialog'
 import { DashboardDialogs } from '@/components/dashboard/dialogs'
 import { DashboardHeadMetrics } from '@/components/dashboard/head-metrics'
 import { useBalanceFetcher } from '@/components/dashboard/use-balance-fetcher'
-import { CREDITS_DELTA_MIN_BASE, formatLocalDate, SIDEBAR_COLLAPSED_STORAGE_KEY, SIDEBAR_TRANSITION_MS, readStoredSidebarCollapsed } from '@/components/dashboard/panel-constants'
+import { ACCOUNT_SORT_STORAGE_KEY, ACCOUNT_SORT_STORAGE_KEY_DIR, CREDITS_DELTA_MIN_BASE, formatLocalDate, SIDEBAR_COLLAPSED_STORAGE_KEY, SIDEBAR_TRANSITION_MS, readStoredSidebarCollapsed } from '@/components/dashboard/panel-constants'
 
 interface DashboardProps {
   onLogout: () => void
@@ -78,8 +78,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<AccountStatusFilter>('all')
-  const [sortKey, setSortKey] = useState<AccountSortKey | null>(null)
-  const [sortDir, setSortDir] = useState<SortDirection>('asc')
+  // 排序状态持久化到 localStorage：刷新（含 cmd+shift+r）后仍保持用户上次点击的排序；
+  // sortKey 为 null 表示默认排序（后端返回顺序）
+  const [sortKey, setSortKey] = useState<AccountSortKey | null>(() => {
+    const raw = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
+    return raw === 'account' || raw === 'remaining' ? raw : null
+  })
+  const [sortDir, setSortDir] = useState<SortDirection>(() =>
+    localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY_DIR) === 'desc' ? 'desc' : 'asc',
+  )
   // 设计稿表体内滚 + 页脚显示「每页 50」
   const itemsPerPage = 50
   const queryClient = useQueryClient()
@@ -315,13 +322,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setSelectedIds(next)
   }
 
-  // 同列再点切换升降序，换列一律从升序开始；排序改变后回到第一页
+  // 同列再点切换升降序，换列一律从升序开始；第三次点击（同列同向再点）回到默认排序；
+  // 排序改变后回到第一页；每次变化同步持久化到 localStorage
   const handleSort = (key: AccountSortKey) => {
-    if (sortKey === key) {
-      setSortDir(dir => (dir === 'asc' ? 'desc' : 'asc'))
+    if (sortKey === key && sortDir === 'desc') {
+      // 同列已两次点击（asc→desc），再点恢复默认排序
+      setSortKey(null)
+      setSortDir('asc')
+      localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY)
+      localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY_DIR)
+    } else if (sortKey === key) {
+      setSortDir('desc')
+      localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY_DIR, 'desc')
     } else {
       setSortKey(key)
       setSortDir('asc')
+      localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY, key)
+      localStorage.removeItem(ACCOUNT_SORT_STORAGE_KEY_DIR)
     }
     setCurrentPage(1)
   }

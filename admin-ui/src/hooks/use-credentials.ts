@@ -313,17 +313,28 @@ export function useCredentialModels(id: number | null) {
 
 // ============ 更新日志 Hooks ============
 
-// 查询 GitHub 最新 release 版本号（用于侧栏版本号旁的更新红点）
-// 请求失败 / 无 release 时返回 undefined，红点静默不展示
+// 查询 GitHub 最新版本号（用于侧栏版本号旁的更新红点）
+// 优先 /releases/latest；仓库未创建正式 Release 时（404）回退到 /tags 取最新 semver tag，
+// 这样推 tag 即生效，不依赖手动建 Release。请求失败 / 无 tag 时返回 null，红点静默不展示
 export function useLatestGitHubVersion() {
   return useQuery({
     queryKey: ['latestGitHubVersion'],
     queryFn: async (): Promise<string | null> => {
-      const res = await fetch('https://api.github.com/repos/TsinHzl/kiro2cc-proxy/releases/latest')
+      const rel = await fetch('https://api.github.com/repos/TsinHzl/kiro2cc-proxy/releases/latest')
+      if (rel.ok) {
+        const data = (await rel.json()) as { tag_name?: string }
+        const tag = data.tag_name?.trim().replace(/^v/i, '') ?? ''
+        if (/^\d+(\.\d+)*$/.test(tag)) return tag
+      }
+      const res = await fetch('https://api.github.com/repos/TsinHzl/kiro2cc-proxy/tags?per_page=10')
       if (!res.ok) return null
-      const data = (await res.json()) as { tag_name?: string }
-      const tag = data.tag_name?.trim()
-      return tag ? tag.replace(/^v/i, '') : null
+      const tags = (await res.json()) as { name?: string }[]
+      const versions = tags
+        .map(t => t.name?.trim().replace(/^v/i, '') ?? '')
+        .filter(v => /^\d+(\.\d+)*$/.test(v))
+      if (versions.length === 0) return null
+      // tags 端点按创建时间倒序返回，取首个即最新；仍做一次比较避免顺序意外
+      return versions.reduce((a, b) => (isNewerVersion(b, a) ? b : a))
     },
     staleTime: 60 * 60 * 1000,
     retry: false,
