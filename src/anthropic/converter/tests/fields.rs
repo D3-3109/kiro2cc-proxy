@@ -282,3 +282,96 @@ fn test_claude_4_5_generation_additional_model_request_fields_is_none() {
         );
     }
 }
+
+#[test]
+fn test_claude_thinking_injection_matrix() {
+    // thinking 注入矩阵：Claude 系请求携带 thinking（enabled 或 adaptive）时
+    // 注入 `thinking: {"type": "adaptive"}`（Kiro 私有协议唯一实证接受形态），
+    // 与 output_config / max_tokens 合并共存；无 thinking / disabled 时不注入
+    //（与变更前一致）；GPT 系走 reasoning.effort 不注入 thinking；
+    // 4.5 代际整体跳过（另行覆盖，见
+    // test_claude_4_5_generation_additional_model_request_fields_is_none）。
+    use crate::anthropic::types::{Message as AnthropicMessage, Thinking};
+
+    fn base_req(model: &str, thinking: Option<Thinking>) -> MessagesRequest {
+        MessagesRequest {
+            model: model.to_string(),
+            max_tokens: 32000,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            stream: false,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking,
+            output_config: None,
+            metadata: None,
+        }
+    }
+
+    // 场景 1：CC 常规请求 enabled thinking → 注入，且与其他字段共存
+    for thinking_type in ["enabled", "adaptive"] {
+        let req = base_req(
+            "claude-sonnet-4-6",
+            Some(Thinking {
+                thinking_type: thinking_type.to_string(),
+                budget_tokens: 20000,
+            }),
+        );
+        let result = convert_request(&req).unwrap();
+        let fields = result
+            .additional_model_request_fields
+            .expect("Claude 非 4.5 代际应构建 additionalModelRequestFields");
+        assert_eq!(
+            fields["thinking"]["type"],
+            serde_json::json!("adaptive"),
+            "thinking_type={thinking_type} 注入值统一为 adaptive"
+        );
+        assert!(
+            fields.get("output_config").is_some() && fields.get("max_tokens").is_some(),
+            "thinking 字段须与 output_config / max_tokens 合并共存"
+        );
+    }
+
+    // 场景 2：disabled / 未携带 → 不注入（行为与变更前一致）
+    for thinking in [
+        None,
+        Some(Thinking {
+            thinking_type: "disabled".to_string(),
+            budget_tokens: 20000,
+        }),
+    ] {
+        let req = base_req("claude-sonnet-4-6", thinking);
+        let result = convert_request(&req).unwrap();
+        let fields = result
+            .additional_model_request_fields
+            .expect("Claude 非 4.5 代际应构建 additionalModelRequestFields");
+        assert!(
+            fields.get("thinking").is_none(),
+            "无 thinking 或 disabled 时不得注入 thinking 字段"
+        );
+    }
+
+    // 场景 3：GPT 系携带 thinking → 走 reasoning.effort，不注入 thinking
+    let req = base_req(
+        "gpt-5.6",
+        Some(Thinking {
+            thinking_type: "enabled".to_string(),
+            budget_tokens: 20000,
+        }),
+    );
+    let result = convert_request(&req).unwrap();
+    let fields = result
+        .additional_model_request_fields
+        .expect("GPT 系应构建 reasoning 结构");
+    assert!(
+        fields.get("thinking").is_none(),
+        "GPT 系不得注入 thinking 字段"
+    );
+    assert!(
+        fields.get("reasoning").is_some(),
+        "GPT 系维持 reasoning.effort 现状"
+    );
+}

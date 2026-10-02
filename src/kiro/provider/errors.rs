@@ -127,15 +127,19 @@ impl KiroProvider {
         Self::rewrite_request_body(body, credentials, false)
     }
 
-    /// 单次解析管线：profileArn 改写 + 按需 thinking adaptive 注入合并处理，
+    /// 单次解析管线：profileArn 改写 + 账号级 thinking 开关判定合并处理，
     /// 避免大请求体（Claude Code 场景可达数 MB）在链路内被多轮 parse/serialize。
     ///
     /// - JSON 解析失败 → 原样返回，不阻断请求
-    /// - `requested=false` 时跳过注入，仅做 profileArn 改写（含 MCP 路径复用）
+    /// - `thinking_adaptive_requested`：客户端请求了 thinking（enabled 或 adaptive
+    ///   均视为已请求，语义见 converter 注入层），当前未被本函数消费（剥离仅由
+    ///   账号开关决定），保留参数以避免 retry.rs 透传链联动改动
+    /// - MCP 路径复用（`rewrite_profile_arn`）传 false；该 flag 不影响剥离判定，
+    ///   thinking 字段的保留与否仅由账号开关 `thinkingAdaptive` 决定
     pub(crate) fn rewrite_request_body(
         body: &str,
         credentials: &KiroCredentials,
-        thinking_adaptive_requested: bool,
+        _thinking_adaptive_requested: bool,
     ) -> String {
         let Ok(mut value) = serde_json::from_str::<serde_json::Value>(body) else {
             return body.to_string();
@@ -160,49 +164,19 @@ impl KiroProvider {
             }
         }
 
-        // 按账号级开关注入 `additionalModelRequestFields.thinking`，复用同一份
-        // 已解析的 value，不产生第二次 parse/serialize。注入条件（全部满足）：
-        // - `thinking_adaptive_requested` 为 true（客户端请求了 adaptive）
-        // - 账号级开关 `credentials.thinking_adaptive` 已开启
-        // - 目标模型非 GPT 系且非 "4.5" 代际（复用 converter 侧
-        //   `additional_fields_skipped` 谓词，与 `build_additional_model_request_fields`
-        //   的整体跳过条件保持单一来源；modelId 取不到时 fail-closed 跳过）
-        if thinking_adaptive_requested && credentials.thinking_adaptive {
-            let model_id = obj
-                .get("conversationState")
-                .and_then(|cs| cs.get("currentMessage"))
-                .and_then(|cm| cm.get("userInputMessage"))
-                .and_then(|uim| uim.get("modelId"))
-                .and_then(|m| m.as_str())
-                .unwrap_or("")
-                .to_string();
-            let model_id = model_id.as_str();
-            if !model_id.is_empty()
-                && !crate::anthropic::converter::additional_fields_skipped(model_id)
-                && !crate::anthropic::converter::is_gpt_model(model_id)
-            {
-                let fields = obj
-                    .entry("additionalModelRequestFields")
-                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-                match fields.as_object_mut() {
-                    Some(f) => {
-                        f.insert(
-                            "thinking".to_string(),
-                            serde_json::json!({ "type": "adaptive" }),
-                        );
-                        tracing::debug!(
-                            "[THINKING-ADAPTIVE] injected: credential={} model_id={} model_type=adaptive",
-                            credentials.id.map(|i| i.to_string()).unwrap_or_default(),
-                            model_id
-                        );
-                    }
-                    None => tracing::warn!(
-                        "[THINKING-ADAPTIVE] additionalModelRequestFields 非对象，跳过注入: credential={} model_id={}",
-                        credentials.id.map(|i| i.to_string()).unwrap_or_default(),
-                        model_id
-                    ),
-                }
-            }
+        // 账号级开关判定：converter 层（fields.rs）已按请求/模型完成注入决策，
+        // 此处按实际选中账号决定"该账号是否保留 thinking 字段"——
+        // `thinkingAdaptive == false` 时剥离（含 converter 未注入的情形，无副作用），
+        // 故障转移后按新账号重判，每次重试都以当次实际选中的账号状态为准。
+        // `thinking_adaptive_requested` 语义已扩展为"客户端请求了 thinking
+        // （enabled 或 adaptive 均视为已请求）"，透传链保留。
+        // （旧模型类型判定 GPT 系 / "4.5" 代际已上移至 converter 注入层，不再重复。）
+        let fields = obj.get_mut("additionalModelRequestFields");
+        if let Some(fields) = fields.and_then(|f| f.as_object_mut())
+            && fields.contains_key("thinking")
+            && !credentials.thinking_adaptive
+        {
+            fields.remove("thinking");
         }
 
         serde_json::to_string(&value).unwrap_or_else(|_| body.to_string())
