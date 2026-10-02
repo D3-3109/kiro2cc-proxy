@@ -114,7 +114,7 @@ export function CredentialList({
 
   return (
         <div className="space-y-4">
-          {/* 操作条（设计稿 .actionbar）：6 项常驻操作，危险操作用竖分隔线隔离并染红 */}
+          {/* 操作条（设计稿 .actionbar） */}
           <CredentialActionBar
             allCredentials={allCredentials}
             handleRefresh={handleRefresh}
