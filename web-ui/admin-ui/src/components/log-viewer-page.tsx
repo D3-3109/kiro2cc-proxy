@@ -138,36 +138,38 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
   const [autoScroll, setAutoScroll] = useState(true)
   const [paused, setPaused] = useState(false)
   const [collapseRepeats, setCollapseRepeats] = useState(true)
-  const [localLogs, setLocalLogs] = useState<LogEntry[]>([])
 
-  const logEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
 
   const { logs, connected, clear } = useLogStream(true)
 
-  // 暂停只冻结显示，不断开 SSE；恢复时一次性追上期间积压的日志
+  // 暂停只冻结显示，不断开 SSE；恢复时一次性追上期间积压的日志。
+  // shownLogs 是「已冻结的显示帧」：暂停期间 hook 的 logs 继续累积但不入画，
+  // 恢复后下一次 logs 变化把整段积压一次性带进来（天然合批，无逐条回放）。
+  const [shownLogs, setShownLogs] = useState<LogEntry[]>([])
   useEffect(() => {
     if (paused) return
-    setLocalLogs(logs)
+    setShownLogs(logs)
   }, [logs, paused])
 
-  const counts = useMemo(() => countByLevel(localLogs), [localLogs])
-  // 依赖 localLogs 重算即可：日志流入本身就是心跳；暂停时数字随画面一同冻结
-  const recent = useMemo(() => countRecent(localLogs, Date.now()), [localLogs])
+  const counts = useMemo(() => countByLevel(shownLogs), [shownLogs])
   // 计数并列时 reduce 初值 'INFO' 使其胜出 —— 确定性平局规则，非偏好
   const { topLevel, topShare, observedLevels } = useMemo(() => {
     const top = LEVELS.reduce((acc, level) => (counts[level] > counts[acc] ? level : acc), 'INFO' as LogLevel)
     return {
       topLevel: top,
-      topShare: localLogs.length > 0 ? (counts[top] / localLogs.length) * 100 : 0,
+      topShare: shownLogs.length > 0 ? (counts[top] / shownLogs.length) * 100 : 0,
       observedLevels: LEVELS.filter((level) => counts[level] > 0),
     }
-  }, [counts, localLogs.length])
+  }, [counts, shownLogs.length])
+
+  // 近 1 小时计数跟随显示帧；日志流入本身就是心跳，暂停时数字随画面一同冻结
+  const recent = useMemo(() => countRecent(shownLogs, Date.now()), [shownLogs])
 
   const filteredLogs = useMemo(
     () =>
-      localLogs.filter((entry) => {
+      shownLogs.filter((entry) => {
         if (levelFilter !== 'ALL' && entry.level !== levelFilter) return false
         if (keyword) {
           const lower = keyword.toLowerCase()
@@ -178,7 +180,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
         }
         return true
       }),
-    [localLogs, levelFilter, keyword]
+    [shownLogs, levelFilter, keyword]
   )
 
   // 折叠开启时才合并；关闭时也走同一 row 结构，日志流渲染无需分支
@@ -191,12 +193,25 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
   )
   const collapsedCount = filteredLogs.length - rows.length
 
-  // Auto-scroll to bottom when rendered rows change
-  useEffect(() => {
-    if (autoScrollRef.current && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'auto' })
+  // Auto-scroll to bottom when rendered rows change.
+  // 不用 scrollIntoView：content-visibility 下视口外行未布局，浏览器定位可能不准。
+  // 直接赋 scrollTop 后，滚动行为本身会让视口外的行实体化（行高从占位估算值变为
+  // 实际值，scrollHeight 随之增长），因此用双 rAF 连续顶两次：首帧赋值触发实体化，
+  // 次帧用更新后的 scrollHeight 再顶一次，确保真正落底。
+  const scrollToBottom = useCallback(() => {
+    const pin = () => {
+      const el = containerRef.current
+      if (el) el.scrollTop = el.scrollHeight
     }
-  }, [rows])
+    pin()
+    requestAnimationFrame(() => requestAnimationFrame(pin))
+  }, [])
+
+  useEffect(() => {
+    if (autoScrollRef.current) {
+      scrollToBottom()
+    }
+  }, [rows, scrollToBottom])
 
   // Keep ref in sync so scroll handler doesn't close over stale state
   useEffect(() => {
@@ -206,7 +221,9 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
   const handleScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50
+    // 阈值放宽到 100：content-visibility 下行高为占位估算值，长消息行实际更高，
+    // 过窄的判定带会在接近底部时误判为已离开底部而关闭自动滚动
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100
     if (atBottom !== autoScrollRef.current) {
       setAutoScroll(atBottom)
     }
@@ -244,18 +261,19 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
     }
   }
 
-  // 两处都清：hook 内缓冲是数据源，本地镜像在暂停态下不会被 effect 同步
   const handleClear = () => {
     clear()
-    setLocalLogs([])
+    // shownLogs 是冻结显示帧，effect 在暂停态不会同步，需就地清空，
+    // 否则计数卡与底部总条数在恢复播放前仍显示旧数据
+    setShownLogs([])
   }
 
   // Scroll to bottom immediately when auto-scroll is turned on
   useEffect(() => {
-    if (autoScroll && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'auto' })
+    if (autoScroll) {
+      scrollToBottom()
     }
-  }, [autoScroll])
+  }, [autoScroll, scrollToBottom])
 
   return (
     // 高度显式给定：日志流需内部滚动，而 dashboard 的 <main> 不是 flex 容器，flex-1 在此无效。
@@ -300,20 +318,20 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
 
       <MetricsBar>
         <Metric label={t('logs.metricBufferLabel')}>
-          <MetricValue value={formatTokenCount(localLogs.length)} unit={`/ ${formatTokenCount(MAX_FRONT_LOGS)}`} />
+          <MetricValue value={formatTokenCount(shownLogs.length)} unit={`/ ${formatTokenCount(MAX_FRONT_LOGS)}`} />
           <MetricFoot className="truncate pr-12">
             <span className="shrink-0">{t('logs.metricRingBuffer')}</span>
-            {localLogs.length > 0 && (
+            {shownLogs.length > 0 && (
               <>
                 <FootSep />
-                <span className="truncate">{t('logs.metricEarliest', { time: localClock(localLogs[0].timestamp) })}</span>
+                <span className="truncate">{t('logs.metricEarliest', { time: localClock(shownLogs[0].timestamp) })}</span>
               </>
             )}
           </MetricFoot>
           <MetricAside>
             <Ring
-              percent={(localLogs.length / MAX_FRONT_LOGS) * 100}
-              tone={localLogs.length >= MAX_FRONT_LOGS ? 'stroke-warn' : 'stroke-brand'}
+              percent={(shownLogs.length / MAX_FRONT_LOGS) * 100}
+              tone={shownLogs.length >= MAX_FRONT_LOGS ? 'stroke-warn' : 'stroke-brand'}
               size={42}
             />
           </MetricAside>
@@ -343,8 +361,8 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
 
         <Metric label={t('logs.metricLevelsLabel')}>
           <MetricValue
-            value={localLogs.length > 0 ? topLevel : '—'}
-            unit={localLogs.length > 0 ? t('logs.metricLevelShare', { percent: topShare.toFixed(0) }) : undefined}
+            value={shownLogs.length > 0 ? topLevel : '—'}
+            unit={shownLogs.length > 0 ? t('logs.metricLevelShare', { percent: topShare.toFixed(0) }) : undefined}
           />
           <MetricFoot className="flex-wrap">
             {observedLevels.length === 0 ? (
@@ -374,7 +392,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
           onChange={setLevelFilter}
           groupLabel={t('logs.filterGroupLabel')}
           options={[
-            { key: 'ALL' as LevelFilter, label: t('logs.filterAll'), count: localLogs.length },
+            { key: 'ALL' as LevelFilter, label: t('logs.filterAll'), count: shownLogs.length },
             ...SEG_LEVELS.map((level) => ({
               key: level as LevelFilter,
               label: level,
@@ -397,7 +415,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
         >
           <Copy className="size-[14px]" aria-hidden="true" />
         </button>
-        <Button variant="destructive" onClick={handleClear} disabled={localLogs.length === 0}>
+        <Button variant="destructive" onClick={handleClear} disabled={shownLogs.length === 0}>
           <Trash2 aria-hidden="true" />
           {t('logs.clearBufferButton')}
         </Button>
@@ -412,7 +430,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
         <div ref={containerRef} onScroll={handleScroll} className="logstream">
           {rows.length === 0 ? (
             <div className="px-[14px] py-8 text-center text-[11.5px] text-ink-3">
-              {localLogs.length === 0 ? t('logs.emptyStreamHint') : t('logs.emptyNoMatch')}
+              {shownLogs.length === 0 ? t('logs.emptyStreamHint') : t('logs.emptyNoMatch')}
             </div>
           ) : (
             rows.map(({ entry, repeat, key }) => (
@@ -434,7 +452,6 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
               </div>
             ))
           )}
-          <div ref={logEndRef} />
         </div>
 
         <div className={PANEL_FOOT}>
@@ -442,7 +459,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
           <span>
             {t('logs.displayedBufferedCount', {
               shown: formatTokenCount(rows.length),
-              total: formatTokenCount(localLogs.length),
+              total: formatTokenCount(shownLogs.length),
             })}
           </span>
           {collapsedCount > 0 && (

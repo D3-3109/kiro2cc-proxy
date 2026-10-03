@@ -2,6 +2,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { storage } from '@/lib/storage'
 
+/** log 事件的合批窗口（ms）：窗口内的日志只触发一次 setState / re-render */
+const FLUSH_INTERVAL_MS = 150
+
 export interface LogEntry {
   timestamp: string
   level: 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
@@ -26,6 +29,31 @@ export function useLogStream(enabled: boolean): {
   const reconnectDelay = useRef(1000)
 
   const historyReceivedRef = useRef(false)
+  const pendingRef = useRef<LogEntry[]>([])
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** 把合批缓冲一次性并入 logs；clear/断连时也要调用以避免旧内容回填 */
+  const flush = useCallback(() => {
+    flushTimerRef.current = null
+    if (pendingRef.current.length === 0) return
+    const incoming = pendingRef.current
+    pendingRef.current = []
+    setLogs((prev) => {
+      const next = prev.length + incoming.length > MAX_FRONT_LOGS
+        ? [...prev, ...incoming].slice(-(MAX_FRONT_LOGS as number))
+        : [...prev, ...incoming]
+      return next
+    })
+  }, [])
+
+  const clear = useCallback(() => {
+    pendingRef.current = []
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    setLogs([])
+  }, [])
 
   const connect = useCallback(() => {
     if (esRef.current) return
@@ -69,12 +97,14 @@ export function useLogStream(enabled: boolean): {
     es.addEventListener('log', (e: MessageEvent) => {
       try {
         const entry: LogEntry = JSON.parse(e.data)
-        setLogs((prev) => {
-          const next = [...prev, entry]
-          return next.length > MAX_FRONT_LOGS
-            ? next.slice(next.length - MAX_FRONT_LOGS)
-            : next
-        })
+        // 合批缓冲：SSE 逐条推送时每条一次 setState + O(n) 复制会让页面在
+        // 日志多时整段卡顿；先攒入 pending 再由定时器一次性 flush。
+        pendingRef.current.push(entry)
+        // 缓冲加上限：上游日志洪峰时避免 pending 无界增长
+        if (pendingRef.current.length > MAX_FRONT_LOGS) pendingRef.current.shift()
+        if (!flushTimerRef.current) {
+          flushTimerRef.current = setTimeout(flush, FLUSH_INTERVAL_MS)
+        }
       } catch {
         // ignore malformed log entry
       }
@@ -89,7 +119,7 @@ export function useLogStream(enabled: boolean): {
       reconnectDelay.current = Math.min(delay * 2, 30000)
       reconnectTimer.current = setTimeout(connect, delay)
     }
-  }, [])
+  }, [flush])
 
   useEffect(() => {
     if (!enabled) {
@@ -97,6 +127,11 @@ export function useLogStream(enabled: boolean): {
       esRef.current = null
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
       setConnected(false)
+      pendingRef.current = []
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
       setLogs([])
       return
     }
@@ -108,10 +143,13 @@ export function useLogStream(enabled: boolean): {
       esRef.current?.close()
       esRef.current = null
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
+      pendingRef.current = []
     }
   }, [enabled, connect])
-
-  const clear = useCallback(() => setLogs([]), [])
 
   return { logs, connected, clear }
 }
