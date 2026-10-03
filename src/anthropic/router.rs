@@ -102,7 +102,10 @@ fn build_router(state: AppState) -> Router {
                     )
                 })
                 .on_request(|request: &axum::http::Request<_>, _span: &tracing::Span| {
-                    tracing::info!(
+                    // request 行整体降为 debug：公网扫描器（GET /、/.env 等）持续
+                    // 探测未注册路径，INFO 级别会刷屏；正常业务请求的信息由下方
+                    // INFO 级别的 response 行承载
+                    tracing::debug!(
                         method = %request.method(),
                         uri = %request.uri(),
                         "request"
@@ -112,11 +115,23 @@ fn build_router(state: AppState) -> Router {
                     |response: &axum::http::Response<_>,
                      latency: std::time::Duration,
                      _span: &tracing::Span| {
-                        tracing::info!(
-                            status = %response.status(),
-                            latency_ms = latency.as_millis(),
-                            "response"
-                        );
+                        let status = response.status();
+                        // 404 来自未注册路由：公网扫描器（GET /、/.env 等）持续探测，
+                        // 降为 debug 避免刷屏（request 行同步降级，见 on_request 注释）；
+                        // 其余状态码保持 INFO
+                        if status == axum::http::StatusCode::NOT_FOUND {
+                            tracing::debug!(
+                                status = %status,
+                                latency_ms = latency.as_millis(),
+                                "response"
+                            );
+                        } else {
+                            tracing::info!(
+                                status = %status,
+                                latency_ms = latency.as_millis(),
+                                "response"
+                            );
+                        }
                     },
                 ),
         )
