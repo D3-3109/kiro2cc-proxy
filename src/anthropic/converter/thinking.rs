@@ -15,7 +15,19 @@ pub(crate) fn is_gpt_model(model_id: &str) -> bool {
 /// converter 侧 `build_additional_model_request_fields` 与 provider 侧
 /// thinking adaptive 注入共用本谓词，避免排除条件双份硬编码漂移。
 pub(crate) fn additional_fields_skipped(model_id: &str) -> bool {
-    model_id.ends_with("4.5")
+    // "4.5" 代际（sonnet/opus/haiku）被 Kiro 后端拒绝该字段
+    if model_id.ends_with("4.5") {
+        return true;
+    }
+    // 第三方非 Claude 模型（2026-10-03 实测）：qwen3-coder-next / glm-5 /
+    // deepseek-3.2 / minimax-m2.5 携带 additionalModelRequestFields 均被
+    // Kiro 后端以 400 "additionalModelRequestFields is not supported for
+    // this model" 拒绝；minimax-m2.1 实测可正常携带（对照组 200 OK），
+    // 故 m2.1 不在跳过之列。
+    matches!(
+        model_id,
+        "qwen3-coder-next" | "glm-5" | "deepseek-3.2" | "minimax-m2.5"
+    )
 }
 
 /// 判断是否为 `gpt-5.6-luna`。

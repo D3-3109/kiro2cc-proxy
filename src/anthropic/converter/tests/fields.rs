@@ -375,3 +375,47 @@ fn test_claude_thinking_injection_matrix() {
         "GPT 系维持 reasoning.effort 现状"
     );
 }
+
+#[test]
+fn test_additional_fields_skipped_for_unsupported_third_party_models() {
+    // 回归测试（2026-10-03 实测）：qwen3-coder-next / glm-5 / deepseek-3.2 /
+    // minimax-m2.5 携带 additionalModelRequestFields 被 Kiro 后端以 400
+    // "additionalModelRequestFields is not supported for this model" 拒绝，
+    // 需整体跳过；minimax-m2.1 实测可正常携带（200 OK），不得误伤。
+    use super::super::thinking::additional_fields_skipped;
+
+    for model in ["qwen3-coder-next", "glm-5", "deepseek-3.2", "minimax-m2.5"] {
+        assert!(
+            additional_fields_skipped(model),
+            "{model} 应跳过 additionalModelRequestFields"
+        );
+        let req = MessagesRequest {
+            model: model.to_string(),
+            max_tokens: 32000,
+            messages: vec![crate::anthropic::types::Message {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            stream: false,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking: Some(crate::anthropic::types::Thinking {
+                thinking_type: "adaptive".to_string(),
+                budget_tokens: 20000,
+            }),
+            output_config: None,
+            metadata: None,
+        };
+        let result = convert_request(&req).unwrap();
+        assert!(
+            result.additional_model_request_fields.is_none(),
+            "{model} 不得携带 additionalModelRequestFields"
+        );
+    }
+
+    assert!(
+        !additional_fields_skipped("minimax-m2.1"),
+        "minimax-m2.1 实测支持该字段，不应跳过"
+    );
+}
