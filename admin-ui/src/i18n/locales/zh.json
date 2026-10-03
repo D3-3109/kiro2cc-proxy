@@ -324,7 +324,7 @@
     "statPendingLabel": "待激活",
     "statDisabledLabel": "已禁用",
     "statExpiredLabel": "已过期",
-    "statusActive": "启用",
+    "statusActive": "已启用",
     "enableAction": "启用",
     "disableAction": "禁用",
     "statusPending": "待激活",
