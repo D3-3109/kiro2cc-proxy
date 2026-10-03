@@ -4,22 +4,22 @@
 /credentials.json
 /.idea
 /test.json
-/admin-ui/node_modules/
-/admin-ui/dist/
-/admin-ui/pnpm-lock.yaml
-/admin-ui/package-lock.json
-/admin-ui/tsconfig.tsbuildinfo
+/web-ui/admin-ui/node_modules/
+/web-ui/admin-ui/dist/
+/web-ui/admin-ui/pnpm-lock.yaml
+/web-ui/admin-ui/package-lock.json
+/web-ui/admin-ui/tsconfig.tsbuildinfo
 /credentials.*
 /kiro_balance_cache.json
 /kiro_stats.json
 *.command
 !run-local-service-mac.command
 .DS_Store
-/user-ui/node_modules/
-/user-ui/dist/
-/user-ui/tsconfig.tsbuildinfo
-/user-ui/pnpm-lock.yaml
-/user-ui/package-lock.json
+/web-ui/user-ui/node_modules/
+/web-ui/user-ui/dist/
+/web-ui/user-ui/tsconfig.tsbuildinfo
+/web-ui/user-ui/pnpm-lock.yaml
+/web-ui/user-ui/package-lock.json
 
 # Runtime files
 kiro-rs.pid

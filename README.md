@@ -115,7 +115,7 @@ run_kiro2cc_proxy     # 等同于 ./run-local-service-mac.sh
 ./build-mac.sh
 ```
 
-脚本会依次构建 admin-ui 前端、user-ui 前端，最后编译 Rust 二进制。首次构建约需 5~15 分钟。
+脚本会依次构建 web-ui/admin-ui 前端、web-ui/user-ui 前端，最后编译 Rust 二进制。首次构建约需 5~15 分钟。
 
 构建成功后输出：
 ```
@@ -229,7 +229,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\build-windows.ps1
 ```
 
-脚本会依次构建 admin-ui 前端、user-ui 前端，最后编译 Rust 二进制。首次构建约需 5~15 分钟。
+脚本会依次构建 web-ui/admin-ui 前端、web-ui/user-ui 前端，最后编译 Rust 二进制。首次构建约需 5~15 分钟。
 
 > 后续除非更新了代码，否则无需重新构建。
 
@@ -877,8 +877,9 @@ git pull
 ```
 kiro2cc-proxy/
 ├── src/                    # Rust 源码
-├── admin-ui/               # 管理面板前端
-├── user-ui/                # 用户面板前端
+├── web-ui/                 # 前端源码根目录
+│   ├── admin-ui/           # 管理面板前端
+│   └── user-ui/            # 用户面板前端
 ├── app/config/             # 本地配置目录（gitignored）
 ├── config.example.json     # 配置示例
 ├── docker-compose.yml      # Docker 部署配置

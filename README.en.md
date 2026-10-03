@@ -115,7 +115,7 @@ run_kiro2cc_proxy     # equivalent to ./run-local-service-mac.sh
 ./build-mac.sh
 ```
 
-This script builds the admin-ui frontend, user-ui frontend, and then compiles the Rust binary. First build takes 5–15 minutes.
+This script builds the web-ui/admin-ui frontend, web-ui/user-ui frontend, and then compiles the Rust binary. First build takes 5–15 minutes.
 
 On success:
 ```
@@ -227,7 +227,7 @@ Then build:
 .\build-windows.ps1
 ```
 
-This script builds the admin-ui frontend, user-ui frontend, and then compiles the Rust binary. First build takes 5–15 minutes.
+This script builds the web-ui/admin-ui frontend, web-ui/user-ui frontend, and then compiles the Rust binary. First build takes 5–15 minutes.
 
 > No need to rebuild unless you update the code.
 
@@ -856,8 +856,9 @@ git pull
 ```
 kiro2cc-proxy/
 ├── src/                    # Rust source code
-├── admin-ui/               # Admin panel frontend
-├── user-ui/                # User panel frontend
+├── web-ui/                 # Web frontends root
+│   ├── admin-ui/           # Admin panel frontend
+│   └── user-ui/            # User panel frontend
 ├── app/config/             # Local config directory (gitignored)
 ├── config.example.json     # Config example
 ├── docker-compose.yml      # Docker deployment config

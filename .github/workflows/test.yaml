@@ -32,19 +32,19 @@ jobs:
           version: 9
 
       - name: Install admin-ui dependencies
-        working-directory: admin-ui
+        working-directory: web-ui/admin-ui
         run: pnpm install
 
       - name: Build admin-ui
-        working-directory: admin-ui
+        working-directory: web-ui/admin-ui
         run: pnpm build
 
       - name: Install user-ui dependencies
-        working-directory: user-ui
+        working-directory: web-ui/user-ui
         run: npm install
 
       - name: Build user-ui
-        working-directory: user-ui
+        working-directory: web-ui/user-ui
         run: npm run build
 
       - name: Setup Rust

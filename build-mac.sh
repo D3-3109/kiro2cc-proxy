@@ -1,6 +1,6 @@
 #!/bin/bash
 # kiro2cc-proxy 一键构建脚本
-# 依次构建 admin-ui、user-ui 前端，再编译 Rust 二进制
+# 依次构建 web-ui/admin-ui、web-ui/user-ui 前端，再编译 Rust 二进制
 
 set -eo pipefail
 
@@ -29,24 +29,24 @@ if ! command -v cargo &>/dev/null; then
 fi
 
 echo ""
-echo "[1/3] 构建 admin-ui..."
-cd admin-ui
+echo "[1/3] 构建 web-ui/admin-ui..."
+cd web-ui/admin-ui
 log "npm install 开始 (registry: $NPM_REGISTRY)"
 npm install --registry "$NPM_REGISTRY" --progress
 log "npm install 完成，开始 build..."
 npm run build
-cd ..
-log "admin-ui 构建完成 ✓"
+cd ../..
+log "web-ui/admin-ui 构建完成 ✓"
 
 echo ""
-echo "[2/3] 构建 user-ui..."
-cd user-ui
+echo "[2/3] 构建 web-ui/user-ui..."
+cd web-ui/user-ui
 log "npm install 开始 (registry: $NPM_REGISTRY)"
 npm install --registry "$NPM_REGISTRY" --progress
 log "npm install 完成，开始 build..."
 npm run build
-cd ..
-log "user-ui 构建完成 ✓"
+cd ../..
+log "web-ui/user-ui 构建完成 ✓"
 
 echo ""
 echo "[3/3] 编译 Rust 二进制..."

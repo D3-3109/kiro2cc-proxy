@@ -1,15 +1,15 @@
 FROM node:22-alpine AS frontend-builder
 
-WORKDIR /app/admin-ui
-COPY admin-ui/package.json ./
+WORKDIR /app/web-ui/admin-ui
+COPY web-ui/admin-ui/package.json ./
 RUN npm install -g pnpm && pnpm install --ignore-scripts
-COPY admin-ui ./
+COPY web-ui/admin-ui ./
 RUN pnpm build
 
-WORKDIR /app/user-ui
-COPY user-ui/package.json ./
+WORKDIR /app/web-ui/user-ui
+COPY web-ui/user-ui/package.json ./
 RUN npm install
-COPY user-ui ./
+COPY web-ui/user-ui ./
 RUN npm run build
 
 FROM rust:1-alpine AS builder
@@ -20,8 +20,8 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
 COPY assets ./assets
-COPY --from=frontend-builder /app/admin-ui/dist /app/admin-ui/dist
-COPY --from=frontend-builder /app/user-ui/dist /app/user-ui/dist
+COPY --from=frontend-builder /app/web-ui/admin-ui/dist /app/web-ui/admin-ui/dist
+COPY --from=frontend-builder /app/web-ui/user-ui/dist /app/web-ui/user-ui/dist
 
 RUN cargo build --release
 

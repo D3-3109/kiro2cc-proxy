@@ -12,7 +12,7 @@ use rust_embed::Embed;
 
 /// 嵌入前端构建产物
 #[derive(Embed)]
-#[folder = "admin-ui/dist"]
+#[folder = "web-ui/admin-ui/dist"]
 struct Asset;
 
 /// 创建 Admin UI 路由
@@ -80,7 +80,7 @@ fn serve_index() -> Response<Body> {
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from(
-                "Admin UI not built. Run 'pnpm build' in admin-ui directory.",
+                "Admin UI not built. Run 'pnpm build' in web-ui/admin-ui directory.",
             ))
             .expect("Failed to build response"),
     }

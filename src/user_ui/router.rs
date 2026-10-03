@@ -12,7 +12,7 @@ use rust_embed::Embed;
 
 /// 嵌入前端构建产物
 #[derive(Embed)]
-#[folder = "user-ui/dist"]
+#[folder = "web-ui/user-ui/dist"]
 struct Asset;
 
 /// 创建 User UI 路由
@@ -75,7 +75,7 @@ fn serve_index() -> Response<Body> {
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from(
-                "User UI not built. Run 'npm run build' in user-ui directory.",
+                "User UI not built. Run 'npm run build' in web-ui/user-ui directory.",
             ))
             .expect("Failed to build response"),
     }

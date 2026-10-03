@@ -4,19 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-kiro2cc-proxy 是一个 Rust 代理服务，将 Anthropic Claude API 请求转换为 Kiro（AWS Q Developer）API 请求，使 Claude Code / Codex CLI / 任意 OpenAI SDK 客户端能够使用 Kiro 账号上的模型。技术栈：Rust 2024 edition + axum 0.8 + tokio + reqwest，前端（admin-ui / user-ui，React + Vite）构建产物经 rust-embed 嵌入二进制。
+kiro2cc-proxy 是一个 Rust 代理服务，将 Anthropic Claude API 请求转换为 Kiro（AWS Q Developer）API 请求，使 Claude Code / Codex CLI / 任意 OpenAI SDK 客户端能够使用 Kiro 账号上的模型。技术栈：Rust 2024 edition + axum 0.8 + tokio + reqwest，前端（web-ui/admin-ui、web-ui/user-ui，React + Vite）构建产物经 rust-embed 嵌入二进制。
 
 ## 常用命令
 
 ```bash
-# 完整构建（admin-ui + user-ui 前端 + cargo release），首次约 5~15 分钟
+# 完整构建（web-ui/admin-ui + web-ui/user-ui 前端 + cargo release），首次约 5~15 分钟
 ./build-mac.sh           # macOS
 .\build-windows.ps1      # Windows
 
 # 仅 Rust
 cargo check            # 快速类型检查
 cargo build            # dev；debug 模式 rust-embed 从磁盘读 dist
-cargo build --release  # release 模式将 admin-ui/dist、user-ui/dist 编译期内嵌
+cargo build --release  # release 模式将 web-ui/admin-ui/dist、web-ui/user-ui/dist 编译期内嵌
 
 # 测试（600 个，全部为各模块内联 #[cfg(test)] mod tests）
 cargo test                        # 全部
@@ -32,7 +32,7 @@ cargo clippy
 RUST_LOG=debug cargo run     # 调试日志直跑（默认读工作目录 config.json）
 ```
 
-前端改动需先 `cd admin-ui && pnpm install && pnpm build`（admin-ui 用 pnpm）或 `cd user-ui && npm install && npm run build`，dist 产物不存在时 release 构建会失败。
+前端改动需先 `cd web-ui/admin-ui && pnpm install && pnpm build`（admin-ui 用 pnpm）或 `cd web-ui/user-ui && npm install && npm run build`，dist 产物不存在时 release 构建会失败。
 
 ## 架构
 
