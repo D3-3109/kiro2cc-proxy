@@ -53,7 +53,10 @@ pub fn create_router_with_provider_and_state(
 
 fn build_router(state: AppState) -> Router {
     // 不需要认证的公开路由
-    let public_routes = Router::new().route("/v1/ping", get(ping));
+    let public_routes = Router::new()
+        .route("/v1/ping", get(ping))
+        // Claude Code 启动时会探测 HEAD /api/hello 判断服务可达性，未注册会产生 404 日志
+        .route("/api/hello", get(ping));
 
     // 需要认证的 /v1 路由
     let v1_routes = Router::new()
@@ -97,6 +100,13 @@ fn build_router(state: AppState) -> Router {
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("-"),
                     )
+                })
+                .on_request(|request: &axum::http::Request<_>, _span: &tracing::Span| {
+                    tracing::info!(
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        "request"
+                    );
                 })
                 .on_response(
                     |response: &axum::http::Response<_>,
