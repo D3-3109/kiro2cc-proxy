@@ -597,6 +597,16 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
           <div className="flex items-center gap-[5px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3">
             <Link2 className="size-[13px] shrink-0" />
             {t('apiKeys.connCcBaseUrlLabel')}
+            {/* 标题行复制按钮：与下方「复制」按钮共用 copiedType 反馈，成功时转 ok 色 */}
+            <button
+              type="button"
+              aria-label={t('apiKeys.connCopyCcUrl')}
+              title={t('apiKeys.connCopyCcUrl')}
+              onClick={() => copyToClipboard(window.location.origin, 'cc')}
+              className="inline-flex size-[18px] flex-none items-center justify-center rounded-[4px] transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >
+              {copiedType === 'cc' ? <Check className="size-[12px] text-ok" /> : <Copy className="size-[12px] hover:text-ink" />}
+            </button>
           </div>
           <div className="mt-1 truncate font-mono text-[14px] font-medium tracking-[-.01em]">
             <span className="text-ink-3">{`${window.location.protocol}//`}</span>
@@ -608,6 +618,15 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
           <div className="flex items-center gap-[5px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3">
             <Link2 className="size-[13px] shrink-0" />
             {t('apiKeys.connCodexBaseUrlLabel')}
+            <button
+              type="button"
+              aria-label={t('apiKeys.connCopyCodexUrl')}
+              title={t('apiKeys.connCopyCodexUrl')}
+              onClick={() => copyToClipboard(`${window.location.origin}/v1`, 'codex')}
+              className="inline-flex size-[18px] flex-none items-center justify-center rounded-[4px] transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >
+              {copiedType === 'codex' ? <Check className="size-[12px] text-ok" /> : <Copy className="size-[12px] hover:text-ink" />}
+            </button>
           </div>
           <div className="mt-1 truncate font-mono text-[14px] font-medium tracking-[-.01em]">
             <span className="text-ink-3">{`${window.location.protocol}//`}</span>
@@ -631,25 +650,6 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
               </span>
             ))}
           </div>
-        </div>
-        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
-          {/* 复制成功时图标转 ok 色：基类 [&_svg]:text-ink-3 特异性更高，必须同修饰符组覆盖 */}
-          <Button
-            variant="outline"
-            className={copiedType === 'cc' ? '[&_svg]:text-ok hover:[&_svg]:text-ok' : ''}
-            onClick={() => copyToClipboard(window.location.origin, 'cc')}
-          >
-            {copiedType === 'cc' ? <Check /> : <Copy />}
-            {t('apiKeys.connCopyCcUrl')}
-          </Button>
-          <Button
-            variant="outline"
-            className={copiedType === 'codex' ? '[&_svg]:text-ok hover:[&_svg]:text-ok' : ''}
-            onClick={() => copyToClipboard(`${window.location.origin}/v1`, 'codex')}
-          >
-            {copiedType === 'codex' ? <Check /> : <Copy />}
-            {t('apiKeys.connCopyCodexUrl')}
-          </Button>
         </div>
       </section>
       {/* 指标条（设计稿 .metrics） */}
