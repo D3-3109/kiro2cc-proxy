@@ -597,13 +597,13 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
           <div className="flex items-center gap-[5px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3">
             <Link2 className="size-[13px] shrink-0" />
             {t('apiKeys.connCcBaseUrlLabel')}
-            {/* 标题行复制按钮：与下方「复制」按钮共用 copiedType 反馈，成功时转 ok 色 */}
+            {/* 标题行复制按钮：copiedType 反馈复制成功；max-lg 扩大触屏点击区（视觉尺寸不变） */}
             <button
               type="button"
               aria-label={t('apiKeys.connCopyCcUrl')}
               title={t('apiKeys.connCopyCcUrl')}
               onClick={() => copyToClipboard(window.location.origin, 'cc')}
-              className="inline-flex size-[18px] flex-none items-center justify-center rounded-[4px] transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              className="relative inline-flex size-[18px] flex-none items-center justify-center rounded-[4px] transition-colors after:absolute after:-inset-2 after:content-[''] hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand max-lg:after:-inset-[14px]"
             >
               {copiedType === 'cc' ? <Check className="size-[12px] text-ok" /> : <Copy className="size-[12px] hover:text-ink" />}
             </button>
@@ -623,7 +623,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
               aria-label={t('apiKeys.connCopyCodexUrl')}
               title={t('apiKeys.connCopyCodexUrl')}
               onClick={() => copyToClipboard(`${window.location.origin}/v1`, 'codex')}
-              className="inline-flex size-[18px] flex-none items-center justify-center rounded-[4px] transition-colors hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              className="relative inline-flex size-[18px] flex-none items-center justify-center rounded-[4px] transition-colors after:absolute after:-inset-2 after:content-[''] hover:bg-surface-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand max-lg:after:-inset-[14px]"
             >
               {copiedType === 'codex' ? <Check className="size-[12px] text-ok" /> : <Copy className="size-[12px] hover:text-ink" />}
             </button>
