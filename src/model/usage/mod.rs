@@ -172,9 +172,15 @@ impl UsageTracker {
         let lifetime_path = lifetime_path_for(&path);
         let (lifetime_keys, lifetime_credentials) = match &lifetime_path {
             Some(p) if p.exists() => {
-                let content = fs::read_to_string(p).unwrap_or_default();
+                // 文件存在但不可读/不可解析时向上传播错误，禁止以零基数启动：
+                // 静默归零后一旦再发生裁剪，会把小基数写回并覆盖历史累计量
+                let content = fs::read_to_string(p)?;
                 match serde_json::from_str::<HashMap<String, LifetimeTotals>>(&content) {
-                    // 文件按 str(id) 存储（JSON 对象键不支持数字键），读回转 u32/u64
+                    // 文件存在但为空：零基数起步（现存明细仍由 get_summary
+                    // 现存求和计入，基数若也计现存记录会导致请求数翻倍）
+                    Ok(raw) if raw.is_empty() || content.trim().is_empty() => {
+                        (HashMap::new(), HashMap::new())
+                    }
                     Ok(raw) if !raw.is_empty() => {
                         let keys = raw
                             .iter()
@@ -184,9 +190,15 @@ impl UsageTracker {
                         // 与 credential #3）；当前 credential 侧仅内存态，不落盘恢复
                         (keys, HashMap::new())
                     }
-                    // 文件存在但为空/损坏：零基数起步（现存明细仍由 get_summary
-                    // 现存求和计入，基数若也计现存记录会导致请求数翻倍）
-                    _ => (HashMap::new(), HashMap::new()),
+                    // 文件存在但格式损坏：向上传播错误，禁止以零基数启动（同上）
+                    Err(e) => {
+                        return Err(anyhow::anyhow!(
+                            "解析累计基数文件 {} 失败: {}",
+                            p.display(),
+                            e
+                        ));
+                    }
+                    Ok(_) => (HashMap::new(), HashMap::new()),
                 }
             }
             // 存量部署首次升级：零基数迁移（同上，现存记录由明细求和计入）
@@ -491,11 +503,17 @@ impl UsageTracker {
 
     /// 获取所有 API Key 的用量概览
     pub fn get_all_summaries(&self) -> Vec<UsageSummary> {
-        let records = self.records.read();
-        let mut key_ids: Vec<u32> = records.iter().map(|r| r.api_key_id).collect();
+        // 枚举明细与累计基数的 ID 并集：仅剩基数（明细被全部裁剪）的 Key
+        // 也要出现在概览中，否则管理 UI 会把该 Key 显示为 0
+        let mut key_ids: Vec<u32> = {
+            let records = self.records.read();
+            let lifetime = self.lifetime_keys.read();
+            let mut ids: Vec<u32> = records.iter().map(|r| r.api_key_id).collect();
+            ids.extend(lifetime.keys().copied());
+            ids
+        };
         key_ids.sort();
         key_ids.dedup();
-        drop(records);
 
         key_ids.iter().map(|&id| self.get_summary(id)).collect()
     }

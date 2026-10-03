@@ -269,12 +269,21 @@ mod tests {
             // 等待后台任务把脏数据落盘（周期 5s 太长，直接触发 shutdown 刷盘：
             // drop tracker 即关闭通道，graceful shutdown 分支会执行落盘）
         }
-        // 轮询等待基数文件生成（graceful shutdown 刷盘是异步的，固定 sleep 不保证完成）；
-        // 明细由同一 shutdown 分支先落盘，基数文件就绪时明细也应就绪
+        // 轮询等待刷盘完成。不能仅等基数文件存在：后台先处理 interval tick 时
+        // （局部 dirty 尚为 false）可能只写基数、不写明细，此时明细文件可能
+        // 还未就绪；改为等待明细文件落盘且记录数达到上限，配合基数文件存在的
+        // 前置条件，两者都就绪才认为 shutdown 刷盘完成
         let lifetime_path = path.parent().unwrap().join("api_key_lifetime.json");
         let mut persisted = false;
         for _ in 0..100 {
-            if lifetime_path.exists() {
+            let records_ready = std::fs::read_to_string(&path)
+                .map(|c| {
+                    serde_json::from_str::<Vec<crate::model::usage::UsageRecord>>(&c)
+                        .map(|r| r.len() == crate::model::usage::MAX_RECORDS_PER_KEY_FOR_TEST)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if records_ready && lifetime_path.exists() {
                 persisted = true;
                 break;
             }
