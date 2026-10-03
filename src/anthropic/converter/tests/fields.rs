@@ -383,11 +383,22 @@ fn test_additional_fields_skipped_for_unsupported_third_party_models() {
     // "additionalModelRequestFields is not supported for this model" 拒绝，
     // 需整体跳过；minimax-m2.1 实测可正常携带（200 OK），不得误伤。
     use super::super::thinking::additional_fields_skipped;
+    use crate::anthropic::converter::map_model;
 
-    for model in ["qwen3-coder-next", "glm-5", "deepseek-3.2", "minimax-m2.5"] {
+    // 混入客户端真实请求名（别名），验证「别名 → map_model 归一 → 谓词」完整链路
+    for model in [
+        "qwen3-coder-next",
+        "qwen3-coder", // 别名 → qwen3-coder-next
+        "glm-5",
+        "glm-4.6", // 别名 → glm-5
+        "deepseek-3.2",
+        "deepseek-v3.2", // 别名 → deepseek-3.2
+        "minimax-m2.5",
+    ] {
+        let mapped = map_model(model).unwrap_or_else(|| model.to_string());
         assert!(
-            additional_fields_skipped(model),
-            "{model} 应跳过 additionalModelRequestFields"
+            additional_fields_skipped(&mapped),
+            "{model} (映射为 {mapped}) 应跳过 additionalModelRequestFields"
         );
         let req = MessagesRequest {
             model: model.to_string(),

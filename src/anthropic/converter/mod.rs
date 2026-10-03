@@ -96,6 +96,7 @@ mod tools;
 mod websearch;
 
 pub use convert::convert_request;
+pub(crate) use model::map_model;
 pub use result::{ConversionError, ConversionResult};
 
 pub(crate) use thinking::{additional_fields_skipped, is_gpt_model, is_luna_model};

@@ -196,9 +196,11 @@ pub async fn post_messages(
     // 每请求仅此一条 thinking 状态日志（流式 token 转发阶段不再输出）。
     // 双维度区分"客户端请求"与"实际生效"：
     // - 请求：客户端是否携带 thinking（enabled/adaptive），未携带 = 关闭
-    // - 生效：请求开启且模型代际支持注入（4.5 代际整体跳过字段、GPT 系走
-    //   reasoning.effort、luna 强制关闭，见 converter/thinking.rs 与
-    //   resolve_thinking_enabled），否则标注不生效原因
+    // - 生效：请求开启且模型实际支持注入。判定顺序与真实生效链路一致：
+    //   luna 强制关闭（resolve_thinking_enabled）→ GPT 系走 reasoning.effort →
+    //   4.5 代际 / 第三方模型整体跳过字段（additional_fields_skipped）。
+    //   注意必须用 map_model 归一化后的规范名判定——payload.model 是客户端
+    //   原始名（如别名 "glm-4.6"），直接传谓词会判不准。
     let requested = payload
         .thinking
         .as_ref()
@@ -206,16 +208,18 @@ pub async fn post_messages(
         .unwrap_or(false);
     let effective = if !requested {
         "关闭"
-    } else if thinking_enabled {
-        "开启"
     } else if is_luna_model(&payload.model) {
         "不生效(luna不支持)"
     } else if is_gpt_model(&payload.model) {
         "不生效(GPT系走reasoning.effort)"
-    } else if additional_fields_skipped(&payload.model) {
-        "不生效(4.5代际跳过)"
     } else {
-        "不生效(模型不支持)"
+        let mapped = crate::anthropic::converter::map_model(&payload.model)
+            .unwrap_or_else(|| payload.model.clone());
+        if additional_fields_skipped(&mapped) {
+            "不生效(模型不支持该字段)"
+        } else {
+            "开启"
+        }
     };
     tracing::info!(
         model = %payload.model,

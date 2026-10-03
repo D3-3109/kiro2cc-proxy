@@ -9,9 +9,13 @@ pub(crate) fn is_gpt_model(model_id: &str) -> bool {
 
 /// `additionalModelRequestFields` 结构化字段的整体跳过谓词（单一来源）。
 ///
-/// "4.5" 代际（sonnet/opus/haiku）被 Kiro 后端拒绝该字段，需整体跳过。
-/// GPT 系已改为发送 `reasoning.effort` 独立结构（见 `fields.rs`），
-/// 不再属于"整体跳过"范畴，故本谓词仅保留 "4.5" 代际跳过条件。
+/// 命中任一条件即整体跳过该字段：
+/// 1. "4.5" 代际（sonnet/opus/haiku）——Kiro 后端拒绝该字段；
+/// 2. 第三方非 Claude 模型（qwen3-coder-next / glm-5 / deepseek-3.2 /
+///    minimax-m2.5）——实测 400 "additionalModelRequestFields is not
+///    supported for this model"（2026-10-03）；minimax-m2.1 为对照组，不跳过。
+///
+/// GPT 系不在此列：已改为发送 `reasoning.effort` 独立结构（见 `fields.rs`）。
 /// converter 侧 `build_additional_model_request_fields` 与 provider 侧
 /// thinking adaptive 注入共用本谓词，避免排除条件双份硬编码漂移。
 pub(crate) fn additional_fields_skipped(model_id: &str) -> bool {
