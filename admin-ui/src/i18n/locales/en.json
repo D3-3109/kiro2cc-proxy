@@ -97,7 +97,7 @@
     "toastSelectToVerify": "Please select accounts to verify first",
     "toastVerifyCancelled": "Verification cancelled",
     "toastVerifyDone": "Verification complete: {{success}}/{{total}} succeeded",
-    "updateAvailable": "New version available, click to visit Releases"
+    "updateAvailable": "New version available, click to update"
   },
   "credentials": {
     "metricPoolLabel": "Account pool",
