@@ -6,12 +6,23 @@ mod tests {
     use crate::model::usage::{UsageTracker, calculate_cost, get_k_ref};
     use std::collections::HashMap;
 
+    /// 每个测试使用独立目录隔离明细文件与累计基数文件（api_key_lifetime.json
+    /// 固定落在明细同目录，仅隔离文件名会让所有测试共享/互踩同一累计文件）
     fn temp_usage_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "kiro2cc_usage_test_{}_{}.json",
+        let dir = std::env::temp_dir().join(format!(
+            "kiro2cc_usage_test_{}_{}",
             name,
             uuid::Uuid::new_v4()
-        ))
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("api_key_usage.json")
+    }
+
+    /// 清理测试独立目录（明细与累计基数同目录）
+    fn cleanup_usage_path(path: &std::path::Path) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[tokio::test]
@@ -44,7 +55,7 @@ mod tests {
             None,
         );
         assert!((tracker.get_total_credits(1) - 4.43).abs() < 1e-9);
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     #[tokio::test]
@@ -67,7 +78,7 @@ mod tests {
         let expected_cost = calculate_cost("claude-sonnet-4.5", 1_000_000, 0);
         let expected_credits = expected_cost * get_k_ref("claude-sonnet-4.5");
         assert!((tracker.get_total_credits(1) - expected_credits).abs() < 1e-9);
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     #[tokio::test]
@@ -101,7 +112,7 @@ mod tests {
         assert!((tracker.get_total_credits(1) - 5.0).abs() < 1e-9);
         assert!((tracker.get_total_credits(2) - 99.0).abs() < 1e-9);
         assert_eq!(tracker.get_total_credits(3), 0.0);
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     #[tokio::test]
@@ -122,7 +133,7 @@ mod tests {
         );
         let summary = tracker.get_summary(1);
         assert!((summary.total_credits - tracker.get_total_credits(1)).abs() < 1e-9);
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     #[tokio::test]
@@ -163,7 +174,7 @@ mod tests {
         );
         // None 兜底：未传 output_config 的旧请求 effort 保持 None
         assert!(page.records.iter().any(|r| r.effort.is_none()));
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     #[test]
@@ -207,7 +218,7 @@ mod tests {
         let summary = tracker.get_summary(9);
         assert_eq!(summary.total_requests, total as u64);
         // 现存明细恰好为上限条数
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     /// 回归：reset 后请求数从 0 重新计数（基数同步清零）
@@ -232,7 +243,7 @@ mod tests {
         assert!(tracker.get_summary(8).total_requests > 0);
         tracker.reset(8).unwrap();
         assert_eq!(tracker.get_summary(8).total_requests, 0);
-        let _ = std::fs::remove_file(&path);
+        cleanup_usage_path(&path);
     }
 
     /// 回归：生命周期基数持久化后重启不丢（裁剪掉的部分仍计入请求数）
@@ -258,11 +269,28 @@ mod tests {
             // 等待后台任务把脏数据落盘（周期 5s 太长，直接触发 shutdown 刷盘：
             // drop tracker 即关闭通道，graceful shutdown 分支会执行落盘）
         }
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // 轮询等待基数文件生成（graceful shutdown 刷盘是异步的，固定 sleep 不保证完成）；
+        // 明细由同一 shutdown 分支先落盘，基数文件就绪时明细也应就绪
+        let lifetime_path = path.parent().unwrap().join("api_key_lifetime.json");
+        let mut persisted = false;
+        for _ in 0..100 {
+            if lifetime_path.exists() {
+                persisted = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            persisted,
+            "lifetime base file should be written on shutdown"
+        );
         let tracker2 = UsageTracker::load(&path).unwrap();
-        // 明细文件在 5s 周期内可能尚未落盘，但基数文件由 shutdown 刷盘兜底；
-        // 至少应等于明细现存条数 + 基数
-        assert!(tracker2.get_summary(7).total_requests >= 1);
-        let _ = std::fs::remove_file(&path);
+        // 精确断言：明细（上限条）+ 基数（裁剪掉的 7 条）完整持久化，
+        // 基数文件缺失或仅靠现存明细求和都会在此失败
+        assert_eq!(
+            tracker2.get_summary(7).total_requests,
+            (crate::model::usage::MAX_RECORDS_PER_KEY_FOR_TEST + 7) as u64
+        );
+        cleanup_usage_path(&path);
     }
 }

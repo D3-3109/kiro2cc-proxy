@@ -228,20 +228,24 @@ impl UsageTracker {
                         }
                     }
                     _ = interval.tick() => {
+                        // 明细刷盘成功才清 dirty，失败则下个周期重试
                         if dirty {
                             if let Err(e) = Self::save_internal(&records_clone, &path_clone).await {
                                 tracing::error!("Failed to save usage: {}", e);
                             } else {
                                 dirty = false;
                             }
-                            // 累计计数仅在发生裁剪（基数变化）时落盘，频率与用量文件一致
-                            if lifetime_dirty.swap(false, Ordering::Relaxed)
-                                && let Err(e) = Self::save_lifetime_internal(
-                                    &lifetime_keys, &lifetime_credentials, &lifetime_path,
-                                ).await
-                            {
-                                tracing::error!("Failed to save lifetime totals: {}", e);
-                            }
+                        }
+                        // 累计计数仅在发生裁剪（基数变化）时落盘，独立于明细 dirty：
+                        // 明细长时间无新增时基数变化也要能落盘；写盘失败恢复脏标记，
+                        // 由下个周期重试（否则该次基数变化将永久丢失）
+                        if lifetime_dirty.swap(false, Ordering::Relaxed)
+                            && let Err(e) = Self::save_lifetime_internal(
+                                &lifetime_keys, &lifetime_credentials, &lifetime_path,
+                            ).await
+                        {
+                            lifetime_dirty.store(true, Ordering::Relaxed);
+                            tracing::error!("Failed to save lifetime totals: {}", e);
                         }
                     }
                 }
@@ -512,11 +516,13 @@ impl UsageTracker {
 
     /// 重置指定 API Key 的用量记录
     pub fn reset(&self, api_key_id: u32) -> anyhow::Result<()> {
+        // 与 record 一致的锁顺序：保持明细写锁直至基数清零，避免并发查询
+        // 在两段之间看到「仅剩基数」的不一致中间态（如 10,007 → 7 → 0）
         let mut records = self.records.write();
         records.retain(|r| r.api_key_id != api_key_id);
-        drop(records);
         // 基数同步清零，否则重置后请求数会直接回到重置前的累计值
         self.lifetime_keys.write().remove(&api_key_id);
+        drop(records);
         self.lifetime_dirty.store(true, Ordering::Relaxed);
         let _ = self.dirty_tx.send(());
         Ok(())
