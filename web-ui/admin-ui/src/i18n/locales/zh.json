@@ -650,6 +650,11 @@
     "adminPasswordHint": "修改后立即生效，旧密码将失效。修改 Admin Password 后需要用新密码重新登录。",
     "loadBalancingMode": "账号选择策略",
     "selectStrategyDesc": "优先级模式按账号优先级依次选取；均衡负载在可用账号之间轮转分摊请求。",
+    "suggestionMode": "Suggestion Mode 输入建议",
+    "suggestionModeDesc": "放行 Claude Code 每轮对话后自动发起的输入建议请求。开启：请求正常转发上游，按全量上下文计费，作用是会在 CC 输入框提示 AI 建议下条输入的内容；关闭（默认）：自动拦截并返回空响应，不产生任何消耗。",
+    "clientTokenPassthrough": "客户端 token 直通",
+    "clientTokenPassthroughDesc": "开启后 usage token 字段 1:1 上报真实值（适用于按显示值统计上下文占用的第三方客户端）；默认关闭，按 0.6657 缩放展示，Claude Code auto-compact 触发时机不变。",
+
     "priorityMode": "优先级模式",
     "balancedMode": "均衡负载",
     "switchedTo": "已切换为{{mode}}",

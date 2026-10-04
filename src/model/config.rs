@@ -157,6 +157,15 @@ pub struct Config {
     #[serde(default)]
     pub client_token_passthrough: bool,
 
+    /// Suggestion Mode 输入建议请求放行开关
+    ///
+    /// Claude Code 每轮主对话后会自动发起输入建议请求（末条消息以 `[SUGGESTION MODE`
+    /// 开头），携带全量上下文却只产出候选短语，转发上游按全价计费。
+    /// 默认 false：代理拦截并返回空响应（不转发、不计费）；
+    /// true：正常转发 Kiro 上游（保留客户端输入框建议短语功能）。
+    #[serde(default)]
+    pub forward_suggestion_mode: bool,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -232,6 +241,7 @@ impl Default for Config {
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
             client_token_passthrough: false,
+            forward_suggestion_mode: false,
             config_path: None,
         }
     }
@@ -290,6 +300,8 @@ impl Config {
     /// - `PROXY_PASSWORD`: 代理密码
     /// - `LOAD_BALANCING_MODE`: 负载均衡模式
     /// - `MODEL_CACHE_TTL_SECS`: /v1/models 动态列表缓存 TTL（秒）
+    /// - `CLIENT_TOKEN_PASSTHROUGH`: 客户端 token 直通开关
+    /// - `FORWARD_SUGGESTION_MODE`: Suggestion Mode 输入建议请求放行开关
     pub fn apply_env_overrides(&mut self) {
         if let Ok(v) = env::var("HOST") {
             self.host = v;
@@ -334,6 +346,11 @@ impl Config {
             && let Ok(b) = v.parse::<bool>()
         {
             self.client_token_passthrough = b;
+        }
+        if let Ok(v) = env::var("FORWARD_SUGGESTION_MODE")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.forward_suggestion_mode = b;
         }
 
         // CacheSimulationConfig 嵌套字段覆盖
@@ -403,6 +420,19 @@ mod tests {
     }
 
     #[test]
+    fn test_forward_suggestion_mode_default_false() {
+        // 缺省该字段时必须为 false（拦截 Suggestion Mode，维持零计费默认行为）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(!config.forward_suggestion_mode);
+    }
+
+    #[test]
+    fn test_forward_suggestion_mode_deserialize_explicit() {
+        let config: Config = serde_json::from_str(r#"{"forwardSuggestionMode": true}"#).unwrap();
+        assert!(config.forward_suggestion_mode);
+    }
+
+    #[test]
     fn test_client_token_passthrough_env_override() {
         // 环境变量覆盖 config.json（容器化部署场景）。
         // 通过子进程注入环境变量验证：cargo test 默认并行运行其他测试，
@@ -426,6 +456,30 @@ mod tests {
             ])
             .env(CHILD_MARKER, "1")
             .env("CLIENT_TOKEN_PASSTHROUGH", "true")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_forward_suggestion_mode_env_override() {
+        // 环境变量覆盖 config.json（容器化部署场景），子进程隔离规避 set_var UB
+        const CHILD_MARKER: &str = "KIRO_CONFIG_ENV_TEST_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.apply_env_overrides();
+            assert!(config.forward_suggestion_mode);
+            return;
+        }
+
+        let status = std::process::Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model::config::tests::test_forward_suggestion_mode_env_override",
+                "--test-threads=1",
+            ])
+            .env(CHILD_MARKER, "1")
+            .env("FORWARD_SUGGESTION_MODE", "true")
             .status()
             .unwrap();
         assert!(status.success());

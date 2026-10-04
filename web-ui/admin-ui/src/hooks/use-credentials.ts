@@ -10,6 +10,10 @@ import {
   deleteCredential,
   updateCredential,
   getLoadBalancingMode,
+  getSuggestionMode,
+  setSuggestionMode,
+  getClientTokenPassthrough,
+  setClientTokenPassthrough,
   setLoadBalancingMode,
   getServerInfo,
   getApiKeys,
@@ -157,7 +161,45 @@ export function useSetLoadBalancingMode() {
   })
 }
 
+// 获取 Suggestion Mode 放行开关
+export function useSuggestionMode() {
+  return useQuery({
+    queryKey: ['suggestionMode'],
+    queryFn: getSuggestionMode,
+  })
+}
+
+// 设置 Suggestion Mode 放行开关
+export function useSetSuggestionMode() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: setSuggestionMode,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['suggestionMode'] })
+    },
+  })
+}
+
 // ============ API Key Hooks ============
+
+// 获取客户端 token 直通开关
+export function useClientTokenPassthrough() {
+  return useQuery({
+    queryKey: ['clientTokenPassthrough'],
+    queryFn: getClientTokenPassthrough,
+  })
+}
+
+// 设置客户端 token 直通开关
+export function useSetClientTokenPassthrough() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: setClientTokenPassthrough,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clientTokenPassthrough'] })
+    },
+  })
+}
 
 // 获取服务器信息
 export function useServerInfo() {

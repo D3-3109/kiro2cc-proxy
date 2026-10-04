@@ -20,7 +20,8 @@ use bytes::Bytes;
 use super::bridge::build_bridge_context;
 use super::error::parse_messages_request;
 use super::helpers::{
-    extract_client_ip, override_thinking_from_model_name, resolve_thinking_enabled,
+    extract_client_ip, is_suggestion_mode_request, override_thinking_from_model_name,
+    resolve_thinking_enabled, suggestion_mode_response,
 };
 use super::nonstream::handle_non_stream_request;
 use super::stream::handle_stream_request;
@@ -40,6 +41,22 @@ pub async fn post_messages(
         Ok(p) => p,
         Err(resp) => return resp,
     };
+
+    // 拦截 Claude Code 输入建议请求（Suggestion Mode）：不转发 Kiro，直接返回空响应。
+    // 这类请求携带全量上下文却只产出候选短语，转发会按全价计费且污染 prompt cache。
+    // forward_suggestion_mode=true 时放行，正常转发上游（设置页可运行时热切换）。
+    if !state
+        .forward_suggestion_mode
+        .load(std::sync::atomic::Ordering::Relaxed)
+        && is_suggestion_mode_request(&payload)
+    {
+        tracing::info!(
+            message_count = %payload.messages.len(),
+            "拦截 Suggestion Mode 输入建议请求，返回空响应（不转发上游）"
+        );
+        return suggestion_mode_response(payload.stream);
+    }
+
     tracing::info!(
         model = %payload.model,
         max_tokens = %payload.max_tokens,

@@ -117,6 +117,30 @@ export async function setLoadBalancingMode(mode: 'priority' | 'balanced'): Promi
   return data
 }
 
+// 获取 Suggestion Mode 放行开关
+export async function getSuggestionMode(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>('/config/suggestion-mode')
+  return data
+}
+
+// 设置 Suggestion Mode 放行开关
+export async function setSuggestionMode(enabled: boolean): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/suggestion-mode', { enabled })
+  return data
+}
+
+// 获取客户端 token 直通开关
+export async function getClientTokenPassthrough(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>('/config/client-token-passthrough')
+  return data
+}
+
+// 设置客户端 token 直通开关
+export async function setClientTokenPassthrough(enabled: boolean): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/client-token-passthrough', { enabled })
+  return data
+}
+
 // ============ 服务器信息 ============
 
 // 获取服务器信息

@@ -274,6 +274,38 @@ pub struct SetLoadBalancingModeRequest {
     pub mode: String,
 }
 
+/// Suggestion Mode 放行开关查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestionModeResponse {
+    /// 是否放行 Suggestion Mode 输入建议请求
+    pub enabled: bool,
+}
+
+/// 设置 Suggestion Mode 放行开关请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSuggestionModeRequest {
+    /// 是否放行 Suggestion Mode 输入建议请求
+    pub enabled: bool,
+}
+
+/// 客户端 token 直通开关查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientTokenPassthroughResponse {
+    /// 是否直通真实 usage（true 1:1 上报，false 按 0.6657 展示缩放）
+    pub enabled: bool,
+}
+
+/// 设置客户端 token 直通开关请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetClientTokenPassthroughRequest {
+    /// 是否直通真实 usage（true 1:1 上报，false 按 0.6657 展示缩放）
+    pub enabled: bool,
+}
+
 // ============ 通用响应 ============
 
 /// 操作成功响应

@@ -158,3 +158,194 @@ pub async fn count_tokens(
         input_tokens: total_tokens.max(1),
     })
 }
+
+/// 检测 Claude Code 的输入建议请求（Suggestion Mode）。
+///
+/// 此类请求是客户端在每轮主对话结束后自动发起的"预测用户下一条输入"辅助请求，
+/// 携带完整 50k+ 上下文却只产出几条候选短语。经 Kiro 全量转发会按全价计费
+/// （metering ~0.37 credits/次），且其末条消息会导致 history[0] 前缀指纹漂移、
+/// 干扰主对话的 prompt cache。这里识别后直接返回空文本响应，不转发上游。
+///
+/// 判据：最后一条消息为 user 且文本以 `[SUGGESTION MODE` 标记开头（该标记
+/// 固定位于消息首部，用 starts_with 而非 contains 降低误伤面）。
+pub(crate) fn is_suggestion_mode_request(payload: &MessagesRequest) -> bool {
+    payload
+        .messages
+        .last()
+        .filter(|m| m.role == "user")
+        .is_some_and(|m| match &m.content {
+            serde_json::Value::String(s) => s.starts_with("[SUGGESTION MODE"),
+            serde_json::Value::Array(blocks) => blocks.iter().any(|b| {
+                b.get("text")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| t.starts_with("[SUGGESTION MODE"))
+            }),
+            _ => false,
+        })
+}
+
+/// 为建议请求构造空响应（按 stream 分流）。
+///
+/// 流式：返回完整 SSE 事件序列（message_start + 空 text 块 + end_turn 收尾）。
+/// 非流式：返回等价的 JSON message 对象。
+///
+/// Claude Code 对该响应只取候选文本，空文本等价于"无建议"；返回结构完整的
+/// 正常响应而非错误，避免客户端把建议失败当主对话故障重试。
+pub(crate) fn suggestion_mode_response(stream: bool) -> axum::response::Response {
+    if !stream {
+        return axum::response::Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({
+                    "id": "msg_suggestion",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "" }],
+                    "model": "suggestion",
+                    "stop_reason": "end_turn",
+                    "stop_sequence": null,
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 1,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap();
+    }
+
+    use crate::anthropic::stream::SseEvent;
+
+    let events = [
+        SseEvent::new(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {
+                    "id": format!("msg_suggestion_{}", std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or_default()),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": "suggestion",
+                    "stop_reason": null,
+                    "stop_sequence": null,
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 1,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0
+                    }
+                }
+            }),
+        ),
+        SseEvent::new(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": { "type": "text", "text": "" }
+            }),
+        ),
+        SseEvent::new(
+            "content_block_stop",
+            serde_json::json!({ "type": "content_block_stop", "index": 0 }),
+        ),
+        SseEvent::new(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": { "stop_reason": "end_turn", "stop_sequence": null },
+                "usage": { "input_tokens": 0, "output_tokens": 1 }
+            }),
+        ),
+        SseEvent::new(
+            "message_stop",
+            serde_json::json!({ "type": "message_stop" }),
+        ),
+    ];
+
+    let body = events
+        .iter()
+        .map(|e| e.to_sse_string())
+        .collect::<Vec<_>>()
+        .join("");
+
+    axum::http::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "text/event-stream")
+        .header(axum::http::header::CACHE_CONTROL, "no-cache")
+        .body(axum::body::Body::from(body))
+        .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn request_with_last_message(role: &str, content: serde_json::Value) -> MessagesRequest {
+        serde_json::from_value(json!({
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 1024,
+            "messages": [
+                { "role": "user", "content": "hi" },
+                { "role": "assistant", "content": "hello" },
+                { "role": role, "content": content }
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn suggestion_string_content_hit() {
+        let p = request_with_last_message(
+            "user",
+            json!("[SUGGESTION MODE: Suggest what the user might naturally type next.]"),
+        );
+        assert!(is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn suggestion_block_content_hit() {
+        let p = request_with_last_message(
+            "user",
+            json!([{ "type": "text", "text": "[SUGGESTION MODE: suggest next input]" }]),
+        );
+        assert!(is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn suggestion_marker_not_at_start_misses() {
+        let p = request_with_last_message("user", json!("请问 [SUGGESTION MODE 是什么协议？"));
+        assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn assistant_role_misses() {
+        let p = request_with_last_message("assistant", json!("[SUGGESTION MODE: ...]"));
+        assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn empty_messages_miss() {
+        let p: MessagesRequest = serde_json::from_value(json!({
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 1024,
+            "messages": []
+        }))
+        .unwrap();
+        assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn normal_user_message_misses() {
+        let p = request_with_last_message("user", json!("帮我看看这个 bug"));
+        assert!(!is_suggestion_mode_request(&p));
+    }
+}

@@ -47,6 +47,11 @@ pub struct AdminState {
     pub config_path: Option<PathBuf>,
     /// IP 归属地解析器（可选）
     pub geo_resolver: Option<Arc<GeoResolver>>,
+    /// Suggestion Mode 输入建议请求放行开关（与 anthropic AppState 共享同一 Arc 实例）
+    pub suggestion_mode: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// config.json 持久化互斥锁：所有 persist_* 写回共享同一把锁，
+    /// 防止并发 PUT（如同时改密钥与开关）的读改写互相覆盖导致字段丢失
+    pub persist_lock: Arc<parking_lot::Mutex<()>>,
 }
 
 impl AdminState {
@@ -62,6 +67,8 @@ impl AdminState {
             log_capture: None,
             config_path: None,
             geo_resolver: None,
+            suggestion_mode: None,
+            persist_lock: Arc::new(parking_lot::Mutex::new(())),
         }
     }
 
@@ -102,6 +109,11 @@ impl AdminState {
 
     pub fn with_geo_resolver(mut self, resolver: Arc<GeoResolver>) -> Self {
         self.geo_resolver = Some(resolver);
+        self
+    }
+
+    pub fn with_suggestion_mode(mut self, flag: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.suggestion_mode = Some(flag);
         self
     }
 }

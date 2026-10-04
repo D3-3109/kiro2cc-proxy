@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { PageHead } from '@/components/page-head'
 import {
   useLoadBalancingMode, useSetLoadBalancingMode,
+  useSuggestionMode, useSetSuggestionMode,
+  useClientTokenPassthrough, useSetClientTokenPassthrough,
   useAuthKeys, useSetAuthKeys,
 } from '@/hooks/use-credentials'
 import { extractErrorMessage } from '@/lib/utils'
@@ -145,15 +147,16 @@ function Seg<T extends string>({
 }
 
 /** 布尔开关（设计稿 .sw） */
-function Sw({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+function Sw({ label, on, onToggle, disabled }: { label: string; on: boolean; onToggle: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       onClick={onToggle}
-      className={`${SW} ${on ? 'bg-brand' : 'bg-track'}`}
+      className={`${SW} ${on ? 'bg-brand' : 'bg-track'} disabled:pointer-events-none disabled:opacity-50`}
     >
       <span className={`${SW_DOT} ${on ? 'right-0.5' : 'left-0.5'}`} />
     </button>
@@ -180,6 +183,10 @@ export function SettingsPanel({
   const { t, i18n } = useTranslation()
   const { data: loadBalancingData, isLoading: isLoadingMode } = useLoadBalancingMode()
   const { mutate: setLoadBalancingMode, isPending: isSettingMode } = useSetLoadBalancingMode()
+  const { data: suggestionModeData, isLoading: isLoadingSuggestionMode } = useSuggestionMode()
+  const { mutate: setSuggestionMode, isPending: isSettingSuggestionMode } = useSetSuggestionMode()
+  const { data: tokenPassthroughData, isLoading: isLoadingTokenPassthrough } = useClientTokenPassthrough()
+  const { mutate: setTokenPassthrough, isPending: isSettingTokenPassthrough } = useSetClientTokenPassthrough()
   const { data: authKeysData, isLoading: isLoadingAuthKeys } = useAuthKeys()
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
   const [adminPswDraft, setAdminPswDraft] = useState('')
@@ -238,6 +245,32 @@ export function SettingsPanel({
               ]}
               onSelect={changeMode}
               disabled={isLoadingMode || isSettingMode}
+            />
+          </Row>
+          <Row label={t('settings.suggestionMode')} desc={t('settings.suggestionModeDesc')}>
+            <Sw
+              label={t('settings.suggestionMode')}
+              on={!!suggestionModeData?.enabled}
+              disabled={isLoadingSuggestionMode || isSettingSuggestionMode}
+              onToggle={() =>
+                setSuggestionMode(!suggestionModeData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
+            />
+          </Row>
+          <Row label={t('settings.clientTokenPassthrough')} desc={t('settings.clientTokenPassthroughDesc')}>
+            <Sw
+              label={t('settings.clientTokenPassthrough')}
+              on={!!tokenPassthroughData?.enabled}
+              disabled={isLoadingTokenPassthrough || isSettingTokenPassthrough}
+              onToggle={() =>
+                setTokenPassthrough(!tokenPassthroughData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
             />
           </Row>
         </Section>

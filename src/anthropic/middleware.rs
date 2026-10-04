@@ -57,6 +57,11 @@ pub struct AppState {
     pub fingerprint_tracker: Option<Arc<crate::cache::fingerprint::FingerprintTracker>>,
     /// `/v1/models` 动态列表缓存（TTL 见 `Config::model_cache_ttl_secs`），初始为空
     pub model_cache: Arc<RwLock<Option<CachedModels>>>,
+    /// Suggestion Mode 输入建议请求放行开关（初始值来自 Config::forward_suggestion_mode）
+    ///
+    /// Arc<AtomicBool> 支持运行时热切换：Admin API（PUT /api/admin/config/suggestion-mode）
+    /// 修改后即时生效，无需重启；请求 handler 每次读取最新值。
+    pub forward_suggestion_mode: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -70,6 +75,7 @@ impl AppState {
             rpm_tracker: None,
             fingerprint_tracker: None,
             model_cache: Arc::new(RwLock::new(None)),
+            forward_suggestion_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -100,6 +106,22 @@ impl AppState {
     /// 设置 RPM 追踪器
     pub fn with_rpm_tracker(mut self, tracker: Arc<RpmTracker>) -> Self {
         self.rpm_tracker = Some(tracker);
+        self
+    }
+
+    /// 设置 Suggestion Mode 放行开关（初始值；main.rs 实际通过 `_arc` 版本注入共享实例）
+    pub fn with_forward_suggestion_mode(self, forward: bool) -> Self {
+        self.forward_suggestion_mode
+            .store(forward, std::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
+    /// 替换为外部共享的开关实例（与 AdminState 共用同一 Arc，实现热切换联动）
+    pub fn with_forward_suggestion_mode_arc(
+        mut self,
+        flag: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.forward_suggestion_mode = flag;
         self
     }
 

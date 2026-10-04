@@ -203,9 +203,21 @@ async fn main() {
             .fingerprint_max_breakpoints_per_account
     );
 
+    // Suggestion Mode 放行开关：anthropic AppState 与 AdminState 共享同一 Arc 实例，
+    // Admin API（PUT /api/admin/config/suggestion-mode）修改后即时生效
+    let suggestion_mode = Arc::new(std::sync::atomic::AtomicBool::new(
+        config.forward_suggestion_mode,
+    ));
     let mut anthropic_app_state = anthropic::middleware::AppState::new()
         .with_rpm_tracker(rpm_tracker.clone())
+        .with_forward_suggestion_mode(config.forward_suggestion_mode)
+        .with_forward_suggestion_mode_arc(suggestion_mode.clone())
         .with_fingerprint_tracker(fingerprint_tracker.clone());
+    if config.forward_suggestion_mode {
+        tracing::info!(
+            "Suggestion Mode 输入建议请求已放行（forward_suggestion_mode=true），将正常转发上游"
+        );
+    }
     if let Some(ref manager) = api_key_manager {
         anthropic_app_state = anthropic_app_state.with_api_key_manager(manager.clone());
     }
@@ -248,6 +260,7 @@ async fn main() {
             admin_state = admin_state.with_throttle_log_store(throttle_log_store.clone());
             admin_state = admin_state.with_failure_log_store(failure_log_store.clone());
             admin_state = admin_state.with_log_capture(log_capture.clone());
+            admin_state = admin_state.with_suggestion_mode(suggestion_mode.clone());
             let admin_app = admin::create_admin_router(admin_state);
 
             // 创建 Admin UI 路由

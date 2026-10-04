@@ -16,9 +16,10 @@ use super::{
     changelog::get_changelog,
     handlers::{
         add_credential, delete_credential, get_all_credentials, get_auth_keys,
-        get_credential_balance, get_geo_batch, get_load_balancing_mode, reset_failure_count,
-        set_auth_keys, set_credential_disabled, set_credential_priority, set_load_balancing_mode,
-        update_credential,
+        get_client_token_passthrough, get_credential_balance, get_geo_batch,
+        get_load_balancing_mode, get_suggestion_mode, reset_failure_count, set_auth_keys,
+        set_client_token_passthrough, set_credential_disabled, set_credential_priority,
+        set_load_balancing_mode, set_suggestion_mode, update_credential,
     },
     log_handler::{download_logs, snapshot_logs, stream_logs},
     middleware::{AdminState, admin_auth_middleware},
@@ -56,6 +57,14 @@ pub fn create_admin_router(state: AdminState) -> Router {
             get(get_load_balancing_mode).put(set_load_balancing_mode),
         )
         .route("/config/auth-keys", get(get_auth_keys).put(set_auth_keys))
+        .route(
+            "/config/suggestion-mode",
+            get(get_suggestion_mode).put(set_suggestion_mode),
+        )
+        .route(
+            "/config/client-token-passthrough",
+            get(get_client_token_passthrough).put(set_client_token_passthrough),
+        )
         .route("/server-info", get(get_server_info))
         .route("/api-keys", get(list_api_keys).post(create_api_key))
         .route("/api-keys/usage", get(get_all_usage))

@@ -650,6 +650,11 @@
     "adminPasswordHint": "Takes effect immediately; the old password will stop working. You'll need to log in again after changing the Admin Password.",
     "loadBalancingMode": "Account Selection Strategy",
     "selectStrategyDesc": "Priority Mode picks accounts in priority order; Balanced Load rotates requests across available accounts.",
+    "suggestionMode": "Suggestion Mode",
+    "suggestionModeDesc": "Controls Claude Code's automatic input-suggestion request after each turn. On: forwarded upstream at full context cost, surfacing AI-suggested next input in the CC prompt box. Off (default): intercepted with an empty response, zero usage.",
+    "clientTokenPassthrough": "Client Token Passthrough",
+    "clientTokenPassthroughDesc": "When enabled, usage token fields are reported 1:1 with real values (for third-party clients that compute context usage from displayed values); when disabled (default), they are scaled by 0.6657 for display, keeping Claude Code auto-compact timing unchanged.",
+
     "priorityMode": "Priority Mode",
     "balancedMode": "Balanced Load",
     "switchedTo": "Switched to {{mode}}",
