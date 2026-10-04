@@ -67,6 +67,32 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.7".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "设置页新增 Suggestion Mode（输入建议拦截）与客户端 token 直通热切换开关",
+                        "Settings page adds hot-toggle switches for Suggestion Mode interception and client token passthrough",
+                    ),
+                    Bilingual::new(
+                        "设置页新增 maxRPM、端口、代理地址三项运行时配置，免重启即时生效",
+                        "Settings page adds maxRPM, port, and proxy URL runtime config, taking effect without restart",
+                    ),
+                ]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复配置文件原子替换丢失原文件权限、三处热更新与磁盘写入顺序不一致的问题",
+                        "Fixed atomic config replacement losing original file permissions and three hot-update ordering inconsistencies with disk writes",
+                    ),
+                    Bilingual::new(
+                        "修复建议模式识别可能误吞正常多块消息的问题",
+                        "Fixed suggestion-mode detection potentially swallowing normal multi-block messages",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.6".to_string(),
             is_latest: false,
             groups: vec![
