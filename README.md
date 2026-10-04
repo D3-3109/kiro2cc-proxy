@@ -504,7 +504,7 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 | `tlsBackend` | 否 | `rustls` | TLS 后端：`rustls` 或 `native-tls` |
 | `loadBalancingMode` | 否 | `priority` | `priority`（按优先级）或 `balanced`（轮询） |
 | `clientTokenPassthrough` | 否 | `false` | 客户端 token 直通：`true` 时返回给客户端的 `usage` 字段 1:1 上报真实值，不再按展示缩放系数（约 0.7）缩放。面向按显示值计算上下文占用的第三方客户端（如 Pi agent，见 Issue #44）。开启后 Claude Code 的 auto-compact 会提前触发，Claude Code 用户建议保持默认；可用环境变量 `CLIENT_TOKEN_PASSTHROUGH` 覆盖 |
-| `thinkingAsText` | 否 | `false` | 思考内容文本化（仅 Claude Code 客户端）：`true` 时把 thinking 块改写为 markdown 引用文本逐行流式展示（类似 Kiro CLI），解决 CC 默认折叠/隐藏 thinking 导致长推理期间像卡住的问题。回传历史中这些文本会被自动剥离，上游看不到；代价是客户端上下文包含这些文本，auto-compact 会更早触发。可用环境变量 `THINKING_AS_TEXT` 覆盖 |
+| `thinkingAsText` | 否 | `false` | 思考内容文本化（仅 Claude Code 客户端）：`true` 时把 thinking 块改写为 markdown 引用文本、以 ANSI 变暗（灰色）样式逐行流式展示（类似 Kiro CLI），解决 CC 默认折叠/隐藏 thinking 导致长推理期间像卡住的问题。回传历史中这些文本会被自动剥离，上游看不到；代价是客户端上下文包含这些文本，auto-compact 会更早触发。可用环境变量 `THINKING_AS_TEXT` 覆盖 |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
 

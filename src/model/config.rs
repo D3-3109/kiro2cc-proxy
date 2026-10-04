@@ -169,7 +169,8 @@ pub struct Config {
     /// 思考内容文本化展示（仅 Claude Code 客户端）
     ///
     /// Claude Code 默认隐藏/折叠 thinking，长推理期间界面像卡住。开启后，出站 SSE 的
-    /// thinking 块被改写为 markdown 引用文本块逐行流式输出（类似 Kiro CLI 的展示）；
+    /// thinking 块被改写为 markdown 引用文本块，以 ANSI 变暗（灰色）样式逐行流式输出
+    /// （类似 Kiro CLI 的展示；转义字符是否生效取决于客户端渲染）；
     /// 回传的历史里这些文本会被自动剥离，上游看不到。默认 false（保持原生 thinking 块）。
     /// 副作用：客户端自己的上下文会包含这些文本，auto-compact 会更早触发。
     #[serde(default)]

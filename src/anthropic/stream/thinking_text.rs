@@ -6,6 +6,9 @@
 //! SSE 中的 thinking 块改写为普通 text 块（markdown 引用，逐行流式输出），使思考过程
 //! 像 Kiro CLI 一样实时可见。
 //!
+//! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
+//! 是否生效取决于客户端是否放行转义字符。
+//!
 //! 代价：这些文本块会被客户端当作 assistant 正文存入对话历史并随后续请求回传。
 //! 回传时由 `converter::history::convert_assistant_message` 识别 [`THOUGHT_HEADER`]
 //! 并剥离，上游模型不会看到自己的旧思考（与原生 thinking 块在历史中被剥离的语义一致）。
@@ -20,6 +23,10 @@ use super::state::SseEvent;
 /// 文本化思考块的首行标记。同时是历史剥离的识别依据，修改需保持两侧一致。
 pub(crate) const THOUGHT_HEADER: &str = "> 💭 Thinking\n";
 
+/// ANSI：变暗开始 / 复位（dim 样式，仅包在每行内容两侧，不跨行）
+const DIM_ON: &str = "\x1b[2m";
+const DIM_OFF: &str = "\x1b[0m";
+
 static THINKING_AS_TEXT: AtomicBool = AtomicBool::new(false);
 
 /// 启动时由 main 根据配置设置（进程级，与 `set_client_token_passthrough` 同模式）
@@ -32,6 +39,14 @@ pub fn thinking_as_text_enabled() -> bool {
     THINKING_AS_TEXT.load(Ordering::Relaxed)
 }
 
+/// 判断文本是否以渲染出的思考首行开头（兼容 dim 样式的转义包裹）
+fn starts_with_rendered_header(text: &str) -> bool {
+    let Some((first, _)) = text.split_once('\n') else {
+        return false;
+    };
+    first.replace(DIM_ON, "").replace(DIM_OFF, "") == THOUGHT_HEADER.trim_end_matches('\n')
+}
+
 /// 仅对 Claude Code 客户端生效：OpenAI 兼容端点等其他调用方需要保留原生 thinking 语义
 pub fn is_claude_code_client(headers: &axum::http::HeaderMap) -> bool {
     headers
@@ -42,10 +57,10 @@ pub fn is_claude_code_client(headers: &axum::http::HeaderMap) -> bool {
 
 /// 剥离历史 text 块中由本模块渲染的思考前缀。
 ///
-/// 仅当文本以 [`THOUGHT_HEADER`] 开头时处理：移除开头连续以 `>` 起始的行
+/// 仅当文本首行是 [`THOUGHT_HEADER`]（允许被 dim 转义包裹）时处理：移除开头连续以 `>` 起始的行
 /// （渲染时每行都带 `> ` 前缀，含空行），保留其后的正文。无前缀时原样返回。
 pub(crate) fn strip_rendered_thinking(text: &str) -> &str {
-    if !text.starts_with(THOUGHT_HEADER) {
+    if !starts_with_rendered_header(text) {
         return text;
     }
     let mut rest = text;
@@ -115,17 +130,27 @@ impl ThinkingTextRewriter {
                     }
                     let mut rendered = String::new();
                     if self.header_sent.insert(i) {
-                        rendered.push_str(THOUGHT_HEADER);
+                        // 首行：`> ` + dim(💭 Thinking)；去掉转义后等于 THOUGHT_HEADER
+                        rendered.push_str("> ");
+                        rendered.push_str(DIM_ON);
+                        rendered.push_str(THOUGHT_HEADER.trim_start_matches("> ").trim_end());
+                        rendered.push_str(DIM_OFF);
+                        rendered.push('\n');
                     }
                     let at_start = self.at_line_start.entry(i).or_insert(true);
                     for ch in text.chars() {
                         if *at_start {
                             rendered.push_str("> ");
+                            rendered.push_str(DIM_ON);
                             *at_start = false;
                         }
-                        rendered.push(ch);
                         if ch == '\n' {
+                            // 换行前复位，样式不跨行
+                            rendered.push_str(DIM_OFF);
+                            rendered.push('\n');
                             *at_start = true;
+                        } else {
+                            rendered.push(ch);
                         }
                     }
                     out.push(SseEvent::new(
@@ -139,7 +164,17 @@ impl ThinkingTextRewriter {
                 }
                 ("content_block_stop", Some(i)) if self.indices.remove(&i) => {
                     self.header_sent.remove(&i);
-                    self.at_line_start.remove(&i);
+                    // 块在行中间结束时补一个复位，避免 dim 样式泄漏到后续正文
+                    if self.at_line_start.remove(&i) == Some(false) {
+                        out.push(SseEvent::new(
+                            "content_block_delta",
+                            json!({
+                                "type": "content_block_delta",
+                                "index": i,
+                                "delta": {"type": "text_delta", "text": DIM_OFF}
+                            }),
+                        ));
+                    }
                     out.push(event);
                 }
                 _ => out.push(event),
@@ -172,6 +207,11 @@ mod tests {
         )
     }
 
+    /// 去掉 dim 转义，便于断言可见文本
+    fn plain(s: &str) -> String {
+        s.replace(DIM_ON, "").replace(DIM_OFF, "")
+    }
+
     fn text_of(events: &[SseEvent]) -> String {
         events
             .iter()
@@ -191,7 +231,7 @@ mod tests {
         ]));
         assert_eq!(out[0].data["content_block"]["type"], "text");
         assert_eq!(
-            text_of(&out),
+            plain(&text_of(&out)),
             "> 💭 Thinking\n> first line\n> second\n> \n> third"
         );
         assert!(
@@ -294,12 +334,38 @@ mod tests {
                 .collect();
             if enabled {
                 assert!(!has_thinking, "开启后不应再出现 thinking 块/delta");
-                assert_eq!(all_text, "> 💭 Thinking\n> 第一行\n> 第二行最终答案");
+                assert_eq!(
+                    plain(&all_text),
+                    "> 💭 Thinking\n> 第一行\n> 第二行最终答案"
+                );
             } else {
                 assert!(has_thinking, "关闭时保持原生 thinking 块");
                 assert_eq!(all_text, "最终答案");
             }
         }
+    }
+
+    #[test]
+    fn dim_style_wraps_each_line_and_resets_at_block_end() {
+        let mut r = ThinkingTextRewriter::new();
+        let mut out = r.rewrite(vec![start(0, "thinking")]);
+        out.extend(r.rewrite(vec![
+            delta(0, "thinking_delta", "thinking", "ab\n\ncd"),
+            stop(0),
+        ]));
+        let text = text_of(&out);
+        assert_eq!(
+            text,
+            "> \x1b[2m💭 Thinking\x1b[0m\n> \x1b[2mab\x1b[0m\n> \x1b[2m\x1b[0m\n> \x1b[2mcd\x1b[0m"
+        );
+        // 行中结束 → 末尾补复位；stop 事件仍在最后
+        assert_eq!(out.last().unwrap().event, "content_block_stop");
+        // dim 渲染的内容同样能被历史剥离识别
+        assert_eq!(strip_rendered_thinking(&text), "");
+        assert_eq!(
+            strip_rendered_thinking(&format!("{text}\nanswer")),
+            "answer"
+        );
     }
 
     #[test]
