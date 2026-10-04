@@ -472,7 +472,7 @@ Lower `priority` value = higher priority. Up to 3 retries per account, 9 per req
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `host` | No | `127.0.0.1` | Listen address; `0.0.0.0` allows external/LAN access |
-| `port` | No | `5678` | Listen port |
+| `port` | No | `8080` (`5678` when written by the local setup scripts) | Listen port; changes from the settings page are written to `config.json` and take effect after restart |
 | `region` | No | `us-east-1` | AWS region |
 | `authRegion` | No | same as `region` | Region used for token refresh |
 | `apiRegion` | No | same as `region` | Region used for API requests |
@@ -482,7 +482,10 @@ Lower `priority` value = higher priority. Up to 3 retries per account, 9 per req
 | `proxyPassword` | No | — | Proxy password |
 | `tlsBackend` | No | `rustls` | TLS backend: `rustls` or `native-tls` |
 | `loadBalancingMode` | No | `priority` | `priority` (by priority) or `balanced` (round-robin) |
-| `clientTokenPassthrough` | No | `false` | Client token passthrough: when `true`, `usage` fields returned to the client are reported 1:1 with real values instead of being scaled by the display factor (~0.7). Intended for third-party clients that compute context usage from displayed values (e.g. Pi agent, see Issue #44). Enabling this makes Claude Code's auto-compact trigger earlier — Claude Code users should keep the default; can be overridden with the `CLIENT_TOKEN_PASSTHROUGH` env var |
+| `maxRpmPerCredential` | No | `0` | Maximum requests per minute for each account; `0` means unlimited. Saving from the settings page applies it immediately and persists it to `config.json` |
+| `forwardSuggestionMode` | No | `false` | Suggestion Mode input-prediction switch. With the default `false`, the proxy intercepts Claude Code's automatic full-context prediction request after each turn and returns an empty response without Token usage. `true` forwards it upstream to show input suggestions, but each turn incurs one additional full-context billed request. Override with `FORWARD_SUGGESTION_MODE` |
+| `clientTokenPassthrough` | No | `false` | Client token passthrough: `true` reports returned `usage` fields 1:1 with real values; the default `false` displays values scaled by `0.6657`. It supports third-party clients that calculate context usage from returned usage values. Claude Code's auto-compact trigger timing remains unchanged in either mode. Override with `CLIENT_TOKEN_PASSTHROUGH` |
+| `thinkingAsText` | No | `false` | Thinking-as-text display for Claude Code only. `true` rewrites thinking blocks into markdown quote text streamed line by line with ANSI dim (gray) styling, similar to Kiro CLI. This avoids Claude Code appearing stalled while native thinking is folded. The text is stripped from returned history before reaching upstream, but remains in Claude Code's context and can make auto-compact happen earlier. Override with `THINKING_AS_TEXT` |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -491,15 +494,31 @@ Full example:
 ```json
 {
   "host": "0.0.0.0",
-  "port": 5678,
+  "port": 8080,
   "region": "us-east-1",
   "adminPsw": "my-admin-password",
   "proxyUrl": "http://127.0.0.1:7890",
   "tlsBackend": "rustls",
   "loadBalancingMode": "priority",
-  "clientTokenPassthrough": false
+  "maxRpmPerCredential": 0,
+  "forwardSuggestionMode": false,
+  "clientTokenPassthrough": false,
+  "thinkingAsText": false
 }
 ```
+
+### Runtime Settings in the Admin Panel
+
+After configuring `adminPsw`, the Admin settings page manages the following options. Each save persists the value to `config.json`.
+
+| Setting | `config.json` field | Behavior after saving |
+|---------|---------------------|-----------------------|
+| Suggestion Mode input suggestions | `forwardSuggestionMode` | Applies immediately |
+| Client token passthrough | `clientTokenPassthrough` | Applies immediately |
+| Thinking-as-text display | `thinkingAsText` | Applies immediately to subsequent requests only |
+| Per-account RPM limit | `maxRpmPerCredential` | Applies immediately; `0` means unlimited |
+| Listen port | `port` | Takes effect after restart; valid range: `1–65535` |
+| Upstream proxy URL | `proxyUrl` | Takes effect after restart; accepts `http`, `https`, and `socks5`; empty disables the proxy |
 
 > **Client authentication**: `config.json` no longer provides a global API key. Clients calling `/v1/messages` or `/cc/v1/messages` must authenticate with a sub API key created and enabled in the admin panel (login with `adminPsw`). Note: if `adminPsw` is left unset, the admin panel itself is disabled — you won't be able to create sub API keys until it's configured.
 

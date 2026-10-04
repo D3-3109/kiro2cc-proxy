@@ -493,7 +493,7 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 | 字段 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `host` | 否 | `127.0.0.1` | 监听地址，`0.0.0.0` 允许外网/局域网访问 |
-| `port` | 否 | `5678` | 监听端口 |
+| `port` | 否 | `8080`（本地启动脚本默认写入 `5678`） | 监听端口；通过设置页修改后写入 `config.json`，重启后生效 |
 | `region` | 否 | `us-east-1` | AWS 区域 |
 | `authRegion` | 否 | 同 `region` | Token 刷新使用的区域 |
 | `apiRegion` | 否 | 同 `region` | API 请求使用的区域 |
@@ -503,7 +503,9 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 | `proxyPassword` | 否 | — | 代理密码 |
 | `tlsBackend` | 否 | `rustls` | TLS 后端：`rustls` 或 `native-tls` |
 | `loadBalancingMode` | 否 | `priority` | `priority`（按优先级）或 `balanced`（轮询） |
-| `clientTokenPassthrough` | 否 | `false` | 客户端 token 直通：`true` 时返回给客户端的 `usage` 字段 1:1 上报真实值，不再按展示缩放系数（约 0.7）缩放。面向按显示值计算上下文占用的第三方客户端（如 Pi agent，见 Issue #44）。开启后 Claude Code 的 auto-compact 会提前触发，Claude Code 用户建议保持默认；可用环境变量 `CLIENT_TOKEN_PASSTHROUGH` 覆盖 |
+| `maxRpmPerCredential` | 否 | `0` | 单个账号每分钟最大请求数；`0` 表示不限。设置页保存后立即热生效并写入 `config.json` |
+| `forwardSuggestionMode` | 否 | `false` | Suggestion Mode 输入建议请求放行开关。`false`（默认）时服务端拦截 Claude Code 每轮对话后自动发起的全量上下文预测请求并返回空响应，不产生 Token 消耗；`true` 时正常转发上游，以展示输入建议，但每轮会额外产生一次全量上下文计费请求。可用环境变量 `FORWARD_SUGGESTION_MODE` 覆盖 |
+| `clientTokenPassthrough` | 否 | `false` | 客户端 token 直通：`true` 时返回给客户端的 `usage` 字段 1:1 上报真实值；`false`（默认）时按 `0.6657` 系数缩放展示。适用于按返回用量统计上下文占用的第三方客户端；无论开关状态如何，Claude Code 的 auto-compact 触发时机保持不变。可用环境变量 `CLIENT_TOKEN_PASSTHROUGH` 覆盖 |
 | `thinkingAsText` | 否 | `false` | 思考内容文本化（仅 Claude Code 客户端）：`true` 时把 thinking 块改写为 markdown 引用文本、以 ANSI 变暗（灰色）样式逐行流式展示（类似 Kiro CLI），解决 CC 默认折叠/隐藏 thinking 导致长推理期间像卡住的问题。回传历史中这些文本会被自动剥离，上游看不到；代价是客户端上下文包含这些文本，auto-compact 会更早触发。可用环境变量 `THINKING_AS_TEXT` 覆盖 |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
@@ -513,15 +515,31 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 ```json
 {
   "host": "0.0.0.0",
-  "port": 5678,
+  "port": 8080,
   "region": "us-east-1",
   "adminPsw": "my-admin-password",
   "proxyUrl": "http://127.0.0.1:7890",
   "tlsBackend": "rustls",
   "loadBalancingMode": "priority",
-  "clientTokenPassthrough": false
+  "maxRpmPerCredential": 0,
+  "forwardSuggestionMode": false,
+  "clientTokenPassthrough": false,
+  "thinkingAsText": false
 }
 ```
+
+### 设置页的运行时配置
+
+配置 `adminPsw` 后，可在 Admin 设置页直接管理以下选项；每次保存都会写回 `config.json`。
+
+| 设置 | `config.json` 字段 | 保存后的行为 |
+|------|-------------------|--------------|
+| Suggestion Mode 输入建议 | `forwardSuggestionMode` | 立即热生效 |
+| 客户端 token 直通 | `clientTokenPassthrough` | 立即热生效 |
+| 思考内容文本化展示 | `thinkingAsText` | 立即热生效，仅影响之后的新请求 |
+| 每账号 RPM 上限 | `maxRpmPerCredential` | 立即热生效，`0` 表示不限 |
+| 监听端口 | `port` | 重启服务后生效，范围为 `1–65535` |
+| 上游代理地址 | `proxyUrl` | 重启服务后生效；支持 `http`、`https`、`socks5`，留空表示不使用代理 |
 
 > **客户端鉴权说明**：`config.json` 不再提供全局 API Key。客户端调用 `/v1/messages`、`/cc/v1/messages` 时，需使用 Admin 后台（`adminPsw` 登录）创建并启用的子 API Key 进行鉴权。注：若未配置 `adminPsw`，Admin 面板本身将被禁用，无法创建子 API Key，需先完成配置。
 
