@@ -489,7 +489,22 @@ fn persist_config_field(
     #[cfg(not(unix))]
     std::fs::write(&tmp_path, &output)?;
 
-    std::fs::rename(&tmp_path, config_path)?;
+    if let Err(e) = std::fs::rename(&tmp_path, config_path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        // config.json 是单文件挂载点（Docker bind mount / 平台配置文件挂载）时，
+        // rename 覆盖会返回 EBUSY（Resource busy, os error 16）。降级为原地写入：
+        // 非原子，但保留 inode 与权限，且比持久化失败更可取。
+        if crate::common::fs::is_replace_blocked(&e) {
+            tracing::warn!(
+                "rename 覆盖 {} 失败（{}），降级为原地写入",
+                config_path.display(),
+                e
+            );
+            crate::common::fs::write_in_place(config_path, output.as_bytes())?;
+            return Ok(());
+        }
+        return Err(e.into());
+    }
     Ok(())
 }
 
