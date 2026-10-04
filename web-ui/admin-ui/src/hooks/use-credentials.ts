@@ -14,6 +14,8 @@ import {
   setSuggestionMode,
   getClientTokenPassthrough,
   setClientTokenPassthrough,
+  getThinkingAsText,
+  setThinkingAsText,
   getRuntimeConfig,
   setRuntimeConfig,
   setLoadBalancingMode,
@@ -220,6 +222,25 @@ export function useSetClientTokenPassthrough() {
     mutationFn: setClientTokenPassthrough,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clientTokenPassthrough'] })
+    },
+  })
+}
+
+// 获取思考文本化开关
+export function useThinkingAsText() {
+  return useQuery({
+    queryKey: ['thinkingAsText'],
+    queryFn: getThinkingAsText,
+  })
+}
+
+// 设置思考文本化开关
+export function useSetThinkingAsText() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: setThinkingAsText,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['thinkingAsText'] })
     },
   })
 }

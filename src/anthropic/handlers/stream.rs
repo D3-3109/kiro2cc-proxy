@@ -47,6 +47,8 @@ pub(crate) async fn handle_stream_request(
     bridge_ctx: Option<BridgeContext>,
     // 请求的 effort 级别（output_config 存在时取值，否则 None），随 usage 记录入库
     effort: Option<String>,
+    // 思考文本化：thinking 块改写为 text 块逐行展示（配置开启且客户端为 Claude Code）
+    thinking_as_text: bool,
 ) -> Response {
     // 调用 Kiro API（支持多账号故障转移）
     let (response, credential_id) = match provider
@@ -67,7 +69,8 @@ pub(crate) async fn handle_stream_request(
         .with_usage_tracking(usage_tracker, api_key_id, Some(credential_id), client_ip)
         .with_prompt_cache_usage(prompt_cache_usage)
         .with_prefix_estimated_tokens(prefix_estimated_tokens)
-        .with_effort(effort);
+        .with_effort(effort)
+        .with_thinking_as_text(thinking_as_text);
 
     // 生成初始事件
     let initial_events = ctx.generate_initial_events();

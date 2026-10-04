@@ -446,3 +446,46 @@ fn test_client_workflow_tool_descriptions_are_not_augmented() {
         assert_eq!(tool.tool_specification.description, description);
     }
 }
+
+#[test]
+fn test_rendered_thinking_text_blocks_stripped_from_assistant_history() {
+    // thinkingAsText 开启时，客户端会把渲染出的思考 text 块当正文回传；
+    // 转换时必须剥离，上游只看到真正的回答与 tool_use
+    use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
+    let req = MessagesRequest {
+        model: "claude-sonnet-4-6".to_string(),
+        max_tokens: 2048,
+        messages: vec![
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q1"),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([
+                    {"type": "text", "text": "> 💭 Thinking\n> secret reasoning\n> \n> more"},
+                    {"type": "text", "text": "visible answer"},
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}
+                ]),
+            },
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!([
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}
+                ]),
+            },
+        ],
+        stream: false,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    };
+    let r = convert_request(&req).unwrap();
+    let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
+    assert!(hist.contains("visible answer"));
+    assert!(!hist.contains("secret reasoning"), "{hist}");
+    assert!(!hist.contains("Thinking"), "{hist}");
+}

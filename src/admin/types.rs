@@ -306,6 +306,22 @@ pub struct SetClientTokenPassthroughRequest {
     pub enabled: bool,
 }
 
+/// 思考文本化开关查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThinkingAsTextResponse {
+    /// 是否把 Claude Code 的 thinking 块改写为引用文本逐行展示
+    pub enabled: bool,
+}
+
+/// 设置思考文本化开关请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetThinkingAsTextRequest {
+    /// 是否把 Claude Code 的 thinking 块改写为引用文本逐行展示
+    pub enabled: bool,
+}
+
 /// 运行时配置（maxRpm / port / proxyUrl）查询响应
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

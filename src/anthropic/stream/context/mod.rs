@@ -90,6 +90,8 @@ pub struct StreamContext {
     prefix_estimated_tokens: Option<i32>,
     /// 请求的 effort 级别（output_config 存在时取值），随 usage 记录入库
     effort: Option<String>,
+    /// 思考文本化转换器（None = 关闭，出站事件原样输出）
+    thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
 }
 
 impl StreamContext {
@@ -101,6 +103,7 @@ impl StreamContext {
     ) -> Self {
         Self {
             state_manager: SseStateManager::new(),
+            thinking_text: None,
             model: model.into(),
             message_id: format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")),
             input_tokens,
@@ -145,6 +148,20 @@ impl StreamContext {
     pub fn with_prefix_estimated_tokens(mut self, prefix: i32) -> Self {
         self.prefix_estimated_tokens = Some(prefix);
         self
+    }
+
+    /// 开启思考文本化：出站 SSE 的 thinking 块改写为 text 块（见 `thinking_text` 模块）
+    pub fn with_thinking_as_text(mut self, enabled: bool) -> Self {
+        self.thinking_text = enabled.then(crate::anthropic::stream::ThinkingTextRewriter::new);
+        self
+    }
+
+    /// 出站事件统一经此处理：开启文本化时改写 thinking 块，否则原样返回
+    fn render_outbound(&mut self, events: Vec<SseEvent>) -> Vec<SseEvent> {
+        match self.thinking_text.as_mut() {
+            Some(rewriter) => rewriter.rewrite(events),
+            None => events,
+        }
     }
 
     /// 设置 effort 级别（随 usage 记录入库）
@@ -266,6 +283,11 @@ impl StreamContext {
 
     /// 处理 Kiro 事件并转换为 Anthropic SSE 事件
     pub fn process_kiro_event(&mut self, event: &Event) -> Vec<SseEvent> {
+        let events = self.process_kiro_event_raw(event);
+        self.render_outbound(events)
+    }
+
+    fn process_kiro_event_raw(&mut self, event: &Event) -> Vec<SseEvent> {
         match event {
             Event::AssistantResponse(resp) => self.process_assistant_response(&resp.content),
             Event::ReasoningContent(reasoning) => self.process_native_reasoning(reasoning),
@@ -722,6 +744,11 @@ impl StreamContext {
 
     /// 生成最终事件序列
     pub fn generate_final_events(&mut self) -> Vec<SseEvent> {
+        let events = self.generate_final_events_raw();
+        self.render_outbound(events)
+    }
+
+    fn generate_final_events_raw(&mut self) -> Vec<SseEvent> {
         let mut events = self.finish_native_thinking();
 
         // Flush thinking_buffer 中的剩余内容

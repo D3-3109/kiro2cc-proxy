@@ -8,6 +8,7 @@ mod helpers;
 mod state;
 mod tests;
 mod thinking;
+mod thinking_text;
 
 pub use calib::cap_input_tokens_pub;
 #[cfg(test)]
@@ -18,6 +19,10 @@ pub use context::StreamContext;
 pub(crate) use helpers::generate_fake_signature;
 pub use state::SseEvent;
 pub(crate) use thinking::split_thinking_and_visible;
+pub(crate) use thinking_text::strip_rendered_thinking;
+pub use thinking_text::{
+    ThinkingTextRewriter, is_claude_code_client, set_thinking_as_text, thinking_as_text_enabled,
+};
 
 #[cfg(test)]
 pub(crate) use calib::context_window_for_model;

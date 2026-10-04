@@ -285,6 +285,50 @@ pub async fn set_client_token_passthrough(
     .into_response()
 }
 
+/// GET /api/admin/config/thinking-as-text
+/// 获取思考文本化开关
+pub async fn get_thinking_as_text() -> impl IntoResponse {
+    Json(super::types::ThinkingAsTextResponse {
+        enabled: crate::anthropic::thinking_as_text_enabled(),
+    })
+}
+
+/// PUT /api/admin/config/thinking-as-text
+/// 设置思考文本化开关（运行时热切换并持久化到 config.json；仅影响之后的新请求）
+pub async fn set_thinking_as_text(
+    State(state): State<AdminState>,
+    Json(payload): Json<super::types::SetThinkingAsTextRequest>,
+) -> impl IntoResponse {
+    // 热更新在锁内执行，保证内存与磁盘写入顺序一致（见 set_suggestion_mode 注释）
+    let _guard = state.persist_lock.lock();
+    crate::anthropic::set_thinking_as_text(payload.enabled);
+    if let Some(ref config_path) = state.config_path
+        && let Err(e) = persist_thinking_as_text(config_path, payload.enabled)
+    {
+        tracing::error!("持久化思考文本化开关失败: {}", e);
+        let error = super::types::AdminErrorResponse::internal_error("持久化失败，但运行时已生效");
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!(error)),
+        )
+            .into_response();
+    }
+
+    Json(SuccessResponse::new(if payload.enabled {
+        "思考文本化已开启"
+    } else {
+        "思考文本化已关闭"
+    }))
+    .into_response()
+}
+
+/// 将思考文本化开关写回 config.json
+fn persist_thinking_as_text(config_path: &std::path::Path, enabled: bool) -> anyhow::Result<()> {
+    persist_config_field(config_path, |json| {
+        json["thinkingAsText"] = serde_json::Value::Bool(enabled);
+    })
+}
+
 /// 将 Suggestion Mode 开关写回 config.json
 fn persist_suggestion_mode(config_path: &std::path::Path, enabled: bool) -> anyhow::Result<()> {
     persist_config_field(config_path, |json| {
@@ -521,6 +565,27 @@ mod tests {
             json["clientTokenPassthrough"],
             serde_json::Value::Bool(false)
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_persist_thinking_as_text_roundtrip() {
+        let dir = temp_config_dir("tat");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, r#"{"host":"127.0.0.1"}"#).unwrap();
+
+        persist_thinking_as_text(&path, true).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["thinkingAsText"], serde_json::Value::Bool(true));
+        assert_eq!(json["host"], "127.0.0.1");
+
+        persist_thinking_as_text(&path, false).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["thinkingAsText"], serde_json::Value::Bool(false));
 
         std::fs::remove_dir_all(&dir).ok();
     }

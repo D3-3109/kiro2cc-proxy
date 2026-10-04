@@ -10,6 +10,7 @@ import {
   useLoadBalancingMode, useSetLoadBalancingMode,
   useSuggestionMode, useSetSuggestionMode,
   useClientTokenPassthrough, useSetClientTokenPassthrough,
+  useThinkingAsText, useSetThinkingAsText,
   useRuntimeConfig, useSetRuntimeConfig,
   useAuthKeys, useSetAuthKeys,
 } from '@/hooks/use-credentials'
@@ -188,6 +189,8 @@ export function SettingsPanel({
   const { mutate: setSuggestionMode, isPending: isSettingSuggestionMode } = useSetSuggestionMode()
   const { data: tokenPassthroughData, isLoading: isLoadingTokenPassthrough } = useClientTokenPassthrough()
   const { mutate: setTokenPassthrough, isPending: isSettingTokenPassthrough } = useSetClientTokenPassthrough()
+  const { data: thinkingAsTextData, isLoading: isLoadingThinkingAsText } = useThinkingAsText()
+  const { mutate: setThinkingAsText, isPending: isSettingThinkingAsText } = useSetThinkingAsText()
   const { data: authKeysData, isLoading: isLoadingAuthKeys } = useAuthKeys()
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
   const [adminPswDraft, setAdminPswDraft] = useState('')
@@ -344,6 +347,19 @@ export function SettingsPanel({
               disabled={isLoadingTokenPassthrough || isSettingTokenPassthrough}
               onToggle={() =>
                 setTokenPassthrough(!tokenPassthroughData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
+            />
+          </Row>
+          <Row label={t('settings.thinkingAsText')} desc={t('settings.thinkingAsTextDesc')}>
+            <Sw
+              label={t('settings.thinkingAsText')}
+              on={!!thinkingAsTextData?.enabled}
+              disabled={isLoadingThinkingAsText || isSettingThinkingAsText}
+              onToggle={() =>
+                setThinkingAsText(!thinkingAsTextData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
                   onError: (e) => toast.error(extractErrorMessage(e)),
                 })

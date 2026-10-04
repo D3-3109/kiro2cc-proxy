@@ -32,7 +32,10 @@ pub mod types;
 mod websearch;
 
 pub use router::create_router_with_provider_and_state;
-pub use stream::{client_token_passthrough_enabled, set_client_token_passthrough};
+pub use stream::{
+    client_token_passthrough_enabled, set_client_token_passthrough, set_thinking_as_text,
+    thinking_as_text_enabled,
+};
 
 #[cfg(test)]
 pub(crate) use converter::convert_request;

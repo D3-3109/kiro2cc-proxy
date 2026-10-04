@@ -64,6 +64,12 @@ async fn main() {
 
     // 客户端 token 直通开关（true 时 usage 字段 1:1 上报，见 Issue #44）
     anthropic::set_client_token_passthrough(config.client_token_passthrough);
+    anthropic::set_thinking_as_text(config.thinking_as_text);
+    if config.thinking_as_text {
+        tracing::info!(
+            "思考文本化已开启（thinkingAsText=true）：Claude Code 的 thinking 将以引用文本逐行展示"
+        );
+    }
     if config.client_token_passthrough {
         tracing::info!(
             "已启用客户端 token 直通（clientTokenPassthrough），usage 字段将 1:1 上报真实值"

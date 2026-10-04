@@ -237,6 +237,11 @@ pub async fn post_messages_cc(
     // effort 级别（output_config 整体存在时取 effort 字符串，否则 None）
     let effort = payload.output_config.as_ref().map(|c| c.effort.clone());
 
+    // 思考文本化仅对 Claude Code 客户端生效
+    let thinking_as_text = thinking_enabled
+        && crate::anthropic::stream::thinking_as_text_enabled()
+        && crate::anthropic::stream::is_claude_code_client(&headers);
+
     if payload.stream {
         // 流式响应：与 /v1 相同的实时转发，额外带 300s 全局 deadline
         // （上游挂起保护，沿用此端点历史上一直具备的 5min 上限）
@@ -257,6 +262,7 @@ pub async fn post_messages_cc(
             thinking_adaptive_requested,
             bridge_ctx,
             effort,
+            thinking_as_text,
         )
         .await
     } else {

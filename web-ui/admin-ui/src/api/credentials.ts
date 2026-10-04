@@ -165,6 +165,18 @@ export async function setClientTokenPassthrough(enabled: boolean): Promise<{ suc
   return data
 }
 
+// 获取思考文本化开关
+export async function getThinkingAsText(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>('/config/thinking-as-text')
+  return data
+}
+
+// 设置思考文本化开关
+export async function setThinkingAsText(enabled: boolean): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/thinking-as-text', { enabled })
+  return data
+}
+
 // ============ 服务器信息 ============
 
 // 获取服务器信息

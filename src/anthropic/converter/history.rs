@@ -255,7 +255,7 @@ pub(super) fn convert_assistant_message(
 
     match &msg.content {
         serde_json::Value::String(s) => {
-            text_content = s.clone();
+            text_content = crate::anthropic::stream::strip_rendered_thinking(s).to_string();
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
@@ -267,7 +267,11 @@ pub(super) fn convert_assistant_message(
                         "thinking" => {}
                         "text" => {
                             if let Some(text) = block.text {
-                                text_content.push_str(&text);
+                                // 剥离「思考文本化」渲染出的 text 块（thinkingAsText 开启时
+                                // 客户端会把它当正文存入历史并回传；上游不应看到旧思考）
+                                text_content.push_str(
+                                    crate::anthropic::stream::strip_rendered_thinking(&text),
+                                );
                             }
                         }
                         "tool_use" => {
