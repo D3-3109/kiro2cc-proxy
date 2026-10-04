@@ -15,6 +15,19 @@ export interface LogEntry {
 /** 前端环形缓冲上限；页面侧的容量指标卡直接复用此常量 */
 export const MAX_FRONT_LOGS = 2000
 
+const logKey = (e: LogEntry) => `${e.timestamp}|${e.level}|${e.target}|${e.message}`
+
+/**
+ * 把历史快照并入已有日志：快照在前，已有但快照里没有的条目（更新的实时日志）追加在后。
+ * 快照 / SSE history / 实时推送三路来源互相重叠，按内容去重，谁先到都不丢不重。
+ */
+function mergeHistory(prev: LogEntry[], entries: LogEntry[]): LogEntry[] {
+  if (prev.length === 0) return entries.slice(-MAX_FRONT_LOGS)
+  const seen = new Set(entries.map(logKey))
+  const extras = prev.filter((e) => !seen.has(logKey(e)))
+  return [...entries, ...extras].slice(-MAX_FRONT_LOGS)
+}
+
 export function useLogStream(enabled: boolean): {
   logs: LogEntry[]
   connected: boolean
@@ -28,7 +41,6 @@ export function useLogStream(enabled: boolean): {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectDelay = useRef(1000)
 
-  const historyReceivedRef = useRef(false)
   const pendingRef = useRef<LogEntry[]>([])
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -39,10 +51,13 @@ export function useLogStream(enabled: boolean): {
     const incoming = pendingRef.current
     pendingRef.current = []
     setLogs((prev) => {
-      const next = prev.length + incoming.length > MAX_FRONT_LOGS
-        ? [...prev, ...incoming].slice(-(MAX_FRONT_LOGS as number))
-        : [...prev, ...incoming]
-      return next
+      // 与快照 / history 可能重叠（订阅与取快照之间产生的日志），按内容去重
+      const seen = new Set(prev.map(logKey))
+      const fresh = incoming.filter((e) => !seen.has(logKey(e)))
+      if (fresh.length === 0) return prev
+      return prev.length + fresh.length > MAX_FRONT_LOGS
+        ? [...prev, ...fresh].slice(-MAX_FRONT_LOGS)
+        : [...prev, ...fresh]
     })
   }, [])
 
@@ -60,7 +75,16 @@ export function useLogStream(enabled: boolean): {
     const apiKey = storage.getApiKey()
     if (!apiKey) return
 
-    historyReceivedRef.current = false
+    // 立即 REST 取快照，不等 SSE 建立：反向代理 / CDN 缓冲 SSE 时，EventSource 的
+    // onopen 与 history 事件可能很久才到，等它们再取快照会导致日志页长时间空白
+    fetch(`/api/admin/logs/snapshot?api_key=${encodeURIComponent(apiKey)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((entries: LogEntry[]) => {
+        if (mountedRef.current && Array.isArray(entries)) {
+          setLogs((prev) => mergeHistory(prev, entries))
+        }
+      })
+      .catch(() => {})
 
     const es = new EventSource(
       `/api/admin/logs/stream?api_key=${encodeURIComponent(apiKey)}`
@@ -70,24 +94,13 @@ export function useLogStream(enabled: boolean): {
     es.onopen = () => {
       setConnected(true)
       reconnectDelay.current = 1000
-      // REST 获取初始快照，规避反向代理对 SSE body 的缓冲
-      fetch(`/api/admin/logs/snapshot?api_key=${encodeURIComponent(apiKey!)}`)
-        .then((r) => r.json())
-        .then((entries: LogEntry[]) => {
-          if (!historyReceivedRef.current && Array.isArray(entries)) {
-            historyReceivedRef.current = true
-            setLogs(entries)
-          }
-        })
-        .catch(() => {})
     }
 
     es.addEventListener('history', (e: MessageEvent) => {
       try {
         const entries: LogEntry[] = JSON.parse(e.data)
         if (Array.isArray(entries)) {
-          historyReceivedRef.current = true
-          setLogs(entries)
+          setLogs((prev) => mergeHistory(prev, entries))
         }
       } catch {
         // ignore malformed history payload
@@ -136,6 +149,7 @@ export function useLogStream(enabled: boolean): {
       return
     }
 
+    mountedRef.current = true
     connect()
 
     return () => {
