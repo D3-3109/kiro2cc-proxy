@@ -131,9 +131,9 @@ impl KiroProvider {
     /// 避免大请求体（Claude Code 场景可达数 MB）在链路内被多轮 parse/serialize。
     ///
     /// - JSON 解析失败 → 原样返回，不阻断请求
-    /// - `thinking_adaptive_requested`：客户端请求了 thinking（enabled 或 adaptive
-    ///   均视为已请求，语义见 converter 注入层），当前未被本函数消费（剥离仅由
-    ///   账号开关决定），保留参数以避免 retry.rs 透传链联动改动
+    /// - `thinking_adaptive_requested`：客户端请求了 adaptive thinking（与 converter
+    ///   注入层判定一致，enabled 不计入），当前未被本函数消费（剥离仅由账号开关
+    ///   决定），保留参数以避免 retry.rs 透传链联动改动
     /// - MCP 路径复用（`rewrite_profile_arn`）传 false；该 flag 不影响剥离判定，
     ///   thinking 字段的保留与否仅由账号开关 `thinkingAdaptive` 决定
     pub(crate) fn rewrite_request_body(
@@ -168,8 +168,6 @@ impl KiroProvider {
         // 此处按实际选中账号决定"该账号是否保留 thinking 字段"——
         // `thinkingAdaptive == false` 时剥离（含 converter 未注入的情形，无副作用），
         // 故障转移后按新账号重判，每次重试都以当次实际选中的账号状态为准。
-        // `thinking_adaptive_requested` 语义已扩展为"客户端请求了 thinking
-        // （enabled 或 adaptive 均视为已请求）"，透传链保留。
         // （旧模型类型判定 GPT 系 / "4.5" 代际已上移至 converter 注入层，不再重复。）
         let fields = obj.get_mut("additionalModelRequestFields");
         if let Some(fields) = fields.and_then(|f| f.as_object_mut())

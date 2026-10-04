@@ -61,19 +61,22 @@ pub(super) fn build_additional_model_request_fields(
 
     let mut fields = serde_json::Map::new();
 
-    // thinking 注入：客户端请求携带 thinking（enabled 或 adaptive，CC 常规请求走
-    // enabled）且模型为 Claude 系时，注入 `thinking: {"type": "adaptive"}`——这是
-    // Kiro 私有协议唯一实证接受的原生 thinking 形态（见
-    // `provider/errors.rs::rewrite_request_body` 现有实现），使上游产出
-    // reasoningContentEvent，进而经 `process_native_reasoning` 转发 thinking_delta。
-    // 注入值统一为 adaptive 型：文本标签协议的 enabled 型不适用于该结构化字段，
-    // 客户端请求的语义是"要思考"，上游协议形态由本代理决定。
-    // 账号级豁免（`thinkingAdaptive` 开关）在 provider 层按实际选中账号执行
-    // （converter 层不持有凭据），此处仅做模型侧判定。
+    // thinking 注入：仅当客户端请求的 thinking 类型为 adaptive 且模型为 Claude 系时，
+    // 注入 `thinking: {"type": "adaptive"}`（Kiro 私有协议唯一实证接受的原生 thinking
+    // 形态），使上游产出 reasoningContentEvent，经 `process_native_reasoning` 转发。
+    // 账号级开关（`thinkingAdaptive`）在 provider 层按实际选中账号执行剥离
+    // （converter 层不持有凭据），此处仅做请求/模型侧判定。
+    //
+    // 不得对 `enabled` 类型注入（v3.4.1 曾放宽到 enabled，导致客户端规则遵从性回退）：
+    // `enabled` 请求已由 `generate_thinking_prefix` 在 history[0] 注入
+    // `<thinking_mode>enabled</thinking_mode>` 文本标签协议；若再叠加原生 thinking
+    // 字段，同一请求同时携带两套互相独立的 thinking 控制信号（v3.4.0 及之前从未出现
+    // 的组合：enabled 只走文本标签，adaptive 只走原生字段），上游行为改变，
+    // CLAUDE.md / system-reminder 等客户端规则的遵从度随之下降。
     if req
         .thinking
         .as_ref()
-        .map(|t| t.is_enabled())
+        .map(|t| t.thinking_type == "adaptive")
         .unwrap_or(false)
     {
         fields.insert("thinking".into(), serde_json::json!({ "type": "adaptive" }));

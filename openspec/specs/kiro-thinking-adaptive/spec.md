@@ -32,18 +32,18 @@
 
 ### Requirement: 仅在开关开启且客户端请求 adaptive 时注入 thinking 字段
 
-Provider 层 SHALL 在确定账号（`CallContext`）后，对请求体执行账号开关判定：账号 `thinkingAdaptive == true` 且请求体含 `additionalModelRequestFields.thinking`（converter 按 enabled/adaptive 注入）时 SHALL 保留该字段；账号 `thinkingAdaptive == false` 时 SHALL 剥离该字段。`thinking_adaptive_requested` 标记的语义扩展为"客户端请求 thinking（enabled 或 adaptive）"，透传链保留。模型侧 GPT 系 / 4.5 代际排除条件已上移至 converter 注入层，provider 层 SHALL NOT 重复判定模型类型。
+Provider 层 SHALL 在确定账号（`CallContext`）后，对请求体执行账号开关判定：账号 `thinkingAdaptive == true` 且请求体含 `additionalModelRequestFields.thinking`（converter 仅对 adaptive 请求注入）时 SHALL 保留该字段；账号 `thinkingAdaptive == false` 时 SHALL 剥离该字段。`thinking_adaptive_requested` 标记语义为"客户端请求 adaptive thinking"，透传链保留。模型侧 GPT 系 / 4.5 代际排除条件已上移至 converter 注入层，provider 层 SHALL NOT 重复判定模型类型。
 
-#### Scenario: 开关开启 + 客户端 enabled thinking → 注入保留
+#### Scenario: 开关开启 + 客户端 adaptive thinking → 注入保留
 
-- **GIVEN** 账号 A 的 `thinkingAdaptive = true`，客户端请求携带 `thinking: {"type": "enabled"}`，模型为 claude-sonnet-4.6
+- **GIVEN** 账号 A 的 `thinkingAdaptive = true`，客户端请求携带 `thinking: {"type": "adaptive"}`，模型为 claude-sonnet-4.6
 - **WHEN** 请求路由到账号 A 并发往 Kiro 上游
 - **THEN** request body 的 `additionalModelRequestFields` 含 `"thinking": {"type": "adaptive"}`
 - **AND** 其余字段（output_config、max_tokens）保持既有构建逻辑不变
 
 #### Scenario: 开关关闭 → 剥离（现状不变）
 
-- **GIVEN** 账号 B 的 `thinkingAdaptive = false`，客户端请求携带 thinking（enabled 或 adaptive）
+- **GIVEN** 账号 B 的 `thinkingAdaptive = false`，客户端请求携带 adaptive thinking
 - **WHEN** 请求路由到账号 B
 - **THEN** request body 不含 `additionalModelRequestFields.thinking`
 - **AND** body 与 v3.3.0 行为逐字节一致
@@ -56,11 +56,15 @@ Provider 层 SHALL 在确定账号（`CallContext`）后，对请求体执行账
 - **AND** 每次重试都以当次实际选中的账号状态为准
 
 ### Requirement: Claude 系模型 thinking 字段注入
-当客户端请求携带 `thinking` 且 `thinking.is_enabled()`（enabled 或 adaptive），且映射后的 Kiro 模型为 Claude 系（非 4.5 代际、非 luna、非 GPT 系）时，系统 SHALL 在 converter 层生成的 `additionalModelRequestFields` 中包含 `thinking` 对象（值为 `{"type": "adaptive"}`，Kiro 私有协议唯一实证接受的形态），并与 `output_config`、`max_tokens` 字段合并共存。
+当客户端请求携带 `thinking` 且 `thinking.type == "adaptive"`，且映射后的 Kiro 模型为 Claude 系（非 4.5 代际、非 luna、非 GPT 系）时，系统 SHALL 在 converter 层生成的 `additionalModelRequestFields` 中包含 `thinking` 对象（值为 `{"type": "adaptive"}`，Kiro 私有协议唯一实证接受的形态），并与 `output_config`、`max_tokens` 字段合并共存。
 
-#### Scenario: CC 常规请求携带 enabled thinking
-- **WHEN** 客户端向 `/v1/messages` 发送 `thinking: {"type": "enabled", "budget_tokens": 20000}`，模型映射为 Claude 非 4.5 代际
+#### Scenario: 客户端携带 adaptive thinking
+- **WHEN** 客户端向 `/v1/messages` 发送 `thinking: {"type": "adaptive"}`，模型映射为 Claude 非 4.5 代际
 - **THEN** converter 生成的 `additionalModelRequestFields` 包含 `thinking` 字段，且 `output_config.effort` 与 `max_tokens` 仍按现有规则存在
+
+#### Scenario: 客户端携带 enabled thinking 不注入原生字段
+- **WHEN** 客户端发送 `thinking: {"type": "enabled", "budget_tokens": 20000}`，模型映射为 Claude 非 4.5 代际
+- **THEN** `additionalModelRequestFields` 不含 `thinking` 字段（enabled 仅走 history[0] `<thinking_mode>` 文本标签协议，两套控制信号不得叠加，否则客户端规则遵从性回退，v3.4.1 回归）
 
 #### Scenario: 客户端未请求 thinking
 - **WHEN** 请求不携带 `thinking` 字段
