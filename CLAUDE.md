@@ -81,6 +81,7 @@ Client (Anthropic SSE format)
 ## 开发约定（来自 openspec/project.md）
 
 - `cargo fmt` + `cargo clippy` clean 后才可提交
+- **打 tag 必须同步版本号（强约束）**：创建 vX.Y.Z tag 前，必须先提交 `chore: 发布 vX.Y.Z`，同步更新 `Cargo.toml` 的 `version` 与 `Cargo.lock`（运行 `cargo check` 刷新），并同步更新 `src/admin/changelog_data.rs` 中的版本条目（否则 `is_latest` 高亮失效）。禁止在版本号未同步的情况下打 tag
 - 不引入新外部 crate（能用已有依赖解决的不新增）
 - 改动局限于最小必要范围，不做无关重构
 - 所有公开行为变更需同步更新单元测试（内联 `#[cfg(test)]` 模块）
