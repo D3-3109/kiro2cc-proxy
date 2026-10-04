@@ -3,6 +3,7 @@ use crate::http_client::ProxyConfig;
 use crate::kiro::model::credentials::KiroCredentials;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU32;
 use tokio::sync::Mutex as TokioMutex;
 
 use crate::model::config::Config;
@@ -115,6 +116,9 @@ pub struct MultiTokenManager {
     /// 历史最大账号 ID（单调递增，跨账号删除/重启持久化，防止 ID 被复用导致
     /// 新账号继承已删除旧账号的用量/失败/限流历史记录）
     pub(crate) next_id_counter: AtomicU64,
+    /// 每账号 RPM 上限（运行时可经 Admin API 热切换；0 = 不限）。
+    /// 独立于 config 持久化值，避免为热切换引入 Config 内部可变性
+    pub(crate) max_rpm_per_credential: AtomicU32,
 }
 
 /// 每个账号最大 API 调用失败次数

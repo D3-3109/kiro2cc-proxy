@@ -293,6 +293,111 @@ fn persist_suggestion_mode(config_path: &std::path::Path, enabled: bool) -> anyh
     })
 }
 
+/// GET /api/admin/config/runtime
+/// 获取运行时配置（maxRpm / port / proxyUrl）
+pub async fn get_runtime_config(State(state): State<AdminState>) -> impl IntoResponse {
+    let max_rpm = state.service.max_rpm_per_credential();
+
+    // port / proxyUrl 无运行时热值概念，读取 config.json 持久化值；
+    // 文件缺失或字段缺失时回退默认值（与 Config serde default 一致）
+    let (mut port, mut proxy_url) = (0u16, None);
+    if let Some(ref config_path) = state.config_path
+        && let Ok(content) = std::fs::read_to_string(config_path)
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+    {
+        port = json["port"].as_u64().unwrap_or(8080) as u16;
+        proxy_url = json["proxyUrl"].as_str().map(str::to_string);
+    }
+    if port == 0 {
+        port = 8080;
+    }
+
+    Json(super::types::RuntimeConfigResponse {
+        max_rpm_per_credential: max_rpm,
+        port,
+        proxy_url,
+    })
+}
+
+/// 校验上游代理地址：空 = 清除，或 http/https/socks5 URL
+fn validate_proxy_url(url: &str) -> Result<(), String> {
+    if url.is_empty() {
+        return Ok(());
+    }
+    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("socks5://") {
+        Ok(())
+    } else {
+        Err("proxyUrl 仅支持 http://、https://、socks5:// 前缀，空串表示清除".to_string())
+    }
+}
+
+/// PUT /api/admin/config/runtime
+/// 设置运行时配置：maxRpm 热切换 + 三字段写回 config.json（port/proxyUrl 重启后生效）
+pub async fn set_runtime_config(
+    State(state): State<AdminState>,
+    Json(payload): Json<super::types::SetRuntimeConfigRequest>,
+) -> impl IntoResponse {
+    // 输入校验（先于任何状态修改）
+    if let Some(port) = payload.port
+        && port == 0
+    {
+        let error = super::types::AdminErrorResponse::invalid_request("port 必须在 1–65535 范围内");
+        return (axum::http::StatusCode::BAD_REQUEST, Json(error)).into_response();
+    }
+    if let Some(ref url) = payload.proxy_url
+        && let Err(msg) = validate_proxy_url(url)
+    {
+        let error = super::types::AdminErrorResponse::invalid_request(msg);
+        return (axum::http::StatusCode::BAD_REQUEST, Json(error)).into_response();
+    }
+
+    // maxRpm 运行时热切换（wait_for_rpm_gate 每次请求读取，即时生效）
+    if let Some(max_rpm) = payload.max_rpm_per_credential {
+        state.service.set_max_rpm_per_credential(max_rpm);
+    }
+
+    // 持久化写回 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）
+    let _guard = state.persist_lock.lock();
+    if let Some(ref config_path) = state.config_path {
+        let result = persist_config_field(config_path, |json| {
+            if let Some(max_rpm) = payload.max_rpm_per_credential {
+                json["maxRpmPerCredential"] = serde_json::json!(max_rpm);
+            }
+            if let Some(port) = payload.port {
+                json["port"] = serde_json::json!(port);
+            }
+            if let Some(ref url) = payload.proxy_url {
+                if url.is_empty() {
+                    if let Some(map) = json.as_object_mut() {
+                        map.remove("proxyUrl");
+                    }
+                } else {
+                    json["proxyUrl"] = serde_json::Value::String(url.clone());
+                }
+            }
+        });
+        if let Err(e) = result {
+            tracing::error!("持久化运行时配置失败: {}", e);
+            let error =
+                super::types::AdminErrorResponse::internal_error("持久化失败，但运行时已生效");
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response();
+        }
+    }
+
+    // 响应消息按字段区分生效方式
+    let mut parts = Vec::new();
+    if payload.max_rpm_per_credential.is_some() {
+        parts.push("maxRpmPerCredential 已热生效");
+    }
+    if payload.port.is_some() {
+        parts.push("port 已保存（重启后生效）");
+    }
+    if payload.proxy_url.is_some() {
+        parts.push("proxyUrl 已保存（重启后生效）");
+    }
+    Json(SuccessResponse::new(parts.join("，"))).into_response()
+}
+
 /// 将客户端 token 直通开关写回 config.json
 fn persist_client_token_passthrough(
     config_path: &std::path::Path,
@@ -415,6 +520,66 @@ mod tests {
         assert_eq!(json["a"], serde_json::json!(2));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_validate_proxy_url() {
+        assert!(validate_proxy_url("").is_ok());
+        assert!(validate_proxy_url("http://127.0.0.1:10089").is_ok());
+        assert!(validate_proxy_url("https://proxy.example.com").is_ok());
+        assert!(validate_proxy_url("socks5://127.0.0.1:1080").is_ok());
+        assert!(validate_proxy_url("ftp://x").is_err());
+        assert!(validate_proxy_url("127.0.0.1:1080").is_err());
+    }
+
+    #[test]
+    fn test_persist_runtime_config_roundtrip() {
+        let dir = temp_config_dir("runtime");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"host":"127.0.0.1","port":5678,"proxyUrl":"http://127.0.0.1:10089"}"#,
+        )
+        .unwrap();
+
+        // 修改 maxRpm + port
+        persist_config_field(&path, |json| {
+            json["maxRpmPerCredential"] = serde_json::json!(16);
+            json["port"] = serde_json::json!(9090);
+        })
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["maxRpmPerCredential"], serde_json::json!(16));
+        assert_eq!(json["port"], serde_json::json!(9090));
+        // 未触及的 proxyUrl 保持不变
+        assert_eq!(json["proxyUrl"], "http://127.0.0.1:10089");
+
+        // 清除 proxyUrl（空串语义）
+        persist_config_field(&path, |json| {
+            if let Some(map) = json.as_object_mut() {
+                map.remove("proxyUrl");
+            }
+        })
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(json.get("proxyUrl").is_none());
+        assert_eq!(json["port"], serde_json::json!(9090));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_get_runtime_config_fallback_defaults() {
+        // config.json 缺失字段时 GET 的兜底逻辑与 serde default 一致：
+        // port 缺失 → 8080，proxyUrl 缺失 → None
+        let json: serde_json::Value = serde_json::from_str(r#"{"host":"127.0.0.1"}"#).unwrap();
+        let port = json["port"].as_u64().unwrap_or(8080) as u16;
+        let proxy_url = json["proxyUrl"].as_str().map(str::to_string);
+        assert_eq!(port, 8080);
+        assert_eq!(proxy_url, None);
     }
 }
 

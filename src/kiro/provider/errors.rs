@@ -45,7 +45,7 @@ impl KiroProvider {
         let Some(rpm) = &self.rpm_tracker else {
             return true;
         };
-        let max_rpm = self.token_manager.config().max_rpm_per_credential;
+        let max_rpm = self.token_manager.max_rpm_per_credential();
         if max_rpm == 0 || rpm.credential_rpm(credential_id) < max_rpm as u64 {
             return true;
         }

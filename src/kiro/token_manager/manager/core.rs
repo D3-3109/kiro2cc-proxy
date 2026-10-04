@@ -14,7 +14,7 @@ use crate::model::config::Config;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::sync::Mutex as TokioMutex;
 
@@ -133,6 +133,7 @@ impl MultiTokenManager {
             .max(starting_max_id);
 
         let load_balancing_mode = config.load_balancing_mode.clone();
+        let max_rpm = config.max_rpm_per_credential;
         let manager = Self {
             config,
             proxy,
@@ -152,6 +153,7 @@ impl MultiTokenManager {
             sticky_misses: AtomicU64::new(0),
             persist_lock: Mutex::new(()),
             next_id_counter: AtomicU64::new(final_max_id),
+            max_rpm_per_credential: AtomicU32::new(max_rpm),
         };
 
         // 持久化历史最大 ID 计数器（即使本次没有新增账号，也要确保计数器文件与内存一致，
@@ -179,6 +181,16 @@ impl MultiTokenManager {
     /// 获取配置的引用
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// 获取每账号 RPM 上限（运行时热切换后的当前值；0 = 不限）
+    pub fn max_rpm_per_credential(&self) -> u32 {
+        self.max_rpm_per_credential.load(Ordering::Relaxed)
+    }
+
+    /// 热切换每账号 RPM 上限（0 = 不限），仅影响运行时，持久化由调用方负责
+    pub fn set_max_rpm_per_credential(&self, value: u32) {
+        self.max_rpm_per_credential.store(value, Ordering::Relaxed);
     }
 
     /// 获取当前活动账号的克隆（仅测试使用）

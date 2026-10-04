@@ -306,6 +306,30 @@ pub struct SetClientTokenPassthroughRequest {
     pub enabled: bool,
 }
 
+/// 运行时配置（maxRpm / port / proxyUrl）查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeConfigResponse {
+    /// 每账号 RPM 上限（运行时当前值，0 = 不限，热生效）
+    pub max_rpm_per_credential: u32,
+    /// 监听端口（config.json 持久化值，重启后生效）
+    pub port: u16,
+    /// 上游代理地址（config.json 持久化值，重启后生效；空表示未配置）
+    pub proxy_url: Option<String>,
+}
+
+/// 设置运行时配置请求（三字段均为可选，仅更新显式传入的字段）
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRuntimeConfigRequest {
+    /// 每账号 RPM 上限（0 = 不限，热生效）
+    pub max_rpm_per_credential: Option<u32>,
+    /// 监听端口（1–65535，重启后生效）
+    pub port: Option<u16>,
+    /// 上游代理地址（空串/None = 清除；支持 http/https/socks5，重启后生效）
+    pub proxy_url: Option<String>,
+}
+
 // ============ 通用响应 ============
 
 /// 操作成功响应

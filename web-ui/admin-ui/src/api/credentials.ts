@@ -129,6 +129,30 @@ export async function setSuggestionMode(enabled: boolean): Promise<{ success: bo
   return data
 }
 
+// 获取运行时配置（maxRpm / port / proxyUrl）
+export async function getRuntimeConfig(): Promise<{
+  maxRpmPerCredential: number
+  port: number
+  proxyUrl: string | null
+}> {
+  const { data } = await api.get<{
+    maxRpmPerCredential: number
+    port: number
+    proxyUrl: string | null
+  }>('/config/runtime')
+  return data
+}
+
+// 设置运行时配置（仅更新传入字段；maxRpm 热生效，port/proxyUrl 重启后生效）
+export async function setRuntimeConfig(payload: {
+  maxRpmPerCredential?: number
+  port?: number
+  proxyUrl?: string
+}): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/runtime', payload)
+  return data
+}
+
 // 获取客户端 token 直通开关
 export async function getClientTokenPassthrough(): Promise<{ enabled: boolean }> {
   const { data } = await api.get<{ enabled: boolean }>('/config/client-token-passthrough')

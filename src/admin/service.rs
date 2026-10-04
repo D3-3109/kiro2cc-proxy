@@ -460,6 +460,16 @@ impl AdminService {
         Ok(LoadBalancingModeResponse { mode: req.mode })
     }
 
+    /// 热切换每账号 RPM 上限（0 = 不限），仅影响运行时，持久化由 handler 负责
+    pub fn set_max_rpm_per_credential(&self, value: u32) {
+        self.token_manager.set_max_rpm_per_credential(value);
+    }
+
+    /// 获取每账号 RPM 上限运行时当前值（含热切换后的值；0 = 不限）
+    pub fn max_rpm_per_credential(&self) -> u32 {
+        self.token_manager.max_rpm_per_credential()
+    }
+
     // ============ 余额缓存持久化 ============
 
     fn load_balance_cache_from(cache_path: &Option<PathBuf>) -> HashMap<u64, CachedBalance> {

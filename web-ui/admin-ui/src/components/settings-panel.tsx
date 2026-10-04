@@ -10,6 +10,7 @@ import {
   useLoadBalancingMode, useSetLoadBalancingMode,
   useSuggestionMode, useSetSuggestionMode,
   useClientTokenPassthrough, useSetClientTokenPassthrough,
+  useRuntimeConfig, useSetRuntimeConfig,
   useAuthKeys, useSetAuthKeys,
 } from '@/hooks/use-credentials'
 import { extractErrorMessage } from '@/lib/utils'
@@ -26,7 +27,7 @@ const SET_ROW = 'flex items-center gap-4 border-b border-hairline px-4 py-[13px]
 /** 行键名（设计稿 .set-k） */
 const SET_K = 'flex items-center gap-[7px] text-[12.5px] font-semibold'
 /** 行说明（设计稿 .set-d） */
-const SET_D = 'mt-0.5 max-w-[560px] text-[11px] leading-[1.5] text-ink-3'
+const SET_D = 'mt-0.5 max-w-[760px] text-[11px] leading-[1.5] text-ink-3'
 /** 行控件区（设计稿 .set-c） */
 const SET_C = 'ml-auto flex flex-none items-center gap-2'
 /** 只读值框（设计稿 .field.w-s） */
@@ -191,6 +192,14 @@ export function SettingsPanel({
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
   const [adminPswDraft, setAdminPswDraft] = useState('')
   const [editingAdminPsw, setEditingAdminPsw] = useState(false)
+  const { data: runtimeConfigData, isError: isRuntimeConfigError, isLoading: isLoadingRuntimeConfig } = useRuntimeConfig()
+  const { mutate: setRuntimeConfigMut, isPending: isSettingRuntimeConfig } = useSetRuntimeConfig()
+  const [runtimeDraft, setRuntimeDraft] = useState<{ maxRpm: string; port: string; proxyUrl: string }>({
+    maxRpm: '',
+    port: '',
+    proxyUrl: '',
+  })
+  const [editingRuntime, setEditingRuntime] = useState<'maxRpm' | 'port' | 'proxyUrl' | null>(null)
 
   const lang = i18n.language === 'en' ? 'en' : 'zh'
 
@@ -224,6 +233,59 @@ export function SettingsPanel({
       }
     )
   }
+
+  const saveRuntimeField = (field: 'maxRpm' | 'port' | 'proxyUrl') => {
+    const payload: { maxRpmPerCredential?: number; port?: number; proxyUrl?: string } = {}
+    if (field === 'maxRpm') payload.maxRpmPerCredential = Number(runtimeDraft.maxRpm)
+    else if (field === 'port') payload.port = Number(runtimeDraft.port)
+    else payload.proxyUrl = runtimeDraft.proxyUrl.trim()
+
+    setRuntimeConfigMut(payload, {
+      onSuccess: (d) => {
+        toast.success(d.message)
+        setEditingRuntime(null)
+      },
+      onError: (e) => toast.error(extractErrorMessage(e)),
+    })
+  }
+
+  const startEditRuntime = (field: 'maxRpm' | 'port' | 'proxyUrl') => {
+    if (field === 'maxRpm') setRuntimeDraft((d) => ({ ...d, maxRpm: String(runtimeConfigData?.maxRpmPerCredential ?? '') }))
+    else if (field === 'port') setRuntimeDraft((d) => ({ ...d, port: String(runtimeConfigData?.port ?? '') }))
+    else setRuntimeDraft((d) => ({ ...d, proxyUrl: runtimeConfigData?.proxyUrl ?? '' }))
+    setEditingRuntime(field)
+  }
+
+  const cancelEditRuntime = () => {
+    setEditingRuntime(null)
+    setRuntimeDraft({ maxRpm: '', port: '', proxyUrl: '' })
+  }
+
+  /** 运行时配置行共用的编辑态控件（Input + 保存/取消按钮） */
+  const runtimeEditor = (
+    field: 'maxRpm' | 'port' | 'proxyUrl',
+    value: string,
+    onChange: (v: string) => void,
+    inputType: 'text' | 'number',
+    canSave: boolean
+  ) => (
+    <>
+      <Input
+        type={inputType}
+        autoFocus
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        // 数值类（maxRpm/port）用短输入框，URL 类（proxyUrl）保留宽输入框
+        className={field === 'proxyUrl' ? 'w-[290px]' : 'w-[110px]'}
+      />
+      <Button size="sm" disabled={!canSave || isSettingRuntimeConfig} onClick={() => saveRuntimeField(field)}>
+        {t('common.save')}
+      </Button>
+      <Button variant="ghost" size="sm" onClick={cancelEditRuntime}>
+        {t('common.cancel')}
+      </Button>
+    </>
+  )
 
   return (
     <div>
@@ -273,6 +335,66 @@ export function SettingsPanel({
               }
             />
           </Row>
+          <Row label={t('settings.maxRpmPerCredential')} desc={t('settings.maxRpmPerCredentialDesc')}>
+            {editingRuntime === 'maxRpm' ? (
+              runtimeEditor(
+                'maxRpm',
+                runtimeDraft.maxRpm,
+                (v) => setRuntimeDraft((d) => ({ ...d, maxRpm: v })),
+                'number',
+                runtimeDraft.maxRpm !== '' && !Number.isNaN(Number(runtimeDraft.maxRpm)) && Number(runtimeDraft.maxRpm) >= 0
+              )
+            ) : (
+              <>
+                <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.maxRpmPerCredential ?? '—')}</div>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError} onClick={() => startEditRuntime('maxRpm')}>
+                  <Pencil />
+                  {t('common.edit')}
+                </Button>
+              </>
+            )}
+          </Row>
+          <Row label={t('settings.port')} desc={t('settings.portDesc')}>
+            {editingRuntime === 'port' ? (
+              runtimeEditor(
+                'port',
+                runtimeDraft.port,
+                (v) => setRuntimeDraft((d) => ({ ...d, port: v })),
+                'number',
+                /^\d+$/.test(runtimeDraft.port) && Number(runtimeDraft.port) >= 1 && Number(runtimeDraft.port) <= 65535
+              )
+            ) : (
+              <>
+                <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.port ?? '—')}</div>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError} onClick={() => startEditRuntime('port')}>
+                  <Pencil />
+                  {t('common.edit')}
+                </Button>
+              </>
+            )}
+          </Row>
+          <Row label={t('settings.proxyUrl')} desc={t('settings.proxyUrlDesc')}>
+            {editingRuntime === 'proxyUrl' ? (
+              runtimeEditor(
+                'proxyUrl',
+                runtimeDraft.proxyUrl,
+                (v) => setRuntimeDraft((d) => ({ ...d, proxyUrl: v })),
+                'text',
+                true
+              )
+            ) : (
+              <>
+                <div className={`${FIELD_S} max-w-[280px] truncate`}>
+                  {isLoadingRuntimeConfig ? t('common.loading') : runtimeConfigData?.proxyUrl || '—'}
+                </div>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError} onClick={() => startEditRuntime('proxyUrl')}>
+                  <Pencil />
+                  {t('common.edit')}
+                </Button>
+              </>
+            )}
+          </Row>
+          <div className="px-4 py-2 text-[11px] text-ink-3">{t('settings.runtimeConfigSaveHint')}</div>
         </Section>
 
         <Section icon={ShieldCheck} title={t('settings.capSecurity')}>

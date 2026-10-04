@@ -14,6 +14,8 @@ import {
   setSuggestionMode,
   getClientTokenPassthrough,
   setClientTokenPassthrough,
+  getRuntimeConfig,
+  setRuntimeConfig,
   setLoadBalancingMode,
   getServerInfo,
   getApiKeys,
@@ -176,6 +178,27 @@ export function useSetSuggestionMode() {
     mutationFn: setSuggestionMode,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['suggestionMode'] })
+    },
+  })
+}
+
+// ============ 运行时配置 Hooks ============
+
+// 获取运行时配置（maxRpm / port / proxyUrl）
+export function useRuntimeConfig() {
+  return useQuery({
+    queryKey: ['runtimeConfig'],
+    queryFn: getRuntimeConfig,
+  })
+}
+
+// 设置运行时配置（仅更新传入字段；maxRpm 热生效，port/proxyUrl 重启后生效）
+export function useSetRuntimeConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: setRuntimeConfig,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['runtimeConfig'] })
     },
   })
 }
