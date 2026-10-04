@@ -67,6 +67,40 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.5".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "Claude 系模型支持注入 thinking 字段（enable-thinking-display 配置开关），客户端可观测深度思考输出",
+                        "Claude-family models can inject the thinking field via the enable-thinking-display toggle, making reasoning output observable to clients",
+                    ),
+                    Bilingual::new(
+                        "新增请求级深度思考状态日志：每条请求同时记录客户端请求的 thinking 配置与实际生效的注入结果（request/effective 双维度）",
+                        "Added request-level thinking status logs: each request records both the client-requested thinking config and the actually applied injection (request/effective dimensions)",
+                    ),
+                    Bilingual::new(
+                        "账号表新增多列排序（请求数/错误率/额度等）并持久化排序状态；Base URL 卡片新增一键复制",
+                        "Account table gains multi-column sorting (requests, error rate, balance, etc.) with persisted sort state; the Base URL card adds one-click copy",
+                    ),
+                ]),
+                improve_group(vec![Bilingual::new(
+                    "实时日志页加载与渲染性能优化：日志合批刷新 + 行按视口虚拟化，长日志洪峰下页面不再卡顿",
+                    "Realtime logs page load and rendering performance optimization: batched log refresh plus viewport-virtualized rows keep the page responsive under heavy log floods",
+                )]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复 API Key 请求次数超过 1 万次后统计封顶不再增长的问题：明细裁剪部分累计进持久化基数，请求数与 credits 持续准确累计，重启不丢",
+                        "Fixed API Key request counts capping at 10,000: pruned detail records are accumulated into a persisted lifetime base, so request counts and credits keep growing accurately across restarts",
+                    ),
+                    Bilingual::new(
+                        "第三方模型（GPT 系等非 Claude 家族）跳过 additionalModelRequestFields，修复该类请求 400 错误",
+                        "Third-party models (GPT and other non-Claude families) now skip additionalModelRequestFields, fixing 400 errors for such requests",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.3.2".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![Bilingual::new(
