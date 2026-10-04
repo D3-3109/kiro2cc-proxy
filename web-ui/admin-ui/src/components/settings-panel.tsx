@@ -261,6 +261,17 @@ export function SettingsPanel({
     setRuntimeDraft({ maxRpm: '', port: '', proxyUrl: '' })
   }
 
+  const runtimeCanSave = (field: 'maxRpm' | 'port' | 'proxyUrl') => {
+    if (field === 'maxRpm') {
+      // 与后端 Option<u32> 对齐：非负整数且 ≤ 4294967295
+      return /^\d+$/.test(runtimeDraft.maxRpm) && Number(runtimeDraft.maxRpm) <= 4294967295
+    }
+    if (field === 'port') {
+      return /^\d+$/.test(runtimeDraft.port) && Number(runtimeDraft.port) >= 1 && Number(runtimeDraft.port) <= 65535
+    }
+    return true
+  }
+
   /** 运行时配置行共用的编辑态控件（Input + 保存/取消按钮） */
   const runtimeEditor = (
     field: 'maxRpm' | 'port' | 'proxyUrl',
@@ -272,7 +283,11 @@ export function SettingsPanel({
     <>
       <Input
         type={inputType}
+        aria-label={t(
+          field === 'maxRpm' ? 'settings.maxRpmPerCredential' : field === 'port' ? 'settings.port' : 'settings.proxyUrl'
+        )}
         autoFocus
+        disabled={isSettingRuntimeConfig}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         // 数值类（maxRpm/port）用短输入框，URL 类（proxyUrl）保留宽输入框
@@ -281,7 +296,7 @@ export function SettingsPanel({
       <Button size="sm" disabled={!canSave || isSettingRuntimeConfig} onClick={() => saveRuntimeField(field)}>
         {t('common.save')}
       </Button>
-      <Button variant="ghost" size="sm" onClick={cancelEditRuntime}>
+      <Button variant="ghost" size="sm" disabled={isSettingRuntimeConfig} onClick={cancelEditRuntime}>
         {t('common.cancel')}
       </Button>
     </>
@@ -342,12 +357,12 @@ export function SettingsPanel({
                 runtimeDraft.maxRpm,
                 (v) => setRuntimeDraft((d) => ({ ...d, maxRpm: v })),
                 'number',
-                runtimeDraft.maxRpm !== '' && !Number.isNaN(Number(runtimeDraft.maxRpm)) && Number(runtimeDraft.maxRpm) >= 0
+                runtimeCanSave('maxRpm')
               )
             ) : (
               <>
                 <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.maxRpmPerCredential ?? '—')}</div>
-                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError} onClick={() => startEditRuntime('maxRpm')}>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('maxRpm')}>
                   <Pencil />
                   {t('common.edit')}
                 </Button>
@@ -361,12 +376,12 @@ export function SettingsPanel({
                 runtimeDraft.port,
                 (v) => setRuntimeDraft((d) => ({ ...d, port: v })),
                 'number',
-                /^\d+$/.test(runtimeDraft.port) && Number(runtimeDraft.port) >= 1 && Number(runtimeDraft.port) <= 65535
+                runtimeCanSave('port')
               )
             ) : (
               <>
                 <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.port ?? '—')}</div>
-                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError} onClick={() => startEditRuntime('port')}>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('port')}>
                   <Pencil />
                   {t('common.edit')}
                 </Button>
@@ -387,7 +402,7 @@ export function SettingsPanel({
                 <div className={`${FIELD_S} max-w-[280px] truncate`}>
                   {isLoadingRuntimeConfig ? t('common.loading') : runtimeConfigData?.proxyUrl || '—'}
                 </div>
-                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError} onClick={() => startEditRuntime('proxyUrl')}>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('proxyUrl')}>
                   <Pencil />
                   {t('common.edit')}
                 </Button>

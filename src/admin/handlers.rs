@@ -222,11 +222,11 @@ pub async fn set_suggestion_mode(
             .into_response();
     };
 
-    // 运行时热切换（与 anthropic AppState 共享同一 Arc 实例，即时生效）
-    flag.store(payload.enabled, std::sync::atomic::Ordering::Relaxed);
-
-    // 持久化到 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）
+    // 持久化到 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）。
+    // 热更新在锁内执行：保证「内存顺序与磁盘顺序一致」，避免并发请求出现
+    // 内存为后值、磁盘为先值 → 重启后设置回退。
     let _guard = state.persist_lock.lock();
+    flag.store(payload.enabled, std::sync::atomic::Ordering::Relaxed);
     if let Some(ref config_path) = state.config_path
         && let Err(e) = persist_suggestion_mode(config_path, payload.enabled)
     {
@@ -261,11 +261,10 @@ pub async fn set_client_token_passthrough(
     State(state): State<AdminState>,
     Json(payload): Json<super::types::SetClientTokenPassthroughRequest>,
 ) -> impl IntoResponse {
-    // 运行时热切换（calib 内 static AtomicBool，全局即时生效）
-    crate::anthropic::set_client_token_passthrough(payload.enabled);
-
-    // 持久化到 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）
+    // 持久化到 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）。
+    // 热更新在锁内执行，保证内存与磁盘写入顺序一致（见 set_suggestion_mode 注释）。
     let _guard = state.persist_lock.lock();
+    crate::anthropic::set_client_token_passthrough(payload.enabled);
     if let Some(ref config_path) = state.config_path
         && let Err(e) = persist_client_token_passthrough(config_path, payload.enabled)
     {
@@ -319,16 +318,18 @@ pub async fn get_runtime_config(State(state): State<AdminState>) -> impl IntoRes
     })
 }
 
-/// 校验上游代理地址：空 = 清除，或 http/https/socks5 URL
+/// 校验上游代理地址：空 = 清除，或 http/https/socks5 URL（须可解析且含主机）
 fn validate_proxy_url(url: &str) -> Result<(), String> {
     if url.is_empty() {
         return Ok(());
     }
-    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("socks5://") {
-        Ok(())
-    } else {
-        Err("proxyUrl 仅支持 http://、https://、socks5:// 前缀，空串表示清除".to_string())
+    let parsed = reqwest::Url::parse(url).map_err(|_| {
+        "proxyUrl 必须是有效的 URL（支持 http://、https://、socks5://，空串表示清除）".to_string()
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https" | "socks5") || parsed.host_str().is_none() {
+        return Err("proxyUrl 必须使用 http/https/socks5 协议且包含主机名".to_string());
     }
+    Ok(())
 }
 
 /// PUT /api/admin/config/runtime
@@ -351,13 +352,13 @@ pub async fn set_runtime_config(
         return (axum::http::StatusCode::BAD_REQUEST, Json(error)).into_response();
     }
 
-    // maxRpm 运行时热切换（wait_for_rpm_gate 每次请求读取，即时生效）
+    // 持久化写回 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）。
+    // maxRpm 热切换同样在锁内执行，保证内存与磁盘写入顺序一致
+    // （wait_for_rpm_gate 每次请求读取，即时生效）。
+    let _guard = state.persist_lock.lock();
     if let Some(max_rpm) = payload.max_rpm_per_credential {
         state.service.set_max_rpm_per_credential(max_rpm);
     }
-
-    // 持久化写回 config.json（重启后保持；persist_lock 防止与其他 PUT 并发覆盖）
-    let _guard = state.persist_lock.lock();
     if let Some(ref config_path) = state.config_path {
         let result = persist_config_field(config_path, |json| {
             if let Some(max_rpm) = payload.max_rpm_per_credential {
@@ -420,7 +421,30 @@ fn persist_config_field(
 
     let output = serde_json::to_string_pretty(&json)?;
     let tmp_path = config_path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, output)?;
+
+    // 临时文件创建即限制权限并继承原文件权限：默认 write() 受 umask 影响，
+    // 0600 的 config.json（含 adminPsw）经替换后会扩大为 0644，泄露密码可读范围
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mode = std::fs::metadata(config_path)
+            .map(|m| m.permissions().mode())
+            .unwrap_or(0o600);
+        // 崩溃可能残留 .tmp 文件，create_new 会永久失败，先清理
+        let _ = std::fs::remove_file(&tmp_path);
+        let mut tmp = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode & 0o777)
+            .open(&tmp_path)?;
+        tmp.write_all(output.as_bytes())?;
+        tmp.sync_all().ok();
+    }
+    #[cfg(not(unix))]
+    std::fs::write(&tmp_path, &output)?;
+
     std::fs::rename(&tmp_path, config_path)?;
     Ok(())
 }
@@ -530,6 +554,32 @@ mod tests {
         assert!(validate_proxy_url("socks5://127.0.0.1:1080").is_ok());
         assert!(validate_proxy_url("ftp://x").is_err());
         assert!(validate_proxy_url("127.0.0.1:1080").is_err());
+        // 非法端口 / 缺主机 / 空主机均应拒绝（前缀校验无法覆盖的形态）
+        assert!(validate_proxy_url("http://proxy.example.com:abc").is_err());
+        assert!(validate_proxy_url("http://").is_err());
+        assert!(validate_proxy_url("socks5://:1080").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_persist_preserves_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_config_dir("perm");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, r#"{"a":1}"#).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        persist_config_field(&path, |json| {
+            json["a"] = serde_json::json!(2);
+        })
+        .unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "替换后应保留原文件权限，不得因 umask 扩大");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

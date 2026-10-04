@@ -175,10 +175,13 @@ pub(crate) fn is_suggestion_mode_request(payload: &MessagesRequest) -> bool {
         .filter(|m| m.role == "user")
         .is_some_and(|m| match &m.content {
             serde_json::Value::String(s) => s.starts_with("[SUGGESTION MODE"),
-            serde_json::Value::Array(blocks) => blocks.iter().any(|b| {
-                b.get("text")
-                    .and_then(|t| t.as_str())
-                    .is_some_and(|t| t.starts_with("[SUGGESTION MODE"))
+            // 标记固定位于消息首部：仅检查首块，避免首块为普通文本、
+            // 后续块恰好以标记开头时误吞整条正常消息
+            serde_json::Value::Array(blocks) => blocks.first().is_some_and(|b| {
+                b.get("type").and_then(|v| v.as_str()) == Some("text")
+                    && b.get("text")
+                        .and_then(|t| t.as_str())
+                        .is_some_and(|t| t.starts_with("[SUGGESTION MODE"))
             }),
             _ => false,
         })
@@ -346,6 +349,40 @@ mod tests {
     #[test]
     fn normal_user_message_misses() {
         let p = request_with_last_message("user", json!("帮我看看这个 bug"));
+        assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn normal_string_with_marker_inside_misses() {
+        // 字符串形态：标记出现在文本中部而非开头，不应误判
+        let p =
+            request_with_last_message("user", json!("请问 [SUGGESTION MODE] 这个标记是什么意思？"));
+        assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn suggestion_marker_in_later_block_misses() {
+        // 首块为普通文本、后续块以标记开头：标记不在消息首部，不应误判
+        let p = request_with_last_message(
+            "user",
+            json!([
+                { "type": "text", "text": "普通内容" },
+                { "type": "text", "text": "[SUGGESTION MODE: suggest next input]" }
+            ]),
+        );
+        assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn suggestion_first_block_non_text_misses() {
+        // 首块非 text 类型时即使带标记也不判中（标记必须位于消息首部）
+        let p = request_with_last_message(
+            "user",
+            json!([
+                { "type": "image", "text": "[SUGGESTION MODE: x]" },
+                { "type": "text", "text": "[SUGGESTION MODE: x]" }
+            ]),
+        );
         assert!(!is_suggestion_mode_request(&p));
     }
 }
