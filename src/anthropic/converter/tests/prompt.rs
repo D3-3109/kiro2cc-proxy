@@ -96,3 +96,136 @@ fn test_unrelated_prompt_does_not_append_recent_knowledge_reference() {
         "Hello, explain Rust lifetimes."
     );
 }
+
+// ---- GPT 专属：动态块分流出 history[0]，保持前缀缓存稳定 ----
+
+fn dynamic_split_req(model: &str, system: Vec<&str>, user: &str) -> MessagesRequest {
+    use crate::anthropic::types::{Message as AnthropicMessage, SystemMessage};
+    MessagesRequest {
+        model: model.to_string(),
+        max_tokens: 2048,
+        messages: vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: serde_json::json!(user),
+        }],
+        stream: false,
+        system: Some(
+            system
+                .into_iter()
+                .map(|t| SystemMessage {
+                    text: t.to_string(),
+                })
+                .collect(),
+        ),
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    }
+}
+
+fn history0_and_current(req: &MessagesRequest) -> (String, String) {
+    let r = convert_request(req).unwrap();
+    let h0 = serde_json::to_value(&r.conversation_state.history[0]).unwrap()
+        ["userInputMessage"]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let cur = r
+        .conversation_state
+        .current_message
+        .user_input_message
+        .content
+        .clone();
+    (h0, cur)
+}
+
+const STABLE: &str = "STABLE RULES";
+const HOOK: &str = "UserPromptSubmit hook success: Session status updated.";
+const DEFERRED: &str = "The following deferred tools are now available via ToolSearch.\nFoo";
+
+#[test]
+fn gpt_dynamic_blocks_leave_history0_and_go_to_current_message() {
+    let (h0, cur) = history0_and_current(&dynamic_split_req(
+        "gpt-5.6-terra",
+        vec![STABLE, HOOK, DEFERRED],
+        "hi",
+    ));
+    assert_eq!(h0, STABLE, "history[0] 只应含稳定系统内容");
+    assert!(cur.ends_with("hi"), "用户原文必须在最后（指令居末）: {cur}");
+    assert!(cur.starts_with("<system-reminder>"), "{cur}");
+    assert!(cur.contains(HOOK) && cur.contains(DEFERRED));
+}
+
+#[test]
+fn gpt_history0_stable_across_turns_with_accumulating_dynamic_blocks() {
+    let (h0_a, _) = history0_and_current(&dynamic_split_req(
+        "gpt-5.6-terra",
+        vec![STABLE, HOOK],
+        "turn1",
+    ));
+    let (h0_b, _) = history0_and_current(&dynamic_split_req(
+        "gpt-5.6-terra",
+        vec![STABLE, HOOK, DEFERRED, HOOK, HOOK],
+        "turn2",
+    ));
+    assert_eq!(h0_a, h0_b, "动态块累积不得改变 history[0]");
+}
+
+#[test]
+fn gpt_all_dynamic_system_keeps_thinking_prefix() {
+    use crate::anthropic::types::Thinking;
+    let mut req = dynamic_split_req("gpt-5.6-sol", vec![HOOK], "hi");
+    req.thinking = Some(Thinking {
+        thinking_type: "enabled".to_string(),
+        budget_tokens: 1000,
+    });
+    let (h0, cur) = history0_and_current(&req);
+    assert!(
+        h0.contains("<thinking_mode>enabled</thinking_mode>"),
+        "{h0}"
+    );
+    assert!(!h0.contains(HOOK));
+    assert!(cur.contains(HOOK));
+}
+
+#[test]
+fn non_gpt_models_keep_dynamic_blocks_in_history0_unchanged() {
+    // 非 GPT 请求与分流逻辑无关：history[0] 为完整 system 按 "\n" 拼接，
+    // 当前消息不被追加任何内容（与改动前逐字节一致）
+    for model in ["claude-sonnet-4-6", "claude-opus-4-6", "deepseek-3.2"] {
+        let (h0, cur) = history0_and_current(&dynamic_split_req(
+            model,
+            vec![STABLE, HOOK, DEFERRED],
+            "hi",
+        ));
+        assert_eq!(h0, format!("{STABLE}\n{HOOK}\n{DEFERRED}"), "{model}");
+        assert_eq!(cur, "hi", "{model}");
+    }
+}
+
+#[test]
+fn dynamic_hook_predicate_matches_expected_shapes() {
+    use super::super::prompt::is_dynamic_hook_injection as p;
+    for yes in [
+        "UserPromptSubmit hook success: x",
+        "  PreToolUse hook additional context: x",
+        "PreToolUse:Bash hook success: x",
+        "PostToolUse:Edit hook success: x",
+        "Stop hook feedback: x",
+        "The following deferred tools are now available via ToolSearch.",
+        "The following MCP servers are still connecting — x",
+    ] {
+        assert!(p(yes), "应识别为动态块: {yes}");
+    }
+    for no in [
+        "STABLE RULES",
+        "SessionStart hook additional context: <EXTREMELY_IMPORTANT>",
+        "SessionStart:startup hook success: x",
+        "Stopping hook is not a hook block",
+        "UserPromptSubmitter hook x",
+    ] {
+        assert!(!p(no), "不应识别为动态块: {no}");
+    }
+}

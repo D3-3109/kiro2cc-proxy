@@ -146,13 +146,26 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
     }
 
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
-    let mut history = build_history(
+    let (mut history, dynamic_system) = build_history(
         req,
         &messages,
         system.as_deref(),
         &model_id,
         &conversation_id,
     )?;
+    // 仅 GPT 系：被分流出 history[0] 的动态块放到当前消息文本**开头**（非 GPT 恒为空，
+    // 不改动 text_content）。放开头而非末尾：当前消息末尾通常是 skill / 用户指令正文，
+    // 末尾追加 "deferred tools / MCP 连接中" 之类通知会抢走模型对本轮指令的注意力；
+    // 当前消息本身不进缓存前缀，放哪里都不影响缓存命中。
+    // 必须遮蔽 text_content（第 12 步 current_message 由它构建），
+    // 不能改写 messages 末条——末条消息不进 history，改写等于丢弃。
+    let text_content = if dynamic_system.is_empty() {
+        text_content
+    } else if text_content.is_empty() {
+        format!("<system-reminder>\n{dynamic_system}\n</system-reminder>")
+    } else {
+        format!("<system-reminder>\n{dynamic_system}\n</system-reminder>\n\n{text_content}")
+    };
 
     // 8. 验证并过滤 tool_use/tool_result 配对
     // 移除孤立的 tool_result（没有对应的 tool_use）

@@ -20,6 +20,47 @@ pub(super) fn normalize_billing_header(content: String) -> String {
     result.replace_range(value_start..value_end, "0");
     result
 }
+
+/// 判断系统区文本块是否为 Claude Code 中途注入的"动态块"（逐轮新增/变化）。
+///
+/// CC 会以 `role:"system"` 的中途消息追加 hook 输出与工具/MCP 状态通知，v3.4.0 起
+/// 这些块被归并进系统区，进而落入 history[0]；它们每轮累积，导致 history[0] 逐轮
+/// 漂移、前缀缓存持续 miss。仅 GPT 请求会据此把它们分流到当前消息末尾
+/// （见 `history::build_history`），其他模型不调用本谓词。
+///
+/// 识别范围（前缀匹配，忽略前导空白）：
+/// - `<Event> hook ...` 与 `<Event>:<matcher> hook ...`，Event ∈ UserPromptSubmit /
+///   PreToolUse / PostToolUse / Stop
+/// - `The following deferred tools are now available...`
+/// - `The following MCP servers are still connecting...`
+///
+/// 刻意不含 SessionStart：它只在会话开头注入一次（可达数 KB 的稳定内容），留在
+/// history[0] 可被缓存；移到尾部反而每轮都要按未缓存计费。
+pub(super) fn is_dynamic_hook_injection(s: &str) -> bool {
+    const HOOK_EVENTS: [&str; 4] = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"];
+    const NOTICE_PREFIXES: [&str; 2] = [
+        "The following deferred tools are now available",
+        "The following MCP servers are still connecting",
+    ];
+
+    let t = s.trim_start();
+    if NOTICE_PREFIXES.iter().any(|p| t.starts_with(p)) {
+        return true;
+    }
+    HOOK_EVENTS.iter().any(|event| {
+        let Some(rest) = t.strip_prefix(event) else {
+            return false;
+        };
+        let after_name = if let Some(with_matcher) = rest.strip_prefix(':') {
+            // "<Event>:<matcher> hook ..."：matcher 不含空格
+            with_matcher.split_once(' ').map(|(_, after)| after)
+        } else {
+            rest.strip_prefix(' ')
+        };
+        after_name.is_some_and(|a| a.starts_with("hook "))
+    })
+}
+
 /// 将 Anthropic 的 JSON Schema 输出约束转换为 Kiro 可理解的提示约束。
 pub(super) fn append_output_format_instruction(
     mut text_content: String,
