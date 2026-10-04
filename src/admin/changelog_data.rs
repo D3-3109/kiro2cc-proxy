@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.8".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "修复 v3.4.1 起客户端规则（CLAUDE.md / system-reminder）遵从性回退：原生 thinking 字段仅对 adaptive 请求注入，enabled 请求不再叠加",
+                "Fixed client rule compliance (CLAUDE.md / system-reminder) regression since v3.4.1: native thinking field is now injected only for adaptive requests, no longer stacked on enabled requests",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.7".to_string(),
             is_latest: false,
             groups: vec![
