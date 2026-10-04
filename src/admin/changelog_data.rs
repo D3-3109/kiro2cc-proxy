@@ -67,6 +67,20 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.9".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![Bilingual::new(
+                    "新增 thinkingAsText 思考内容文本化展示，设置页支持热切换；固定使用 ANSI dim 变暗样式",
+                    "Adds thinkingAsText mode rendering thinking content as text with ANSI dim styling; hot-toggle in settings page",
+                )]),
+                fix_group(vec![Bilingual::new(
+                    "修复 GPT 系动态 hook 块分流破坏 history[0] 前缀缓存稳定性的问题",
+                    "Fixed GPT-series dynamic hook block routing breaking history[0] prefix cache stability",
+                )]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.8".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![Bilingual::new(
