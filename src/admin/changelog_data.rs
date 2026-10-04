@@ -67,7 +67,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
-            version: "3.4.5".to_string(),
+            version: "3.4.6".to_string(),
             is_latest: false,
             groups: vec![
                 feat_group(vec![
