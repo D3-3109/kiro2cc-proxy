@@ -38,6 +38,9 @@ pub struct CacheSimulationConfig {
     pub fingerprint_max_breakpoints_per_account: usize,
 }
 
+fn default_true() -> bool {
+    true
+}
 fn default_fingerprint_enabled() -> bool {
     true
 }
@@ -171,9 +174,9 @@ pub struct Config {
     /// Claude Code 默认隐藏/折叠 thinking，长推理期间界面像卡住。开启后，出站 SSE 的
     /// thinking 块被改写为 markdown 引用文本块，以 ANSI 变暗（灰色）样式逐行流式输出
     /// （类似 Kiro CLI 的展示；转义字符是否生效取决于客户端渲染）；
-    /// 回传的历史里这些文本会被自动剥离，上游看不到。默认 false（保持原生 thinking 块）。
+    /// 回传的历史里这些文本会被自动剥离，上游看不到。默认 true（文本化展示）。
     /// 副作用：客户端自己的上下文会包含这些文本，auto-compact 会更早触发。
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub thinking_as_text: bool,
 
     /// 配置文件路径（运行时元数据，不写入 JSON）
@@ -252,7 +255,7 @@ impl Default for Config {
             cache_simulation: CacheSimulationConfig::default(),
             client_token_passthrough: false,
             forward_suggestion_mode: false,
-            thinking_as_text: false,
+            thinking_as_text: true,
             config_path: None,
         }
     }
