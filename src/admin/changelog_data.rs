@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.11".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "「思考内容文本化展示」默认开启：新用户搭建后即默认生效，无需手动开启",
+                "Show Thinking as Text is now enabled by default: new deployments get it out of the box without manual toggling",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.10".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![Bilingual::new(
