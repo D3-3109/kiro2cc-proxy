@@ -5,9 +5,11 @@ use super::stream::stream_interrupted_error_event;
 use crate::anthropic::stream::{SseEvent, StreamContext};
 
 use crate::kiro::model::events::Event;
-use crate::kiro::model::requests::conversation::ConversationState;
+use crate::kiro::model::requests::conversation::{
+    AssistantMessage, ConversationState, HistoryAssistantMessage, Message,
+};
 use crate::kiro::model::requests::kiro::KiroRequest;
-use crate::kiro::model::requests::tool::ToolResult;
+use crate::kiro::model::requests::tool::{ToolResult, ToolUseEntry};
 use crate::kiro::parser::decoder::EventStreamDecoder;
 use bytes::Bytes;
 use serde_json::json;
@@ -340,6 +342,43 @@ pub(crate) fn build_continuation_request(
     }
 }
 
+/// 把本轮截获的 web_search toolUse 显式补进 history 尾部
+///
+/// 常规续请求只回填 `current_message.tool_results`，配对依赖上游服务端
+/// 会话状态保留其刚产出的 toolUse；超长会话等场景下服务端状态缺失，
+/// 续请求会收到 400 `TOOL_USE_RESULT_MISMATCH`。此函数把 toolUse 写入
+/// history 使配对显式化：末位是 assistant 消息则并入其 `tool_uses`
+/// （避免产生连续两条 assistant 消息），否则追加一条仅含 toolUse 的
+/// assistant 消息（content 用单空格占位，与 merge_assistant_messages
+/// 对"只有 toolUse 的 assistant 消息"的既有约定一致）。
+pub(crate) fn pair_web_search_tool_use_in_history(
+    state: &mut ConversationState,
+    pending: &PendingSearch,
+) {
+    let entry = ToolUseEntry {
+        tool_use_id: pending.tool_use_id.clone(),
+        name: "web_search".to_string(),
+        input: json!({ "query": pending.query }),
+    };
+    match state.history.last_mut() {
+        Some(Message::Assistant(last)) => {
+            last.assistant_response_message
+                .tool_uses
+                .get_or_insert_with(Vec::new)
+                .push(entry);
+        }
+        _ => {
+            let mut assistant = AssistantMessage::new(" ");
+            assistant.tool_uses = Some(vec![entry]);
+            state
+                .history
+                .push(Message::Assistant(HistoryAssistantMessage {
+                    assistant_response_message: assistant,
+                }));
+        }
+    }
+}
+
 /// 按单条待执行搜索构建其 ToolResult（MCP 成功 → success 摘要；失败 → error 降级）
 pub(crate) fn build_search_tool_result(
     tool_use_id: &str,
@@ -455,6 +494,54 @@ pub(crate) async fn bridge_execute_round(
             BridgeRoundOutcome::Continued(response, EventStreamDecoder::new(), search_results)
         }
         Err(e) => {
+            // 上游服务端会话状态缺失（超长会话等场景）时，续请求会因
+            // tool_result 无配对 toolUse 被拒（400 TOOL_USE_RESULT_MISMATCH）。
+            // 降级重试一次：把本轮 toolUse 显式补进 history 后重发，
+            // 使配对不再依赖服务端状态。常规路径（history 逐字节不变）不受影响。
+            if e.to_string().contains("TOOL_USE_RESULT_MISMATCH") {
+                let mut retried = kiro_request.clone();
+                pair_web_search_tool_use_in_history(&mut retried.conversation_state, &pending);
+                tracing::warn!(
+                    tool_use_id = %pending.tool_use_id,
+                    "web_search 续请求配对被拒(TOOL_USE_RESULT_MISMATCH)，补写 toolUse 至 history 后重试"
+                );
+                match serde_json::to_string(&retried) {
+                    Ok(retry_body) => {
+                        return match provider
+                            .call_api_stream(
+                                &retry_body,
+                                bridge_ctx.is_compact_request,
+                                bridge_ctx.thinking_adaptive_requested,
+                                &bridge_ctx.bound_ids,
+                            )
+                            .await
+                        {
+                            Ok((response, _credential_id)) => {
+                                tracing::info!(
+                                    tool_use_id = %pending.tool_use_id,
+                                    "web_search 续请求补写 toolUse 重试成功"
+                                );
+                                bridge.evolution_base = Some(retried.conversation_state);
+                                BridgeRoundOutcome::Continued(
+                                    response,
+                                    EventStreamDecoder::new(),
+                                    search_results,
+                                )
+                            }
+                            Err(retry_err) => {
+                                tracing::error!("web_search 续请求重试仍失败: {}", retry_err);
+                                bridge.evolution_base = Some(retried.conversation_state);
+                                BridgeRoundOutcome::Failed(search_results)
+                            }
+                        };
+                    }
+                    Err(se) => {
+                        tracing::error!("web_search 续请求重试序列化失败: {}", se);
+                        bridge.evolution_base = Some(retried.conversation_state);
+                        return BridgeRoundOutcome::Failed(search_results);
+                    }
+                }
+            }
             tracing::error!("web_search 续请求发起失败: {}", e);
             // 演进基底保持取出的状态，避免下一轮基于未知状态演进
             bridge.evolution_base = Some(kiro_request.conversation_state);

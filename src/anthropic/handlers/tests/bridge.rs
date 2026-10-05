@@ -620,4 +620,110 @@ pub(crate) mod tests {
         // 之后又截获到新轮次窗口的情形不存在（rounds_used 不回退），上限语义稳定
         assert!(!state.has_remaining_rounds());
     }
+
+    // ==== pair_web_search_tool_use_in_history（TOOL_USE_RESULT_MISMATCH 重试路径）====
+
+    fn pending_search_for_pairing() -> super::super::super::bridge::PendingSearch {
+        super::super::super::bridge::PendingSearch {
+            tool_use_id: "toolu_bdrk_01Q2RHaAE4QNMZiMS7cLfKwS".to_string(),
+            query: "rust async".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_pair_tool_use_appends_assistant_after_user_history() {
+        // history 末位是 user 消息 → 追加一条仅含 toolUse 的 assistant 消息
+        let mut state = ConversationState::new("conv-1");
+        state.history = vec![Message::user("hi", "claude-sonnet-4")];
+
+        super::super::super::bridge::pair_web_search_tool_use_in_history(
+            &mut state,
+            &pending_search_for_pairing(),
+        );
+
+        assert_eq!(state.history.len(), 2, "应追加一条 assistant 消息");
+        let Message::Assistant(last) = &state.history[1] else {
+            panic!("末位应为 assistant 消息");
+        };
+        let am = &last.assistant_response_message;
+        assert_eq!(am.content, " ", "无正文的 assistant content 用单空格占位");
+        let tus = am.tool_uses.as_ref().expect("应携带 tool_uses");
+        assert_eq!(tus.len(), 1);
+        assert_eq!(tus[0].tool_use_id, "toolu_bdrk_01Q2RHaAE4QNMZiMS7cLfKwS");
+        assert_eq!(tus[0].name, "web_search");
+        assert_eq!(tus[0].input["query"], "rust async");
+    }
+
+    #[test]
+    fn test_pair_tool_use_merges_into_trailing_assistant() {
+        // history 末位是 assistant（无 tool_uses）→ 并入该消息，不追加新消息
+        let mut state = bridge_ctx_for_continuation().conversation_state.clone();
+        let history_len = state.history.len();
+
+        super::super::super::bridge::pair_web_search_tool_use_in_history(
+            &mut state,
+            &pending_search_for_pairing(),
+        );
+
+        assert_eq!(
+            state.history.len(),
+            history_len,
+            "不应追加新消息（避免连续 assistant）"
+        );
+        let Message::Assistant(last) = state.history.last().unwrap() else {
+            panic!("末位应保持 assistant 消息");
+        };
+        assert_eq!(
+            last.assistant_response_message.content, "历史助手回复",
+            "原 content 不应被改写"
+        );
+        let tus = last
+            .assistant_response_message
+            .tool_uses
+            .as_ref()
+            .expect("原 tool_uses 为 None 应初始化并写入");
+        assert_eq!(tus.len(), 1);
+        assert_eq!(tus[0].name, "web_search");
+    }
+
+    #[test]
+    fn test_pair_tool_use_appends_to_existing_tool_uses() {
+        // history 末位 assistant 已有 tool_uses → 追加到既有列表尾部
+        let mut state = bridge_ctx_for_continuation().conversation_state.clone();
+        let Message::Assistant(last) = state.history.last_mut().unwrap() else {
+            panic!("测试前提：末位应为 assistant");
+        };
+        last.assistant_response_message.tool_uses =
+            Some(vec![crate::kiro::model::requests::tool::ToolUseEntry::new(
+                "toolu_old_1",
+                "read",
+            )]);
+
+        super::super::super::bridge::pair_web_search_tool_use_in_history(
+            &mut state,
+            &pending_search_for_pairing(),
+        );
+
+        let Message::Assistant(last) = state.history.last().unwrap() else {
+            panic!("末位应保持 assistant 消息");
+        };
+        let tus = last.assistant_response_message.tool_uses.as_ref().unwrap();
+        assert_eq!(tus.len(), 2, "应在既有 tool_uses 尾部追加");
+        assert_eq!(tus[0].tool_use_id, "toolu_old_1", "既有条目保持在前");
+        assert_eq!(tus[1].tool_use_id, "toolu_bdrk_01Q2RHaAE4QNMZiMS7cLfKwS");
+    }
+
+    #[test]
+    fn test_pair_tool_use_serialized_shape() {
+        // 序列化形态：续请求补写后 history 尾部含 toolUse 条目，字段驼峰命名
+        let mut state = bridge_ctx_for_continuation().conversation_state;
+        super::super::super::bridge::pair_web_search_tool_use_in_history(
+            &mut state,
+            &pending_search_for_pairing(),
+        );
+        let serialized = serde_json::to_string(&state).unwrap();
+        assert!(serialized.contains("\"web_search\""));
+        assert!(serialized.contains("toolu_bdrk_01Q2RHaAE4QNMZiMS7cLfKwS"));
+        assert!(serialized.contains("\"toolUses\""));
+    }
 }
