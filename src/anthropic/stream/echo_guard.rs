@@ -166,9 +166,6 @@ mod tests {
         let mut guard = ResponseEchoGuard::new();
         assert_eq!(guard.filter(""), "");
         assert_eq!(guard.filter("<system-reminder>"), "");
-        assert_eq!(
-            guard.filter("done</system-reminder>answer"),
-            "answer"
-        );
+        assert_eq!(guard.filter("done</system-reminder>answer"), "answer");
     }
 }

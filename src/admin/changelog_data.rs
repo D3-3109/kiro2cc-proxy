@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.10".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "修复上游偶发回显 Claude Code system-reminder 元提示，避免该文本泄漏到客户端响应正文",
+                "Fixed occasional upstream echoing of Claude Code system-reminder metadata, preventing it from leaking into client response bodies",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.9".to_string(),
             is_latest: false,
             groups: vec![
