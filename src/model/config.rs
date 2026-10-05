@@ -41,6 +41,7 @@ pub struct CacheSimulationConfig {
 fn default_true() -> bool {
     true
 }
+
 fn default_fingerprint_enabled() -> bool {
     true
 }
@@ -430,6 +431,19 @@ mod tests {
         // 缺省该字段时必须为 false（维持展示缩放，Issue #44 修复的默认零回归前提）
         let config: Config = serde_json::from_str("{}").unwrap();
         assert!(!config.client_token_passthrough);
+    }
+
+    #[test]
+    fn test_thinking_as_text_default_is_true() {
+        let config = Config::default();
+        assert!(config.thinking_as_text);
+    }
+
+    #[test]
+    fn test_thinking_as_text_deserialize_default_is_true() {
+        // 缺省该字段时必须为 true（新用户默认开启思考文本化展示）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(config.thinking_as_text);
     }
 
     #[test]
