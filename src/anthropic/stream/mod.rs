@@ -4,6 +4,7 @@
 
 mod calib;
 mod context;
+mod echo_guard;
 mod helpers;
 mod state;
 mod tests;
@@ -16,6 +17,7 @@ pub(crate) use calib::scale_for_client_with;
 pub(crate) use calib::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
 pub use calib::{client_token_passthrough_enabled, set_client_token_passthrough};
 pub use context::StreamContext;
+pub(crate) use echo_guard::ResponseEchoGuard;
 pub(crate) use helpers::generate_fake_signature;
 pub use state::SseEvent;
 pub(crate) use thinking::split_thinking_and_visible;

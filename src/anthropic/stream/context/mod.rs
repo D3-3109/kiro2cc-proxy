@@ -92,6 +92,8 @@ pub struct StreamContext {
     effort: Option<String>,
     /// 思考文本化转换器（None = 关闭，出站事件原样输出）
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
+    /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
+    echo_guard: super::echo_guard::ResponseEchoGuard,
 }
 
 impl StreamContext {
@@ -134,6 +136,7 @@ impl StreamContext {
             context_usage_percentage: None,
             prefix_estimated_tokens: None,
             effort: None,
+            echo_guard: super::echo_guard::ResponseEchoGuard::new(),
         }
     }
 
@@ -368,6 +371,15 @@ impl StreamContext {
 
     /// 处理助手响应事件
     pub(crate) fn process_assistant_response(&mut self, content: &str) -> Vec<SseEvent> {
+        if content.is_empty() {
+            return Vec::new();
+        }
+
+        // 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块
+        // 文档 `echo_guard`）。放在最前面统一处理：命中时整段剥离后再继续走正常
+        // 流程（含 thinking 标签解析），不命中/已决出结果后永久透传，不影响吞吐。
+        let content = self.echo_guard.filter(content);
+        let content = content.as_str();
         if content.is_empty() {
             return Vec::new();
         }

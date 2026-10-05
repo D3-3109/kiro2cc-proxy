@@ -503,6 +503,11 @@ pub(crate) async fn handle_non_stream_request(
         split_non_stream_thinking(&text_content, !native_thinking_blocks.is_empty());
     text_content = visible_text;
 
+    // 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况
+    // （见 `stream::echo_guard` 模块文档）。非流式路径已拿到完整文本，
+    // 一次性调用即可（无需跨 chunk 状态）。
+    text_content = crate::anthropic::stream::ResponseEchoGuard::new().filter(&text_content);
+
     // JSON schema 结构化输出：去除模型可能添加的 Markdown 代码围栏
     if json_schema_requested && !text_content.is_empty() {
         text_content = strip_json_fences(text_content);
