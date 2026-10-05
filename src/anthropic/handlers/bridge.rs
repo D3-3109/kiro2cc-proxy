@@ -77,6 +77,16 @@ pub(crate) struct BridgeState {
     /// 每轮续请求基于上一轮续请求所用的状态演进，保证 conversationId/
     /// agentContinuationId/history 跨轮次逐字节不变
     pub(crate) evolution_base: Option<ConversationState>,
+    /// 一致性基底：与 evolution_base 不同，此状态始终满足"末位 assistant 的
+    /// 每个 tool_use 都被 currentMessage 的 tool_result 应答"的完整配对约束。
+    ///
+    /// 常规续请求会整体替换 currentMessage.tool_results（客户端原始结果被换成
+    /// 本轮搜索结果），配对依赖上游服务端会话状态；服务端状态缺失（超长会话）
+    /// 时该请求被 400 TOOL_USE_RESULT_MISMATCH 拒绝，且替换语义使客户端原始
+    /// tool_results 已不在演进链中、无法从演进基底恢复。此基底从原始请求状态
+    /// 出发，每轮结束时把本轮 toolUse（补进 history 末位 assistant）与结果
+    /// （追加到 tool_results 尾部）累积进来，重试时由它重建完整配对请求。
+    pub(crate) consolidated_base: Option<ConversationState>,
 }
 
 /// 一轮已截获完成、待执行的搜索
@@ -114,6 +124,7 @@ impl BridgeState {
             max_rounds: max_uses.unwrap_or(5).clamp(0, 5) as usize,
             pending: VecDeque::new(),
             evolution_base: None,
+            consolidated_base: None,
         }
     }
 
@@ -379,6 +390,27 @@ pub(crate) fn pair_web_search_tool_use_in_history(
     }
 }
 
+/// 把一轮 web_search 的配对信息（toolUse + 结果）累积并入给定状态
+///
+/// 重试请求构建与轮末一致性基底维护共用。补写 toolUse 到 history 末位
+/// assistant 的同时，把本轮结果**追加**到 currentMessage.tool_results 尾部
+/// （区别于常规续请求的整体替换），使状态满足退化校验模式下
+/// "assistant 每个 tool_use 都被紧随消息的 tool_result 应答、
+/// 每个 tool_result 都有配对 tool_use"的双向配对约束。
+pub(crate) fn apply_round_pairing(
+    state: &mut ConversationState,
+    pending: &PendingSearch,
+    round_result: &ToolResult,
+) {
+    pair_web_search_tool_use_in_history(state, pending);
+    state
+        .current_message
+        .user_input_message
+        .user_input_message_context
+        .tool_results
+        .push(round_result.clone());
+}
+
 /// 按单条待执行搜索构建其 ToolResult（MCP 成功 → success 摘要；失败 → error 降级）
 pub(crate) fn build_search_tool_result(
     tool_use_id: &str,
@@ -466,20 +498,31 @@ pub(crate) async fn bridge_execute_round(
     // 2. 基于演进基底构建续请求（D3 多轮语义：第 N+1 轮 clone 第 N 轮所用状态）
     let tool_result =
         build_search_tool_result(&pending.tool_use_id, &pending.query, &search_results);
-    let kiro_request =
-        build_continuation_request(bridge_ctx, bridge.evolution_base.take(), vec![tool_result]);
+    // 一致性基底懒初始化：从原始请求状态出发累积各轮配对（重试时使用）
+    if bridge.consolidated_base.is_none() {
+        bridge.consolidated_base = Some(bridge_ctx.conversation_state.clone());
+    }
+    let kiro_request = build_continuation_request(
+        bridge_ctx,
+        bridge.evolution_base.take(),
+        vec![tool_result.clone()],
+    );
     let request_body = match serde_json::to_string(&kiro_request) {
         Ok(body) => body,
         Err(e) => {
             tracing::error!("web_search 续请求序列化失败: {}", e);
             // 与 call_api_stream Err 分支对齐：写回取出的演进基底
             bridge.evolution_base = Some(kiro_request.conversation_state);
+            // 本轮配对仍需累积进一致性基底，供后续轮次（若有）重试使用
+            if let Some(consolidated) = bridge.consolidated_base.as_mut() {
+                apply_round_pairing(consolidated, &pending, &tool_result);
+            }
             return BridgeRoundOutcome::Failed(search_results);
         }
     };
 
     // 3. 续流：call_api_stream（换上游 body 继续 unfold，ctx/bridge 原样携带）
-    match provider
+    let outcome = match provider
         .call_api_stream(
             &request_body,
             bridge_ctx.is_compact_request,
@@ -494,20 +537,32 @@ pub(crate) async fn bridge_execute_round(
             BridgeRoundOutcome::Continued(response, EventStreamDecoder::new(), search_results)
         }
         Err(e) => {
-            // 上游服务端会话状态缺失（超长会话等场景）时，续请求会因
-            // tool_result 无配对 toolUse 被拒（400 TOOL_USE_RESULT_MISMATCH）。
-            // 降级重试一次：把本轮 toolUse 显式补进 history 后重发，
-            // 使配对不再依赖服务端状态。常规路径（history 逐字节不变）不受影响。
+            // 上游服务端会话状态缺失（超长会话等场景）时，续请求会因配对断裂被拒
+            // （400 TOOL_USE_RESULT_MISMATCH，两个方向：tool_result 无配对 tool_use、
+            // 或 tool_use 无紧随的 tool_result——后者源于续请求整体替换 tool_results
+            // 使客户端原始结果悬空）。降级重试一次：从一致性基底重建完整配对请求
+            // （原始结果 + 各轮累积 + 本轮结果，toolUse 补进 history 末位），
+            // 不再依赖服务端状态。常规路径（history 逐字节不变）不受影响。
             if e.to_string().contains("TOOL_USE_RESULT_MISMATCH") {
-                let mut retried = kiro_request.clone();
-                pair_web_search_tool_use_in_history(&mut retried.conversation_state, &pending);
+                let mut retry_state = bridge
+                    .consolidated_base
+                    .clone()
+                    .expect("consolidated_base 已在步骤 2 懒初始化");
+                apply_round_pairing(&mut retry_state, &pending, &tool_result);
+                let retried = KiroRequest {
+                    conversation_state: retry_state,
+                    profile_arn: bridge_ctx.profile_arn.clone(),
+                    additional_model_request_fields: bridge_ctx
+                        .additional_model_request_fields
+                        .clone(),
+                };
                 tracing::warn!(
                     tool_use_id = %pending.tool_use_id,
-                    "web_search 续请求配对被拒(TOOL_USE_RESULT_MISMATCH)，补写 toolUse 至 history 后重试"
+                    "web_search 续请求配对被拒(TOOL_USE_RESULT_MISMATCH)，从一致性基底重建完整配对后重试"
                 );
                 match serde_json::to_string(&retried) {
                     Ok(retry_body) => {
-                        return match provider
+                        match provider
                             .call_api_stream(
                                 &retry_body,
                                 bridge_ctx.is_compact_request,
@@ -519,7 +574,7 @@ pub(crate) async fn bridge_execute_round(
                             Ok((response, _credential_id)) => {
                                 tracing::info!(
                                     tool_use_id = %pending.tool_use_id,
-                                    "web_search 续请求补写 toolUse 重试成功"
+                                    "web_search 续请求完整配对重试成功"
                                 );
                                 bridge.evolution_base = Some(retried.conversation_state);
                                 BridgeRoundOutcome::Continued(
@@ -533,22 +588,29 @@ pub(crate) async fn bridge_execute_round(
                                 bridge.evolution_base = Some(retried.conversation_state);
                                 BridgeRoundOutcome::Failed(search_results)
                             }
-                        };
+                        }
                     }
                     Err(se) => {
                         tracing::error!("web_search 续请求重试序列化失败: {}", se);
                         bridge.evolution_base = Some(retried.conversation_state);
-                        return BridgeRoundOutcome::Failed(search_results);
+                        BridgeRoundOutcome::Failed(search_results)
                     }
                 }
+            } else {
+                tracing::error!("web_search 续请求发起失败: {}", e);
+                // 演进基底保持取出的状态，避免下一轮基于未知状态演进
+                bridge.evolution_base = Some(kiro_request.conversation_state);
+                // 搜索结果必须带回：客户端已收到 server_tool_use 块，缺结果块会破坏配对
+                BridgeRoundOutcome::Failed(search_results)
             }
-            tracing::error!("web_search 续请求发起失败: {}", e);
-            // 演进基底保持取出的状态，避免下一轮基于未知状态演进
-            bridge.evolution_base = Some(kiro_request.conversation_state);
-            // 搜索结果必须带回：客户端已收到 server_tool_use 块，缺结果块会破坏配对
-            BridgeRoundOutcome::Failed(search_results)
         }
+    };
+
+    // 4. 轮末：本轮配对（toolUse + 结果）累积进一致性基底，供后续轮次重试重建
+    if let Some(consolidated) = bridge.consolidated_base.as_mut() {
+        apply_round_pairing(consolidated, &pending, &tool_result);
     }
+    outcome
 }
 
 /// 执行一轮桥接的 owned 变体（修复③ v2：供 `tokio::spawn` 后台任务调用）

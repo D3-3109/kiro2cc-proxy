@@ -726,4 +726,146 @@ pub(crate) mod tests {
         assert!(serialized.contains("toolu_bdrk_01Q2RHaAE4QNMZiMS7cLfKwS"));
         assert!(serialized.contains("\"toolUses\""));
     }
+
+    // ==== apply_round_pairing（TOOL_USE_RESULT_MISMATCH 一致性基底重建）====
+
+    fn paired_base_state() -> ConversationState {
+        // 模拟原始请求转换结果：history 末位 assistant 携带 tool_use a1，
+        // currentMessage.tool_results 携带其结果 ra1（配对完整）
+        let mut state = ConversationState::new("conv-pair");
+        let mut assistant = crate::kiro::model::requests::conversation::AssistantMessage::new(" ");
+        assistant.tool_uses = Some(vec![crate::kiro::model::requests::tool::ToolUseEntry::new(
+            "toolu_a1", "read",
+        )]);
+        state.history = vec![
+            Message::user("hi", "claude-sonnet-4"),
+            Message::Assistant(
+                crate::kiro::model::requests::conversation::HistoryAssistantMessage {
+                    assistant_response_message: assistant,
+                },
+            ),
+        ];
+        state.current_message.user_input_message.content = "results".to_string();
+        state
+            .current_message
+            .user_input_message
+            .user_input_message_context
+            .tool_results = vec![crate::kiro::model::requests::tool::ToolResult::success(
+            "toolu_a1",
+            "file content",
+        )];
+        state
+    }
+
+    fn round_result_for(id: &str) -> crate::kiro::model::requests::tool::ToolResult {
+        crate::kiro::model::requests::tool::ToolResult::success(id, "search summary")
+    }
+
+    /// 断言末位 assistant 的 tool_use 与 currentMessage 的 tool_result 双向配对
+    fn assert_fully_paired(state: &ConversationState) {
+        let Message::Assistant(last) = state.history.last().expect("history 非空") else {
+            panic!("末位应为 assistant");
+        };
+        let use_ids: Vec<&str> = last
+            .assistant_response_message
+            .tool_uses
+            .as_ref()
+            .expect("tool_uses 应存在")
+            .iter()
+            .map(|t| t.tool_use_id.as_str())
+            .collect();
+        let result_ids: Vec<&str> = state
+            .current_message
+            .user_input_message
+            .user_input_message_context
+            .tool_results
+            .iter()
+            .map(|r| r.tool_use_id.as_str())
+            .collect();
+        assert_eq!(
+            use_ids, result_ids,
+            "tool_use 与 tool_result 应完全配对（含顺序）"
+        );
+    }
+
+    #[test]
+    fn test_apply_round_pairing_restores_full_consistency() {
+        // 常规续请求把 currentMessage.tool_results 整体替换为 [t1] 后，a1 悬空
+        // （即线上 TOOL_USE_RESULT_MISMATCH 的第二变体）。重试路径从一致性基底
+        // （原始请求状态，tool_results 仍是 [ra1]）clone 后 apply 一轮：追加而非
+        // 替换，恢复双向配对
+        let mut state = paired_base_state();
+
+        super::super::super::bridge::apply_round_pairing(
+            &mut state,
+            &super::super::super::bridge::PendingSearch {
+                tool_use_id: "toolu_t1".to_string(),
+                query: "q1".to_string(),
+            },
+            &round_result_for("toolu_t1"),
+        );
+
+        assert_fully_paired(&state);
+        let Message::Assistant(last) = state.history.last().unwrap() else {
+            panic!()
+        };
+        let ids: Vec<&str> = last
+            .assistant_response_message
+            .tool_uses
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|t| t.tool_use_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["toolu_a1", "toolu_t1"]);
+        let result_ids: Vec<&str> = state
+            .current_message
+            .user_input_message
+            .user_input_message_context
+            .tool_results
+            .iter()
+            .map(|r| r.tool_use_id.as_str())
+            .collect();
+        // 原始结果保留在前、本轮结果追加在后（区别于替换语义）
+        assert_eq!(result_ids, vec!["toolu_a1", "toolu_t1"]);
+    }
+
+    #[test]
+    fn test_consolidated_base_accumulates_across_rounds() {
+        // 多轮：每轮累积后一致性基底都保持双向配对
+        let mut state = paired_base_state();
+
+        super::super::super::bridge::apply_round_pairing(
+            &mut state,
+            &super::super::super::bridge::PendingSearch {
+                tool_use_id: "toolu_t1".to_string(),
+                query: "q1".to_string(),
+            },
+            &round_result_for("toolu_t1"),
+        );
+        assert_fully_paired(&state);
+
+        super::super::super::bridge::apply_round_pairing(
+            &mut state,
+            &super::super::super::bridge::PendingSearch {
+                tool_use_id: "toolu_t2".to_string(),
+                query: "q2".to_string(),
+            },
+            &round_result_for("toolu_t2"),
+        );
+        assert_fully_paired(&state);
+
+        let Message::Assistant(last) = state.history.last().unwrap() else {
+            panic!()
+        };
+        let ids: Vec<&str> = last
+            .assistant_response_message
+            .tool_uses
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|t| t.tool_use_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["toolu_a1", "toolu_t1", "toolu_t2"]);
+    }
 }
