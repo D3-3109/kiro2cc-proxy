@@ -1,0 +1,42 @@
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="ar9" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="480" fill="#fafafa"/>
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能⑧ 思考文本化：thinking 内容以 > 💭 文本形式展示（内部阅读顺序）</text>
+
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① anthropic/thinking_text.rs — 开关与判定：thinking_as_text_enabled / set_thinking_as_text</text>
+  <text x="80" y="86" font-size="10" fill="#555">is_claude_code_client 的判定条件（User-Agent / system prompt 痕迹）——为什么只对 CC 生效</text>
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#ar9)"/>
+
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② thinking_text.rs::rewrite — 出站方向：thinking 块改写成 &gt; 💭 Thinking 文本块</text>
+  <text x="80" y="154" font-size="10" fill="#555">THOUGHT_HEADER 常量；thinking_delta / signature_delta 分别怎么处理</text>
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#ar9)"/>
+
+  <rect x="60" y="184" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="204" font-size="11.5" fill="#1a56c4" font-weight="bold">③ thinking_text.rs::strip_rendered_thinking — 入站方向：把回传的 💭 文本剥回 thinking</text>
+  <text x="80" y="222" font-size="10" fill="#555">与②必须双向互逆：改写→剥离→还原后逐字节一致（回归测试即验这个不变量）</text>
+  <line x1="450" y1="236" x2="450" y2="250" stroke="#555" stroke-width="1.5" marker-end="url(#ar9)"/>
+
+  <rect x="60" y="252" width="780" height="52" rx="6" fill="#fef7e0" stroke="#f4b400" stroke-width="2"/>
+  <text x="80" y="272" font-size="11.5" fill="#9a6b00" font-weight="bold">④ anthropic/stream/thinking.rs ★ — 与功能④衔接：流式侧 thinking 标签重建是谁产出的 thinking 块</text>
+  <text x="80" y="290" font-size="10" fill="#555">rewrite 处理的是流式重建（标签检测）之后的块；两层的职责边界必须画清</text>
+  <line x1="450" y1="304" x2="450" y2="318" stroke="#555" stroke-width="1.5" marker-end="url(#ar9)"/>
+
+  <rect x="60" y="320" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="340" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ converter 侧接入点 — 请求消息里若有历史 💭 文本块，入站剥离发生在转换之前还是之后</text>
+  <text x="80" y="358" font-size="10" fill="#555">grep strip_rendered_thinking 的全部调用点，确认只覆盖入站路径、不影响 tool_use 内容</text>
+  <line x1="450" y1="372" x2="450" y2="386" stroke="#555" stroke-width="1.5" marker-end="url(#ar9)"/>
+
+  <rect x="60" y="388" width="780" height="44" rx="6" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="80" y="406" font-size="11.5" fill="#1e7e34" font-weight="bold">⑥ 验证：thinking_as_text 默认值回归测试（48d138f / 79bb6a5）+ 双向互逆测试用例</text>
+  <text x="80" y="422" font-size="10" fill="#555">关闭开关时行为应与原生 Claude API 一致</text>
+
+  <text x="80" y="452" font-size="9" fill="#888">验证：为什么历史消息里的 💭 文本必须剥掉再发上游？（避免污染 thinking 上下文 / 缓存前缀漂移）</text>
+</svg>

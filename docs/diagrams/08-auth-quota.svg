@@ -1,0 +1,42 @@
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="ar8" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="480" fill="#fafafa"/>
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能⑦ 认证与额度入口：一个请求进门先被谁拦（内部阅读顺序）</text>
+
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① anthropic/router.rs — 端点总装：/v1/*、/cc/v1/*、/v1/ping、OpenAI 兼容路由怎么 nest</text>
+  <text x="80" y="86" font-size="10" fill="#555">哪些路由套了 auth_middleware、哪些没套（ping / user 登录）；layer 顺序</text>
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#ar8)"/>
+
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② anthropic/middleware.rs — auth_middleware：主 Key → 子 Key 的认证顺序</text>
+  <text x="80" y="154" font-size="10" fill="#555">AuthMiddleware builder 链（with_api_key_manager / with_rpm_tracker / with_fingerprint_tracker）聚合了什么</text>
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#ar8)"/>
+
+  <rect x="60" y="184" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="204" font-size="11.5" fill="#1a56c4" font-weight="bold">③ model/rpm.rs — RPM 滑动窗口计数：RpmTracker 怎么记、窗口多大、超了怎么拒绝</text>
+  <text x="80" y="222" font-size="10" fill="#555">RPM 限制与 token_manager 的 max_rpm_per_credential 是两个不同维度（客户端侧 vs 上游侧）</text>
+  <line x1="450" y1="236" x2="450" y2="250" stroke="#555" stroke-width="1.5" marker-end="url(#ar8)"/>
+
+  <rect x="60" y="252" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="272" font-size="11.5" fill="#1a56c4" font-weight="bold">④ model/api_key.rs + admin/api_keys.rs — 子 Key：数据结构、额度检查在哪个环节拦截</text>
+  <text x="80" y="290" font-size="10" fill="#555">子 Key 的额度耗尽 / 过期 / 禁用各返回什么状态码与错误体</text>
+  <line x1="450" y1="304" x2="450" y2="318" stroke="#555" stroke-width="1.5" marker-end="url(#ar8)"/>
+
+  <rect x="60" y="320" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="340" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ model/usage/ — 用量追踪：UsageTracker 的子 Key 维度 + 全局维度双口径</text>
+  <text x="80" y="358" font-size="10" fill="#555">谁在请求完成后把 usage 写进 tracker；Admin UI 统计页的数据源</text>
+  <line x1="450" y1="368" x2="450" y2="382" stroke="#555" stroke-width="1.5" marker-end="url(#ar8)"/>
+
+  <rect x="60" y="384" width="780" height="44" rx="6" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="80" y="402" font-size="11.5" fill="#1e7e34" font-weight="bold">⑥ common/auth.rs + admin/middleware.rs — 公共认证工具与 Admin 鉴权（与②对照读）</text>
+  <text x="80" y="418" font-size="10" fill="#555">Admin 密码校验方式与 API Key 校验的差异</text>
+
+  <text x="80" y="452" font-size="9" fill="#888">验证：未带 Key / 子 Key 额度耗尽 / RPM 超限，三种情况的响应码分别是什么？在哪一行被拦截？</text>
+</svg>

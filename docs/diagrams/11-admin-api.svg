@@ -1,0 +1,43 @@
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="ar11" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="480" fill="#fafafa"/>
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能⑩ Admin/User API 与配置持久化：改一个配置项之后发生了什么（内部阅读顺序）</text>
+
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① admin/router.rs — 路由总装：/api/admin/* 全部端点清单 + admin_psw 非空才启用的门控</text>
+  <text x="80" y="86" font-size="10" fill="#555">对照 src/user/ 的自助端点：user 只能看/改自己的什么</text>
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#ar11)"/>
+
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② admin/middleware.rs — Admin 鉴权：密码校验方式（与功能⑦的 API Key 校验对照）</text>
+  <text x="80" y="154" font-size="10" fill="#555">session/token 机制还是每请求带密码？前端登录态怎么维持</text>
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#ar11)"/>
+
+  <rect x="60" y="184" width="780" height="66" rx="6" fill="#fef7e0" stroke="#f4b400" stroke-width="2"/>
+  <text x="80" y="204" font-size="11.5" fill="#9a6b00" font-weight="bold">③ admin/persist.rs ★ — 配置持久化：persist_config_field 白名单制（哪些字段允许运行时改）</text>
+  <text x="80" y="222" font-size="10" fill="#555">改完内存 Config 后如何通知热组件（token_manager / provider 并发数 / RPM 上限）生效；</text>
+  <text x="80" y="238" font-size="10" fill="#555">哪些字段改了必须重启——白名单本身就是一个「热更新边界」清单</text>
+  <line x1="450" y1="250" x2="450" y2="264" stroke="#555" stroke-width="1.5" marker-end="url(#ar11)"/>
+
+  <rect x="60" y="266" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="286" font-size="11.5" fill="#1a56c4" font-weight="bold">④ common/fs.rs — 原子写：临时文件 + rename，为什么不能直接 write</text>
+  <text x="80" y="304" font-size="10" fill="#555">credentials.json 回写（衔接功能④ refresh）与 config.json 持久化共用这套设施</text>
+  <line x1="450" y1="318" x2="450" y2="332" stroke="#555" stroke-width="1.5" marker-end="url(#ar11)"/>
+
+  <rect x="60" y="334" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="354" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ admin/api_keys.rs — 子 Key 管理端点：增删改查怎么联动内存中的 ApiKeyManager</text>
+  <text x="80" y="372" font-size="10" fill="#555">额度调整立即生效还是下请求生效（衔接功能⑦）</text>
+  <line x1="450" y1="386" x2="450" y2="400" stroke="#555" stroke-width="1.5" marker-end="url(#ar11)"/>
+
+  <rect x="60" y="402" width="780" height="44" rx="6" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="80" y="420" font-size="11.5" fill="#1e7e34" font-weight="bold">⑥ admin/changelog_data.rs — 版本条目：is_latest 高亮依赖此文件与 Cargo.toml version 同步</text>
+  <text x="80" y="436" font-size="10" fill="#555">对应仓库强约束：打 tag 前必须提交 chore: 发布 vX.Y.Z</text>
+
+  <text x="80" y="470" font-size="9" fill="#888">验证：改 max_rpm_per_credential 后不重启服务，正在飞行的请求受影响吗？持久化失败会留下什么状态？</text>
+</svg>

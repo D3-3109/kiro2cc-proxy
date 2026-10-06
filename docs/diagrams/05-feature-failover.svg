@@ -1,0 +1,47 @@
+<svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="560" fill="#fafafa"/>
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能④ 多账号故障转移与重试：一次 429 之后发生了什么（内部阅读顺序）</text>
+
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① kiro/token_manager/manager/core.rs — 选号：priority（默认）/ balanced 轮询、粘性会话</text>
+  <text x="80" y="86" font-size="10" fill="#555">credentials() 怎么选、sticky_metrics 报什么；max_rpm_per_credential 与单账号并发 20 的关系</text>
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#ar5)"/>
+
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② kiro/provider/core.rs — 发送：client_for / semaphore_for（全局 50 / 单账号 20）、超时分档</text>
+  <text x="80" y="154" font-size="10" fill="#555">普通 180s / compact 1000s；builder 链（proxy / rpm_tracker / throttle_log / failure_log）</text>
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#ar5)"/>
+
+  <rect x="60" y="184" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="204" font-size="11.5" fill="#1a56c4" font-weight="bold">③ kiro/endpoint.rs — 端点轮换：Ide / Runtime / Codewhisperer / Amazonq 四桶 + default_order</text>
+  <text x="80" y="222" font-size="10" fill="#555">EndpointBucketRegistry：(credential_id, endpoint) 二元组隔离封禁，单次 429 封 30s</text>
+  <line x1="450" y1="236" x2="450" y2="250" stroke="#555" stroke-width="1.5" marker-end="url(#ar5)"/>
+
+  <rect x="60" y="252" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="272" font-size="11.5" fill="#1a56c4" font-weight="bold">④ kiro/provider/errors.rs — 错误分类：什么错误值得重试、退避延迟怎么算</text>
+  <text x="80" y="290" font-size="10" fill="#555">月度限额与 Profile ARN 错误判定；什么情况下改写请求体重试</text>
+  <line x1="450" y1="304" x2="450" y2="318" stroke="#555" stroke-width="1.5" marker-end="url(#ar5)"/>
+
+  <rect x="60" y="320" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="340" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ kiro/provider/retry.rs — 重试编排：每凭据 3 次 × 总共 9 次，重试怎么换下一个凭据</text>
+  <text x="80" y="358" font-size="10" fill="#555">对照 retry.rs 顶部注释画「凭据内 3 次 × 全局 9 次」树状图</text>
+  <line x1="450" y1="372" x2="450" y2="386" stroke="#555" stroke-width="1.5" marker-end="url(#ar5)"/>
+
+  <rect x="60" y="388" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="408" font-size="11.5" fill="#1a56c4" font-weight="bold">⑥ token_manager/refresh.rs + mod.rs — 补给线：OAuth 刷新、machine_id 派生、credentials.json 回写</text>
+  <text x="80" y="426" font-size="10" fill="#555">单/多账号两种格式的回写差异；refresh 失败时账号会被标记为什么状态</text>
+  <line x1="450" y1="440" x2="450" y2="454" stroke="#555" stroke-width="1.5" marker-end="url(#ar5)"/>
+
+  <rect x="60" y="456" width="780" height="44" rx="6" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="80" y="474" font-size="11.5" fill="#1e7e34" font-weight="bold">⑦ provider/headers.rs — 收尾：build_headers / build_mcp_headers 的伪装字段</text>
+  <text x="80" y="490" font-size="10" fill="#555">请求头里带了哪些字段让上游把代理当成官方 IDE 客户端</text>
+
+  <text x="80" y="530" font-size="9" fill="#888">验证：上游 429 后封禁记录在哪个维度？（(credential_id, endpoint) 二元组）重试换凭据时粘性会话会怎样？</text>
+</svg>

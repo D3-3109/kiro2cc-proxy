@@ -1,0 +1,43 @@
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="ar10" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="480" fill="#fafafa"/>
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能⑨ Token 计数与 0.6657 缩放：auto-compact 时机是怎么被「调」出来的（内部阅读顺序）</text>
+
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① src/token.rs — tiktoken cl100k_base BPE 全局单例：初始化方式与线程安全</text>
+  <text x="80" y="86" font-size="10" fill="#555">count_tokens / count_messages_tokens 的口径：哪些字段计入、哪些忽略</text>
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#ar10)"/>
+
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② token.rs::count_prefix_tokens — 前缀估算：为 prompt cache 第二层降级服务（衔接功能⑤）</text>
+  <text x="80" y="154" font-size="10" fill="#555">为什么用 cl100k 近似 Claude 分词；误差方向（偏高/偏低）对缓存意味着什么</text>
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#ar10)"/>
+
+  <rect x="60" y="184" width="780" height="66" rx="6" fill="#fef7e0" stroke="#f4b400" stroke-width="2"/>
+  <text x="80" y="204" font-size="11.5" fill="#9a6b00" font-weight="bold">③ anthropic/stream/calib.rs ★ — CLIENT_TOKEN_DISPLAY_SCALE = 0.6657：显示缩放系数</text>
+  <text x="80" y="222" font-size="10" fill="#555">cap_input_tokens_pub 的输入封顶；client_token_passthrough 直通开关绕过一切校准；</text>
+  <text x="80" y="238" font-size="10" fill="#555">0.6657 是配合旧公式校准的——改 token 口径必须重新评估这个系数</text>
+  <line x1="450" y1="250" x2="450" y2="264" stroke="#555" stroke-width="1.5" marker-end="url(#ar10)"/>
+
+  <rect x="60" y="266" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="286" font-size="11.5" fill="#1a56c4" font-weight="bold">④ stream/mod.rs 消费点 — 校准后的 usage 写进 message_delta 的哪个字段</text>
+  <text x="80" y="304" font-size="10" fill="#555">input_tokens / cache_read_input_tokens 各自的来源与缩放差异</text>
+  <line x1="450" y1="318" x2="450" y2="332" stroke="#555" stroke-width="1.5" marker-end="url(#ar10)"/>
+
+  <rect x="60" y="334" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="354" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ 闭环推演 — Claude Code 客户端拿这个数做什么：对照 context窗口阈值触发 auto-compact</text>
+  <text x="80" y="372" font-size="10" fill="#555">缩放系数偏大 → 提前 compact（浪费）；偏小 → 上下文溢出报错。画一条数轴标注两种失败</text>
+  <line x1="450" y1="386" x2="450" y2="400" stroke="#555" stroke-width="1.5" marker-end="url(#ar10)"/>
+
+  <rect x="60" y="402" width="780" height="44" rx="6" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="80" y="420" font-size="11.5" fill="#1e7e34" font-weight="bold">⑥ 回归验证 — additional_model_request_fields 的 max_tokens 分档与 token 计数的关系</text>
+  <text x="80" y="436" font-size="10" fill="#555">上游 max_tokens（1024 下限 / 128K·64K 档）是约束输出，与本功能的输入计数是两条线</text>
+
+  <text x="80" y="470" font-size="9" fill="#888">验证：0.6657 乘在哪个数上？如果 tiktoken 换 o200k_base，这个系数要动吗？为什么？</text>
+</svg>

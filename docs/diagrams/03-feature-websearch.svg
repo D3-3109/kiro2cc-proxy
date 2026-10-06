@@ -1,0 +1,62 @@
+<svg viewBox="0 0 900 640" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="640" fill="#fafafa"/>
+
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能② web_search 桥接：Claude Code web_search → Kiro web_search（内部阅读顺序）</text>
+
+  <!-- 读取顺序 1 -->
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① converter/websearch.rs — 请求侧拆解：split_web_search_tool 把 server tool 从请求中拆出</text>
+  <text x="80" y="86" font-size="10" fill="#555">create_web_search_bridge_tool 注入 context.tools 让 Kiro 模型主动发起 web_search toolUse；collect_history_tool_names</text>
+
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 读取顺序 2 -->
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② handlers/bridge.rs（前半）— 桥接上下文与状态机：build_bridge_context → BridgeState</text>
+  <text x="80" y="154" font-size="10" fill="#555">状态迁移 Collecting → Executing（嵌入 create_sse_stream 的 unfold 循环）；parse_bridge_query 解析搜索意图</text>
+
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 读取顺序 3 -->
+  <rect x="60" y="184" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="204" font-size="11.5" fill="#1a56c4" font-weight="bold">③ handlers/bridge.rs（后半）— 截获与执行：bridge_handle_event 截获 web_search toolUse</text>
+  <text x="80" y="222" font-size="10" fill="#555">bridge_execute_round →（交④真实搜索）→ build_web_search_visibility_events / result_events 回填 SSE</text>
+
+  <line x1="450" y1="236" x2="450" y2="250" stroke="#555" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 读取顺序 4 -->
+  <rect x="60" y="252" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="272" font-size="11.5" fill="#1a56c4" font-weight="bold">④ anthropic/websearch.rs — 真实搜索执行：create_mcp_request + call_mcp_api 走 Kiro MCP 接口</text>
+  <text x="80" y="290" font-size="10" fill="#555">parse_search_results / generate_websearch_events（块格式被 bridge 复用）；失败降级 ToolResult::error 不中断流</text>
+
+  <line x1="450" y1="304" x2="450" y2="318" stroke="#555" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 读取顺序 5 -->
+  <rect x="60" y="320" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="340" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ handlers/bridge.rs（收尾）— 多轮续接：build_continuation_request + build_search_tool_result</text>
+  <text x="80" y="358" font-size="10" fill="#555">harvest_bridge_round / flush_unpaired_search_blocks / build_web_search_result_block；多轮 Executing 循环回到②</text>
+
+  <line x1="450" y1="372" x2="450" y2="386" stroke="#555" stroke-width="1.5" marker-end="url(#arrow3)"/>
+
+  <!-- 运行时闭环 -->
+  <rect x="60" y="388" width="780" height="150" rx="6" fill="#fef7e0" stroke="#f4b400" stroke-width="1.5"/>
+  <text x="80" y="410" font-size="12" fill="#9a6b00" font-weight="bold">运行时数据流闭环（读完代码后沿这条线走一遍验证理解）</text>
+  <text x="80" y="432" font-size="10.5" fill="#333">客户端请求带 web_search server tool → ①拆解+注入桥接工具 → Kiro 模型返回 web_search toolUse</text>
+  <text x="80" y="452" font-size="10.5" fill="#333">→ ③截获 toolUse → ④经 MCP 真实搜索 → 搜索结果以 toolResult 续接（⑤）→ 再次发给 Kiro</text>
+  <text x="80" y="472" font-size="10.5" fill="#333">→ 循环直至模型给出最终回答 → 桥接工具对客户端不可见，客户端只看到标准 Anthropic 事件</text>
+  <text x="80" y="498" font-size="10" fill="#9a6b00">验证点：为什么客户端视角的 web_search 事件序列与官方 server tool 格式保持一致？（build_web_search_visibility_events）</text>
+  <text x="80" y="518" font-size="10" fill="#9a6b00">验证点：MCP 调用失败时流为什么不中断？（降级为 ToolResult::error 续接对话）</text>
+
+  <!-- 注意 -->
+  <rect x="60" y="552" width="780" height="52" rx="6" fill="#fce8e6" stroke="#ea4335" stroke-width="1.5"/>
+  <text x="80" y="572" font-size="10.5" fill="#b3261e" font-weight="bold">注意：《代码速查表》中「src/anthropic/websearch.rs 承担全部桥接」的描述已过时 ——</text>
+  <text x="80" y="590" font-size="10" fill="#b3261e">现行架构是三文件协作：converter/websearch.rs（请求侧）+ handlers/bridge.rs（状态机）+ websearch.rs（MCP 执行）</text>
+</svg>

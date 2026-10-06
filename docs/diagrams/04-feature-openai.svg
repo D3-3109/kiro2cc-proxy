@@ -1,0 +1,43 @@
+<svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;max-width:900px;font-family:sans-serif">
+  <defs>
+    <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="520" fill="#fafafa"/>
+  <text x="450" y="28" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">功能③ OpenAI 兼容层：/v1/chat/completions 与 /v1/responses（内部阅读顺序）</text>
+
+  <rect x="60" y="48" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="68" font-size="11.5" fill="#1a56c4" font-weight="bold">① openai/handlers.rs — 两个入口：post_chat_completions / post_responses</text>
+  <text x="80" y="86" font-size="10" fill="#555">关注点：翻译成 Anthropic 请求后如何复用 anthropic::handlers::post_messages 走完整下游链路</text>
+  <line x1="450" y1="100" x2="450" y2="114" stroke="#555" stroke-width="1.5" marker-end="url(#ar4)"/>
+
+  <rect x="60" y="116" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="136" font-size="11.5" fill="#1a56c4" font-weight="bold">② openai/chat_request.rs + responses_request/（items.rs + tools.rs）— 入站翻译</text>
+  <text x="80" y="154" font-size="10" fill="#555">messages/items → Anthropic content；tools 翻译；web_search 等内建工具为何 OpenAI 侧无对等实现</text>
+  <line x1="450" y1="168" x2="450" y2="182" stroke="#555" stroke-width="1.5" marker-end="url(#ar4)"/>
+
+  <rect x="60" y="184" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="204" font-size="11.5" fill="#1a56c4" font-weight="bold">③ openai/model_map.rs — gpt-* 模型名 → Kiro 上游模型（与 anthropic 侧 map_model 对照读）</text>
+  <text x="80" y="222" font-size="10" fill="#555">两侧映射的规则差异；透传模型名的处理（passthrough）</text>
+  <line x1="450" y1="236" x2="450" y2="250" stroke="#555" stroke-width="1.5" marker-end="url(#ar4)"/>
+
+  <rect x="60" y="252" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="272" font-size="11.5" fill="#1a56c4" font-weight="bold">④ openai/sse.rs — Anthropic SSE 增量解析器（~350 行，两个出站翻译器共用的前置层）</text>
+  <text x="80" y="290" font-size="10" fill="#555">为什么需要一个独立的 SSE 再解析层；事件缓冲与拼接策略</text>
+  <line x1="450" y1="304" x2="450" y2="318" stroke="#555" stroke-width="1.5" marker-end="url(#ar4)"/>
+
+  <rect x="60" y="320" width="780" height="52" rx="6" fill="#e8f0fe" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="80" y="340" font-size="11.5" fill="#1a56c4" font-weight="bold">⑤ openai/chat_response/ + responses_response/（stream.rs + nonstream.rs）— 出站翻译</text>
+  <text x="80" y="358" font-size="10" fill="#555">Anthropic SSE/JSON → OpenAI chat.chunk / response.output_item；流式与非流式对称组织</text>
+  <line x1="450" y1="372" x2="450" y2="386" stroke="#555" stroke-width="1.5" marker-end="url(#ar4)"/>
+
+  <rect x="60" y="388" width="780" height="44" rx="6" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="80" y="406" font-size="11.5" fill="#1e7e34" font-weight="bold">⑥ openai/error.rs — OpenAI 格式错误响应；对照 anthropic/handlers/error.rs</text>
+  <text x="80" y="422" font-size="10" fill="#555">两种错误外壳格式的差异</text>
+
+  <text x="80" y="462" font-size="9" fill="#888">设计取舍：外挂不侵入——不改 anthropic 模块任何实现；代价是 SSE 多一次解析/再编码</text>
+  <text x="80" y="480" font-size="9" fill="#888">验证：为什么 codex CLI（/v1/responses）也能吃到多账号故障转移？（翻译后复用同一下游）</text>
+</svg>
