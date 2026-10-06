@@ -1,4 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! 程序入口：初始化日志/配置/凭据管理器，装配 axum 路由（Anthropic、OpenAI 兼容层、Admin/User API 与静态 UI）并启动 HTTP 服务。
+
 mod admin;
 mod admin_ui;
 mod anthropic;

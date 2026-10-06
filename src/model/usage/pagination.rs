@@ -1,5 +1,4 @@
-//! 分页查询：API Key / 账号维度的原始请求记录分页
-
+//! 分页查询：API Key / 账号维度的原始请求记录分页。
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;

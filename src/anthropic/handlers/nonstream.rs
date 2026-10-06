@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! 非流式响应构建：将 Kiro 事件聚合为完整 Anthropic message 响应（含 thinking 块 flush），用于非流式请求。
 
 use crate::anthropic::types::ErrorResponse;
 

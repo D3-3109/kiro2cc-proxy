@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // 工具使用事件处理与 signature 事件生成（自 context.rs 拆出，纯代码搬移）
 
+//! 工具使用事件处理与 signature 事件生成（自 context.rs 拆出，纯代码搬移）。
 use serde_json::json;
 
 use super::StreamContext;

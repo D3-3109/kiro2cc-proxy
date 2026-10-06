@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! Handler 错误处理：构造 prompt_too_long 提示、将 Kiro/provider 错误映射为带上下文的 Anthropic 错误响应、解析请求体为 MessagesRequest。
 
 use crate::anthropic::stream::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
 use crate::anthropic::types::{ErrorResponse, MessagesRequest};

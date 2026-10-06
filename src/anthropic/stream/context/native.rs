@@ -1,5 +1,4 @@
-//! Kiro 原生推理事件到 Anthropic thinking 块的转换。
-
+//! Kiro 原生推理事件到 Anthropic thinking 块的转换：native reasoning 流的组装与收尾事件生成。
 use serde_json::json;
 
 use super::StreamContext;

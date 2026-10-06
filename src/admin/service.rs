@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API 业务逻辑服务
+//! Admin 业务服务层：凭据增删改查、余额查询与缓存、模型列表聚合、负载均衡模式与单账号 RPM 设置，桥接 handlers 与 token_manager/provider。
 
 use std::collections::HashMap;
 use std::path::PathBuf;

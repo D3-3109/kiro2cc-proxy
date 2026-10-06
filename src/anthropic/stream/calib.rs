@@ -1,6 +1,4 @@
-//! 流式响应处理模块
-//!
-//! 实现 Kiro → Anthropic 流式响应转换和 SSE 状态管理
+//! Token 显示校准：按模型确定 context window 与空响应阈值，CLIENT_TOKEN_DISPLAY_SCALE（0.6657）缩放客户端可见 token 以控制 auto-compact 时机，支持 passthrough 开关。
 /// 所有模型统一按 100 万 token 上下文窗口计算。
 ///
 /// 历史上按模型分支返回 200K/1M；本变更改为统一 1M，与"contextUsage 本地化"决策一致：

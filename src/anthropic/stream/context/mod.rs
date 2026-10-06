@@ -1,6 +1,4 @@
-//! 流式响应处理模块
-//!
-//! 实现 Kiro → Anthropic 流式响应转换和 SSE 状态管理
+//! StreamContext 主结构：聚合单次流式请求的全部状态（事件缓冲、块状态、usage 统计），是 SSE 状态机的上下文载体。
 use std::collections::HashMap;
 use std::sync::Arc;
 

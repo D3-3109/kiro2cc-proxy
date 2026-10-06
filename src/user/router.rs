@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! User API 路由配置
+//! User 路由装配：create_user_router 挂载登录与用量查询端点到 /api/user。
 
 use axum::{
     Router, middleware,

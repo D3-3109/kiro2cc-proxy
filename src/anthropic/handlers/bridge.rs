@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! web_search 桥接 Handler：解析 bridge 查询参数并构建桥接上下文，将客户端 web_search 工具请求转发到 Kiro 侧执行。
 
 use super::stream::stream_interrupted_error_event;
 use crate::anthropic::stream::{SseEvent, StreamContext};

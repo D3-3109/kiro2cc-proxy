@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API 类型定义
+//! Admin API 请求/响应类型：凭据状态、启停请求、余额、模型条目、负载均衡模式等 DTO 定义。
 
 use serde::{Deserialize, Serialize};
 

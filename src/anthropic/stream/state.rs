@@ -1,6 +1,4 @@
-//! 流式响应处理模块
-//!
-//! 实现 Kiro → Anthropic 流式响应转换和 SSE 状态管理
+//! 流式状态定义：SseEvent 与 BlockState 等核心结构，驱动 Kiro → Anthropic SSE 转换状态机。
 use std::collections::HashMap;
 
 use serde_json::json;

@@ -1,5 +1,6 @@
 // 流式部分：Anthropic SSE → OpenAI Responses SSE 转换状态机
 
+//! 流式部分：Anthropic SSE → OpenAI Responses SSE 转换状态机（item 生命周期、输出块聚合）。
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};

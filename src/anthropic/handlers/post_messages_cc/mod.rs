@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! /cc/v1/messages 端点：在标准 /v1/messages 之上附加 300s 全局 deadline，超时强制终止上游并返回错误。
 
 use crate::kiro::model::requests::kiro::KiroRequest;
 use crate::token;

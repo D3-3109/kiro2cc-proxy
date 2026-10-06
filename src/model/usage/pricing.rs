@@ -1,5 +1,4 @@
-//! 模型定价与费用估算：每百万 tokens 美元定价、credits/USD 换算率、单次请求费用
-
+//! 模型定价与费用估算：每百万 tokens 美元定价、credits/USD 换算率、单次请求费用。
 /// 模型定价（每百万 tokens，美元）
 /// 使用 200K context 标准定价
 pub(crate) struct ModelPricing {

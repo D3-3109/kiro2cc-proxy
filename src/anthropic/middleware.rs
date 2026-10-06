@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API 中间件
+//! Anthropic 层中间件与共享状态：AppState 构建器（装配 provider/API key/usage/RPM/fingerprint 追踪器）、auth_middleware 认证与限流、CORS 配置。
 
 use std::sync::Arc;
 

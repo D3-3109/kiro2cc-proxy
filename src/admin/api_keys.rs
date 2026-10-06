@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API Key 管理处理器
+//! Admin API Key 管理端点：服务器信息查询、子 Key 的列表/创建/更新/删除。
 
 use axum::{
     Json,

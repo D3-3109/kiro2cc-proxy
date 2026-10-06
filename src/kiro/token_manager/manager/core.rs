@@ -1,3 +1,4 @@
+//! MultiTokenManager 核心：构造初始化、配置读取、每凭据 RPM 上限等基础能力。
 use super::super::entry::{CredentialEntry, DisabledReason, HealthStatus};
 use super::super::refresh::{
     RefreshTokenInvalidError, is_token_expired, is_token_expiring_soon, refresh_token,

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! 文件写入工具
+//! 文件写入工具：write_in_place 原地写入、atomic_write 临时文件+rename 原子替换，并识别跨设备替换受限错误。
 
 /// rename 覆盖目标失败是否属于「目标是挂载点 / 跨设备」类错误。
 ///

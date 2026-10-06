@@ -1,5 +1,4 @@
-//! 重试与故障转移：select_endpoint / call_api_with_retry
-
+//! 重试与故障转移：端点选择（select_endpoint）与 call_api_with_retry 多账号多轮重试。
 use tokio::time::sleep;
 
 use crate::kiro::endpoint::{BUCKET_THROTTLE_DURATION, Endpoint, EndpointName};

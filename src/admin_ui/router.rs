@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin UI 路由配置
+//! Admin UI 静态资源路由：rust-embed 内嵌 admin-ui dist，index 与静态文件 handler（SPA 回退）。
 
 use axum::{
     Router,

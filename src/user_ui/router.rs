@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! User UI 路由配置
+//! User UI 静态资源路由：rust-embed 内嵌 user-ui dist，index 与静态文件 handler（SPA 回退）。
 
 use axum::{
     Router,

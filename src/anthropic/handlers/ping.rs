@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! 诊断端点：/ping 健康检查，返回服务存活状态与基础信息。
 
 use crate::anthropic::middleware::AppState;
 

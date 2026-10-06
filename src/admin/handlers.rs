@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API HTTP 处理器
+//! Admin 凭据管理端点：凭据列表/启停/优先级调整/重置启用/余额查询等 REST 处理函数。
 
 use axum::{
     Json,

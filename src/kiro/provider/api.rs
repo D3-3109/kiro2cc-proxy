@@ -1,5 +1,4 @@
-//! 公开 API 入口：call_api / call_api_stream / call_mcp（含 MCP 重试）
-
+//! Kiro 上游调用公开入口：call_api / call_api_stream / call_mcp（含 MCP 重试）。
 use tokio::time::sleep;
 
 use super::core::{KiroProvider, MAX_RETRIES_PER_CREDENTIAL, MAX_TOTAL_RETRIES};

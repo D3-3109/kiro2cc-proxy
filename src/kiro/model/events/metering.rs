@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! Kiro 计量事件（MeteringEvent）模型：上游返回的真实 token 用量数据结构。
 use serde::Deserialize;
 
 use crate::kiro::parser::error::ParseResult;

@@ -1,3 +1,4 @@
+//! MultiTokenManager 管理操作：手动切换账号、可用模型列表查询等面向 Admin API 的操作。
 use anyhow::Context;
 
 use super::super::entry::{CredentialEntry, DisabledReason};

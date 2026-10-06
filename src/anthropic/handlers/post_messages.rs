@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! /v1/messages 端点主函数：接收 Anthropic 请求、直通流式转发至 Kiro，并提供请求体调试转储（dump_kiro_request_body）。
 
 use crate::anthropic::converter::{
     ConversionError, additional_fields_skipped, convert_request, is_gpt_model, is_luna_model,

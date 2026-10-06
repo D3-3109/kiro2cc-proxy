@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API 路由配置
+//! Admin 路由装配：create_admin_router 将凭据、API Key、模型、日志、负载均衡等端点挂载到 /api/admin。
 
 use axum::{
     Router, middleware,

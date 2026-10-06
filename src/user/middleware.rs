@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! User API 中间件
+//! User 层中间件与状态：UserState/UserContext 定义、user_auth_middleware 子 Key 会话认证，保护 /api/user 端点。
 
 use std::sync::Arc;
 

@@ -1,3 +1,4 @@
+//! OAuth token 刷新：social / IDC 两种凭据的刷新流程、region 解析与过期判定辅助。
 use super::is_token_expiring_within;
 use crate::http_client::{ProxyConfig, build_client};
 use crate::kiro::machine_id;

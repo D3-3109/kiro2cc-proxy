@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API 错误类型定义
+//! Admin 服务错误类型：AdminServiceError 枚举，统一凭据/余额/模型操作的错误分类与 HTTP 映射。
 
 use std::fmt;
 

@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! Token 刷新请求/响应数据模型：social 与 IDC 刷新的请求体与响应体结构。
 use serde::{Deserialize, Serialize};
 
 /// 刷新 Token 的请求体 (Social 认证)

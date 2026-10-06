@@ -1,3 +1,4 @@
+//! 单凭据条目：健康状态（HealthStatus）、禁用原因（DisabledReason）与统计计数。
 use crate::kiro::model::credentials::KiroCredentials;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

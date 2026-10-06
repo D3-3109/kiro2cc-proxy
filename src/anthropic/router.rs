@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API 路由配置
+//! Anthropic 路由装配：创建 /v1 与 /cc/v1 路由，串联中间件（认证、CORS）与 handlers。
 
 use axum::{
     Router,

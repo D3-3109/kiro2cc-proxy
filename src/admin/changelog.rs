@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! 更新日志查询处理器
+//! Admin 更新日志端点：返回内置 changelog 数据（changelog_data），供 UI 展示版本历史与最新版高亮。
 
 use axum::{Json, response::IntoResponse};
 

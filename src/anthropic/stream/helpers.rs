@@ -1,6 +1,4 @@
-//! 流式响应处理模块
-//!
-//! 实现 Kiro → Anthropic 流式响应转换和 SSE 状态管理
+//! 流式辅助工具：生成 Kiro 事件所需的伪造 signature、按中英文字符数估算 token（count_token_chars/tokens_from_chars）。
 /// 生成伪造的 thinking 签名（长度 >= 100 的 base64 形状字符串）
 ///
 /// 上游不返回真实签名，流式与非流式路径共用这一份伪造实现，保证两端

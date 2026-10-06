@@ -1,5 +1,4 @@
-//! 错误分类与请求体改写：退避延迟、月度限额/Profile ARN 判定、请求体改写
-
+//! 错误分类与退避：重试/限流退避延迟、月度限额与 Profile ARN 错误判定、请求体改写。
 use std::time::Duration;
 use tokio::time::sleep;
 

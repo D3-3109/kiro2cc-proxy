@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! 公共认证工具函数
+//! 通用认证工具：从请求头提取 API Key，constant_time_eq 恒定时间比较防时序攻击。
 
 use axum::{
     body::Body,

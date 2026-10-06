@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! 配置模型：config.json 反序列化结构（TlsBackend、缓存模拟、限流、超时等）与环境变量覆盖逻辑。
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;

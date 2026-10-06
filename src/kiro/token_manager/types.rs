@@ -1,3 +1,4 @@
+//! MultiTokenManager 类型定义：凭据快照（CredentialEntrySnapshot）、管理器快照与多账号管理器主体结构。
 use super::entry::{CredentialEntry, DisabledReason, HealthStatus};
 use crate::http_client::ProxyConfig;
 use crate::kiro::model::credentials::KiroCredentials;

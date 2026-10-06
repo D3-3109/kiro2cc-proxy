@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Admin API 中间件
+//! Admin 中间件与状态：AdminState 装配、admin_auth_middleware 管理密码认证，保护 /api/admin 下全部端点。
 
 use std::path::PathBuf;
 use std::sync::Arc;

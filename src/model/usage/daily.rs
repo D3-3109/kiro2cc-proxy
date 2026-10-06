@@ -1,5 +1,4 @@
-//! 按日期（CST）汇总与日报查询
-
+//! 用量日报：按日期（CST）汇总的单日/单账号用量结构与日报查询。
 use chrono::FixedOffset;
 use serde::Serialize;
 

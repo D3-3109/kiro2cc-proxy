@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! API Key 数据模型：子密钥结构、额度限制（次数/Token）与持久化读写。
 use crate::common::fs::atomic_write;
 use chrono::{DateTime, Utc};
 use parking_lot::{Mutex, RwLock};

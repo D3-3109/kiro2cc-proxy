@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! 命令行参数定义（clap::Parser）：--config / --credentials 等启动项。
 use clap::Parser;
 
 /// Anthropic <-> Kiro API 客户端

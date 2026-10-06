@@ -1,3 +1,4 @@
+//! 凭据状态上报：限流（throttled）、成功（success）等运行时状态回报与轮转联动。
 use super::super::entry::{CredentialEntry, DisabledReason};
 use super::super::types::{
     MAX_FAILURES_PER_CREDENTIAL, MultiTokenManager, QUOTA_EXHAUSTED_ALL_MARKER,

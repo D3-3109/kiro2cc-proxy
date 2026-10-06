@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! 流式请求处理：handle_stream_request 建立 SSE 通道并驱动 Kiro 事件到客户端的转发，wait_deadline 处理全局超时。
 
 use crate::anthropic::stream::{SseEvent, StreamContext};
 

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! User API 处理器
+//! User API 端点：子 Key 登录换取会话、个人用量概览与分页用量记录查询。
 
 use axum::{Extension, Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,4 @@
+//! 凭据统计持久化：stats.json 防抖写入、缓存目录与统计文件路径管理。
 use super::super::entry::{CredentialEntry, DisabledReason, HealthStatus, StatsEntry};
 use super::super::types::{MultiTokenManager, STATS_SAVE_DEBOUNCE};
 use crate::common::fs::atomic_write;

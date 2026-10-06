@@ -1,5 +1,4 @@
-//! 请求头构建（build_headers / build_mcp_headers）
-
+//! 请求头构建：普通请求与 MCP 请求的 HTTP 头（Authorization、Host、Content-Type 等）。
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HOST, HeaderMap, HeaderValue};
 use uuid::Uuid;
 

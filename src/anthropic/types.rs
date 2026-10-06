@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API 类型定义
+//! Anthropic 协议类型：错误响应（ErrorResponse/ErrorDetail）、模型信息等对外 DTO 定义。
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

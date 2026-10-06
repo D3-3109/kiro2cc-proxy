@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! 转换结果与转换错误类型
+//! 转换结果与错误类型：ConversionResult 聚合转换产物，ConversionError 描述 Anthropic → Kiro 转换失败场景。
 
 use crate::kiro::model::requests::conversation::ConversationState;
 

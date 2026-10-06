@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! Handler 杂项工具：剥离 JSON 代码围栏、提取客户端 IP、按模型名覆盖 thinking 开关、/v1/messages/count_tokens 计数端点、suggestion 模式请求识别与快速响应。
 
 use crate::anthropic::converter::is_luna_model;
 use crate::anthropic::types::{

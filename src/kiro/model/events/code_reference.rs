@@ -1,4 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
+
+//! Kiro CodeReference 事件模型：上游代码引用事件的反序列化结构。
 use serde::Deserialize;
 
 use crate::kiro::parser::error::ParseResult;

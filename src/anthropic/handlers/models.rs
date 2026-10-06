@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! Anthropic API Handler 函数
+//! 模型列表 Handler：/v1/models 端点，静态列表与上游动态拉取相结合，带 TTL 缓存（CachedModels）。
 
 use crate::anthropic::middleware::AppState;
 use crate::anthropic::types::{ErrorResponse, Model, ModelsResponse};

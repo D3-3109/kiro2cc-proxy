@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // 输出 token 口径与空响应判定（自 context.rs 拆出，纯代码搬移）
 
+//! 输出 token 口径统计与空响应判定（自 context.rs 拆出，纯代码搬移）。
 use super::StreamContext;
 use crate::anthropic::stream::calib::NEAR_EMPTY_OUTPUT_THRESHOLD;
 use crate::anthropic::stream::calib::empty_response_oversized_threshold;
