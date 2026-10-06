@@ -3,15 +3,16 @@
 //!
 //! Claude Code 携带 `redact-thinking` beta（或默认折叠 thinking）时，界面几乎看不到
 //! 流式思考内容，长时间推理期间表现为「卡住」。开启 `thinkingAsText` 后，本模块把出站
-//! SSE 中的 thinking 块改写为普通 text 块（markdown 引用，逐行流式输出），使思考过程
+//! SSE 中的 thinking 块改写为普通 text 块（逐行流式输出），使思考过程
 //! 像 Kiro CLI 一样实时可见。
 //!
 //! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
-//! 是否生效取决于客户端是否放行转义字符。
+//! 是否生效取决于客户端是否放行转义字符。首行为「💭 Thinking」标记，
+//! 不带 markdown 引用前缀（客户端不显示竖线）。
 //!
 //! 代价：这些文本块会被客户端当作 assistant 正文存入对话历史并随后续请求回传。
 //! 回传时由 `converter::history::convert_assistant_message` 识别 [`THOUGHT_HEADER`]
-//! 并剥离，上游模型不会看到自己的旧思考（与原生 thinking 块在历史中被剥离的语义一致）。
+//! 并剥离标记行，思考正文按普通助手文本保留回传（上下文略增，已确认接受）。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,8 +21,9 @@ use serde_json::json;
 
 use super::state::SseEvent;
 
-/// 文本化思考块的首行标记。同时是历史剥离的识别依据，修改需保持两侧一致。
-pub(crate) const THOUGHT_HEADER: &str = "> 💭 Thinking\n";
+/// 文本化思考块的首行标记（不含换行符）。同时是历史剥离的识别依据，修改需保持两侧一致。
+/// 不带 `> ` 引用前缀（客户端渲染时无竖线）；历史回传仅按此标记行识别并剥离。
+pub(crate) const THOUGHT_HEADER: &str = "💭 Thinking";
 
 /// ANSI：变暗开始 / 复位（dim 样式，仅包在每行内容两侧，不跨行）
 const DIM_ON: &str = "\x1b[2m";
@@ -39,12 +41,9 @@ pub fn thinking_as_text_enabled() -> bool {
     THINKING_AS_TEXT.load(Ordering::Relaxed)
 }
 
-/// 判断文本是否以渲染出的思考首行开头（兼容 dim 样式的转义包裹）
-fn starts_with_rendered_header(text: &str) -> bool {
-    let Some((first, _)) = text.split_once('\n') else {
-        return false;
-    };
-    first.replace(DIM_ON, "").replace(DIM_OFF, "") == THOUGHT_HEADER.trim_end_matches('\n')
+/// 单行文本是否为渲染出的思考标记行（兼容 dim 转义包裹）
+fn is_rendered_header_line(line: &str) -> bool {
+    line.replace(DIM_ON, "").replace(DIM_OFF, "") == THOUGHT_HEADER
 }
 
 /// 仅对 Claude Code 客户端生效：OpenAI 兼容端点等其他调用方需要保留原生 thinking 语义
@@ -57,20 +56,14 @@ pub fn is_claude_code_client(headers: &axum::http::HeaderMap) -> bool {
 
 /// 剥离历史 text 块中由本模块渲染的思考前缀。
 ///
-/// 仅当文本首行是 [`THOUGHT_HEADER`]（允许被 dim 转义包裹）时处理：移除开头连续以 `>` 起始的行
-/// （渲染时每行都带 `> ` 前缀，含空行），保留其后的正文。无前缀时原样返回。
+/// 仅当文本首行是 [`THOUGHT_HEADER`]（允许被 dim 转义包裹）时处理：移除该标记行，
+/// 保留其后的正文。无标记时原样返回。
 pub(crate) fn strip_rendered_thinking(text: &str) -> &str {
-    if !starts_with_rendered_header(text) {
-        return text;
+    match text.split_once('\n') {
+        // 首行即标记行（允许被 dim 转义包裹）时剥掉，其余原样返回
+        Some((first, rest)) if is_rendered_header_line(first) => rest,
+        _ => text,
     }
-    let mut rest = text;
-    while rest.starts_with('>') {
-        match rest.find('\n') {
-            Some(i) => rest = &rest[i + 1..],
-            None => return "",
-        }
-    }
-    rest
 }
 
 /// 把 thinking 块事件改写为 text 块事件的有状态转换器
@@ -80,7 +73,7 @@ pub struct ThinkingTextRewriter {
     indices: HashSet<i32>,
     /// 已输出首行标记的块
     header_sent: HashSet<i32>,
-    /// 各块当前是否位于行首（决定是否补 `> ` 前缀）
+    /// 各块当前是否位于行首（决定是否补 ANSI dim 起始转义，避免样式跨行）
     at_line_start: HashMap<i32, bool>,
 }
 
@@ -130,17 +123,15 @@ impl ThinkingTextRewriter {
                     }
                     let mut rendered = String::new();
                     if self.header_sent.insert(i) {
-                        // 首行：`> ` + dim(💭 Thinking)；去掉转义后等于 THOUGHT_HEADER
-                        rendered.push_str("> ");
+                        // 首行：dim(💭 Thinking)，即 THOUGHT_HEADER + 换行
                         rendered.push_str(DIM_ON);
-                        rendered.push_str(THOUGHT_HEADER.trim_start_matches("> ").trim_end());
+                        rendered.push_str(THOUGHT_HEADER);
                         rendered.push_str(DIM_OFF);
                         rendered.push('\n');
                     }
                     let at_start = self.at_line_start.entry(i).or_insert(true);
                     for ch in text.chars() {
                         if *at_start {
-                            rendered.push_str("> ");
                             rendered.push_str(DIM_ON);
                             *at_start = false;
                         }
@@ -232,7 +223,7 @@ mod tests {
         assert_eq!(out[0].data["content_block"]["type"], "text");
         assert_eq!(
             plain(&text_of(&out)),
-            "> 💭 Thinking\n> first line\n> second\n> \n> third"
+            "💭 Thinking\nfirst line\nsecond\n\nthird"
         );
         assert!(
             out.iter()
@@ -274,26 +265,32 @@ mod tests {
     }
 
     #[test]
-    fn strip_removes_rendered_prefix_separate_and_merged() {
-        let rendered = "> 💭 Thinking\n> a\n> \n> b";
-        assert_eq!(strip_rendered_thinking(rendered), "");
+    fn strip_removes_only_header_and_keeps_thinking_body() {
+        // 仅剥「💭 Thinking」标记行，思考正文保留（作为普通助手文本回传上游）
+        let rendered = "💭 Thinking\na\n\nb";
+        assert_eq!(strip_rendered_thinking(rendered), "a\n\nb");
         // 客户端把相邻 text 块合并的情形
-        let merged = "> 💭 Thinking\n> a\n> \n> b\nanswer";
-        assert_eq!(strip_rendered_thinking(merged), "answer");
+        let merged = "💭 Thinking\na\n\nb\nanswer";
+        assert_eq!(strip_rendered_thinking(merged), "a\n\nb\nanswer");
         // 普通文本（含普通引用）不受影响
         assert_eq!(strip_rendered_thinking("> quote\nx"), "> quote\nx");
         assert_eq!(strip_rendered_thinking("plain"), "plain");
     }
 
     #[test]
-    fn rendered_then_stripped_roundtrip() {
+    fn rendered_thinking_body_survives_history_strip() {
         let mut r = ThinkingTextRewriter::new();
         let mut out = r.rewrite(vec![start(0, "thinking")]);
         out.extend(r.rewrite(vec![
             delta(0, "thinking_delta", "thinking", "想一想\n\n再想想\n"),
             stop(0),
         ]));
-        assert_eq!(strip_rendered_thinking(&text_of(&out)), "");
+        let rendered = plain(&text_of(&out));
+        let stripped = strip_rendered_thinking(&rendered);
+        assert_eq!(stripped, "想一想\n\n再想想\n");
+        // 尾部换行与中间空行原样保留，不得被裁剪
+        assert!(stripped.ends_with('\n'));
+        assert_eq!(stripped.lines().count(), 3);
     }
 
     #[test]
@@ -334,10 +331,7 @@ mod tests {
                 .collect();
             if enabled {
                 assert!(!has_thinking, "开启后不应再出现 thinking 块/delta");
-                assert_eq!(
-                    plain(&all_text),
-                    "> 💭 Thinking\n> 第一行\n> 第二行最终答案"
-                );
+                assert_eq!(plain(&all_text), "💭 Thinking\n第一行\n第二行最终答案");
             } else {
                 assert!(has_thinking, "关闭时保持原生 thinking 块");
                 assert_eq!(all_text, "最终答案");
@@ -356,15 +350,16 @@ mod tests {
         let text = text_of(&out);
         assert_eq!(
             text,
-            "> \x1b[2m💭 Thinking\x1b[0m\n> \x1b[2mab\x1b[0m\n> \x1b[2m\x1b[0m\n> \x1b[2mcd\x1b[0m"
+            "\x1b[2m💭 Thinking\x1b[0m\n\x1b[2mab\x1b[0m\n\x1b[2m\x1b[0m\n\x1b[2mcd\x1b[0m"
         );
         // 行中结束 → 末尾补复位；stop 事件仍在最后
         assert_eq!(out.last().unwrap().event, "content_block_stop");
-        // dim 渲染的内容同样能被历史剥离识别
-        assert_eq!(strip_rendered_thinking(&text), "");
+        // dim 渲染的内容同样能被历史剥离识别（仅剥标记行，正文保留）
+        let body = &text[text.find('\n').unwrap() + 1..];
+        assert_eq!(strip_rendered_thinking(&text), body);
         assert_eq!(
             strip_rendered_thinking(&format!("{text}\nanswer")),
-            "answer"
+            format!("{body}\nanswer")
         );
     }
 

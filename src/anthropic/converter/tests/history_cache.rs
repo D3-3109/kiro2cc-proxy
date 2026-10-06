@@ -448,9 +448,9 @@ fn test_client_workflow_tool_descriptions_are_not_augmented() {
 }
 
 #[test]
-fn test_rendered_thinking_text_blocks_stripped_from_assistant_history() {
+fn test_rendered_thinking_header_stripped_from_assistant_history() {
     // thinkingAsText 开启时，客户端会把渲染出的思考 text 块当正文回传；
-    // 转换时必须剥离，上游只看到真正的回答与 tool_use
+    // 历史转换仅剥离「💭 Thinking」标记行，思考正文按普通助手文本保留回传上游
     use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
     let req = MessagesRequest {
         model: "claude-sonnet-4-6".to_string(),
@@ -463,7 +463,7 @@ fn test_rendered_thinking_text_blocks_stripped_from_assistant_history() {
             AnthropicMessage {
                 role: "assistant".to_string(),
                 content: serde_json::json!([
-                    {"type": "text", "text": "> 💭 Thinking\n> secret reasoning\n> \n> more"},
+                    {"type": "text", "text": "💭 Thinking\nsecret reasoning\n\nmore"},
                     {"type": "text", "text": "visible answer"},
                     {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}
                 ]),
@@ -486,6 +486,7 @@ fn test_rendered_thinking_text_blocks_stripped_from_assistant_history() {
     let r = convert_request(&req).unwrap();
     let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
     assert!(hist.contains("visible answer"));
-    assert!(!hist.contains("secret reasoning"), "{hist}");
-    assert!(!hist.contains("Thinking"), "{hist}");
+    // 标记行已剥；正文保留（用户已确认的语义：上下文略增，显示最干净）
+    assert!(!hist.contains("💭 Thinking"), "{hist}");
+    assert!(hist.contains("secret reasoning"), "{hist}");
 }
