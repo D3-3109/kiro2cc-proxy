@@ -89,6 +89,7 @@ Client (Anthropic SSE format)
 
 ## 深入文档
 
+- `docs/源码阅读路线图.md` — 新手从零到精通的源码阅读路径（五阶段学习路线）
 - `docs/源码全景解析.md` — 全链路深度解析 + 8 个难点攻坚记录（二进制帧协议、thinking 标签检测、prompt caching、tiktoken 等）
 - `docs/代码速查表.md` — 功能 → 代码位置速查表
 - `openspec/project.md` — 项目上下文与开发约定
