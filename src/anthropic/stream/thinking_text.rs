@@ -54,10 +54,10 @@ pub fn is_claude_code_client(headers: &axum::http::HeaderMap) -> bool {
         .is_some_and(|ua| ua.starts_with("claude-cli") || ua.starts_with("claude-code"))
 }
 
-/// 剥离历史 text 块中由本模块渲染的思考前缀。
+/// 剥离历史 text 块中由本模块渲染的思考**标记行**（思考正文保留回传上游）。
 ///
 /// 仅当文本首行是 [`THOUGHT_HEADER`]（允许被 dim 转义包裹）时处理：移除该标记行，
-/// 保留其后的正文。无标记时原样返回。
+/// 保留其后的正文。无标记时原样返回 —— 故对非文本化思考的普通文本是幂等的。
 pub(crate) fn strip_rendered_thinking(text: &str) -> &str {
     match text.split_once('\n') {
         // 首行即标记行（允许被 dim 转义包裹）时剥掉，其余原样返回

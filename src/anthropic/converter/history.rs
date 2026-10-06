@@ -261,14 +261,15 @@ pub(super) fn convert_assistant_message(
             for item in arr {
                 match serde_json::from_value::<ContentBlock>(item.clone()) {
                     Ok(block) => match block.block_type.as_str() {
-                        // 历史消息中剥离 thinking 内容：thinking 仅对当轮推理有意义，
+                        // 原生 thinking 块在历史中整块丢弃：thinking 仅对当轮推理有意义，
                         // 保留在 history 中会导致 payload 膨胀（Opus 每轮可产生数万字符），
                         // 触发 Kiro 400 "Improperly formed request"。
                         "thinking" => {}
                         "text" => {
                             if let Some(text) = block.text {
-                                // 剥离「思考文本化」渲染出的 text 块（thinkingAsText 开启时
-                                // 客户端会把它当正文存入历史并回传；上游不应看到旧思考）
+                                // thinkingAsText 渲染出的 text 块：仅剥首行「💭 Thinking」标记，
+                                // 思考正文按普通助手文本保留（上下文略增，已确认接受）。
+                                // 注意与上方原生 thinking 的处置差异 —— 前者整块丢弃，后者保留正文。
                                 text_content.push_str(
                                     crate::anthropic::stream::strip_rendered_thinking(&text),
                                 );

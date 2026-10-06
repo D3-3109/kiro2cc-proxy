@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.12".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "思考文本化渲染去掉每行引用前缀，消除客户端显示的竖线",
+                "Thinking-as-text rendering no longer prefixes each line with quote markers, removing the vertical bar shown by clients",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.11".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![Bilingual::new(
