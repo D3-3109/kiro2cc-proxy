@@ -942,4 +942,10 @@ MIT
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
 
+**特别致谢**——以下 Issue 直接推动了关键修复：
+
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) 定位 `history[0]` 冻结缓存 key 漂移导致 Kiro 前缀缓存逐轮失效
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) 定位长生成轮约 247s 被上游 Reset，促成大参数工具调用分块写入约束
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) 反馈 sonnet 5 反代响应慢，促成 effort 兜底值下调
+
 > 感谢每一位提交 Issue、反馈建议和参与讨论的用户，是你们让这个项目不断完善。

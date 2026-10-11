@@ -921,4 +921,10 @@ Thanks to all the contributors of this project:
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
 
+**Special thanks** — the following issues directly drove critical fixes:
+
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) pinpointed the `history[0]` freeze-cache key drift that invalidated the Kiro prefix cache every turn
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) pinpointed the upstream stream reset at ~247s on long generations, leading to the chunked-write constraint for large tool arguments
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) reported slow responses from the proxied sonnet 5, leading to the lower default effort fallback
+
 > Thanks to everyone who has filed issues, shared feedback, and joined the discussions — you keep making this project better.
