@@ -67,6 +67,20 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.22".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![
+                Bilingual::new(
+                    "企业版 IdC 账号（IAM Identity Center）支持：新增企业备用 profileArn 兜底，避免企业账号被补上 BuilderId 占位 ARN 导致上游拒绝；添加账号时先调用 ListAvailableProfiles 自动发现真实 ARN 并写回；额度查询失败时自动发现 ARN 重试，仍失败则按 KAM 做法不带 ARN 查询（issue #43）",
+                    "Enterprise IAM Identity Center accounts are now supported: an enterprise fallback profileArn prevents enterprise accounts from being given the BuilderId placeholder ARN that upstream rejects; when adding an account the real ARN is discovered via ListAvailableProfiles and written back; failed usage queries now discover the ARN and retry, falling back to an ARN-less query as KAM does (issue #43)",
+                ),
+                Bilingual::new(
+                    "额度查询换区域重试改为按 HTTP 状态码判定（新增 UsageLimitsHttpError 携带状态码，Display 文案保持原格式以兼容错误分类）",
+                    "The cross-region retry for usage queries is now decided by HTTP status code (a new UsageLimitsHttpError carries the status while its Display text keeps the previous format for error classification)",
+                ),
+            ])],
+        },
+        ReleaseNote {
             version: "3.4.21".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![Bilingual::new(
