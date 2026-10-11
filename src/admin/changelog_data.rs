@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.21".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "分块写入约束的行数上限改为可配置：默认上限由 150 行放宽到 300 行，避免把本可一次写完的内容拆成多轮（客户端每轮都携带 thinking adaptive，轮数越多思考开销越大）；新增 writeChunkingMaxLines 配置项与环境变量 WRITE_CHUNKING_MAX_LINES，设为 0 即完全关闭该约束；可在 Admin 设置页热修改，仅影响之后的新请求（issue #46）",
+                "The line limit of the chunked-writing constraint is now configurable: the default is relaxed from 150 to 300 lines so content that could be written in one call is no longer split across multiple turns (the client carries thinking adaptive on every turn, so more turns means more thinking overhead); a new writeChunkingMaxLines option and WRITE_CHUNKING_MAX_LINES environment variable were added, where 0 disables the constraint entirely; it can be changed live on the Admin settings page and only affects subsequent requests (issue #46)",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.20".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![Bilingual::new(
