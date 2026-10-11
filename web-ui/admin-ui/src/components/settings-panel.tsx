@@ -193,12 +193,13 @@ export function SettingsPanel({
   const [editingAdminPsw, setEditingAdminPsw] = useState(false)
   const { data: runtimeConfigData, isError: isRuntimeConfigError, isLoading: isLoadingRuntimeConfig } = useRuntimeConfig()
   const { mutate: setRuntimeConfigMut, isPending: isSettingRuntimeConfig } = useSetRuntimeConfig()
-  const [runtimeDraft, setRuntimeDraft] = useState<{ maxRpm: string; port: string; proxyUrl: string }>({
+  const [runtimeDraft, setRuntimeDraft] = useState<{ maxRpm: string; chunkLines: string; port: string; proxyUrl: string }>({
     maxRpm: '',
+    chunkLines: '',
     port: '',
     proxyUrl: '',
   })
-  const [editingRuntime, setEditingRuntime] = useState<'maxRpm' | 'port' | 'proxyUrl' | null>(null)
+  const [editingRuntime, setEditingRuntime] = useState<'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl' | null>(null)
 
   const lang = i18n.language === 'en' ? 'en' : 'zh'
 
@@ -233,9 +234,15 @@ export function SettingsPanel({
     )
   }
 
-  const saveRuntimeField = (field: 'maxRpm' | 'port' | 'proxyUrl') => {
-    const payload: { maxRpmPerCredential?: number; port?: number; proxyUrl?: string } = {}
+  const saveRuntimeField = (field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl') => {
+    const payload: {
+      maxRpmPerCredential?: number
+      writeChunkingMaxLines?: number
+      port?: number
+      proxyUrl?: string
+    } = {}
     if (field === 'maxRpm') payload.maxRpmPerCredential = Number(runtimeDraft.maxRpm)
+    else if (field === 'chunkLines') payload.writeChunkingMaxLines = Number(runtimeDraft.chunkLines)
     else if (field === 'port') payload.port = Number(runtimeDraft.port)
     else payload.proxyUrl = runtimeDraft.proxyUrl.trim()
 
@@ -248,8 +255,9 @@ export function SettingsPanel({
     })
   }
 
-  const startEditRuntime = (field: 'maxRpm' | 'port' | 'proxyUrl') => {
+  const startEditRuntime = (field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl') => {
     if (field === 'maxRpm') setRuntimeDraft((d) => ({ ...d, maxRpm: String(runtimeConfigData?.maxRpmPerCredential ?? '') }))
+    else if (field === 'chunkLines') setRuntimeDraft((d) => ({ ...d, chunkLines: String(runtimeConfigData?.writeChunkingMaxLines ?? '') }))
     else if (field === 'port') setRuntimeDraft((d) => ({ ...d, port: String(runtimeConfigData?.port ?? '') }))
     else setRuntimeDraft((d) => ({ ...d, proxyUrl: runtimeConfigData?.proxyUrl ?? '' }))
     setEditingRuntime(field)
@@ -257,13 +265,17 @@ export function SettingsPanel({
 
   const cancelEditRuntime = () => {
     setEditingRuntime(null)
-    setRuntimeDraft({ maxRpm: '', port: '', proxyUrl: '' })
+    setRuntimeDraft({ maxRpm: '', chunkLines: '', port: '', proxyUrl: '' })
   }
 
-  const runtimeCanSave = (field: 'maxRpm' | 'port' | 'proxyUrl') => {
+  const runtimeCanSave = (field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl') => {
     if (field === 'maxRpm') {
       // 与后端 Option<u32> 对齐：非负整数且 ≤ 4294967295
       return /^\d+$/.test(runtimeDraft.maxRpm) && Number(runtimeDraft.maxRpm) <= 4294967295
+    }
+    if (field === 'chunkLines') {
+      // 与后端 Option<u32> 对齐：非负整数且 ≤ 4294967295（0 = 不追加约束）
+      return /^\d+$/.test(runtimeDraft.chunkLines) && Number(runtimeDraft.chunkLines) <= 4294967295
     }
     if (field === 'port') {
       return /^\d+$/.test(runtimeDraft.port) && Number(runtimeDraft.port) >= 1 && Number(runtimeDraft.port) <= 65535
@@ -273,7 +285,7 @@ export function SettingsPanel({
 
   /** 运行时配置行共用的编辑态控件（Input + 保存/取消按钮） */
   const runtimeEditor = (
-    field: 'maxRpm' | 'port' | 'proxyUrl',
+    field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl',
     value: string,
     onChange: (v: string) => void,
     inputType: 'text' | 'number',
@@ -283,13 +295,19 @@ export function SettingsPanel({
       <Input
         type={inputType}
         aria-label={t(
-          field === 'maxRpm' ? 'settings.maxRpmPerCredential' : field === 'port' ? 'settings.port' : 'settings.proxyUrl'
+          field === 'maxRpm'
+            ? 'settings.maxRpmPerCredential'
+            : field === 'chunkLines'
+              ? 'settings.writeChunkingMaxLines'
+              : field === 'port'
+                ? 'settings.port'
+                : 'settings.proxyUrl'
         )}
         autoFocus
         disabled={isSettingRuntimeConfig}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        // 数值类（maxRpm/port）用短输入框，URL 类（proxyUrl）保留宽输入框
+        // 数值类（maxRpm/chunkLines/port）用短输入框，URL 类（proxyUrl）保留宽输入框
         className={field === 'proxyUrl' ? 'w-[290px]' : 'w-[110px]'}
       />
       <Button size="sm" disabled={!canSave || isSettingRuntimeConfig} onClick={() => saveRuntimeField(field)}>
@@ -375,6 +393,25 @@ export function SettingsPanel({
               <>
                 <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.maxRpmPerCredential ?? '—')}</div>
                 <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('maxRpm')}>
+                  <Pencil />
+                  {t('common.edit')}
+                </Button>
+              </>
+            )}
+          </Row>
+          <Row label={t('settings.writeChunkingMaxLines')} desc={t('settings.writeChunkingMaxLinesDesc')}>
+            {editingRuntime === 'chunkLines' ? (
+              runtimeEditor(
+                'chunkLines',
+                runtimeDraft.chunkLines,
+                (v) => setRuntimeDraft((d) => ({ ...d, chunkLines: v })),
+                'number',
+                runtimeCanSave('chunkLines')
+              )
+            ) : (
+              <>
+                <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.writeChunkingMaxLines ?? '—')}</div>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('chunkLines')}>
                   <Pencil />
                   {t('common.edit')}
                 </Button>

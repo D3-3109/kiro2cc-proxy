@@ -129,23 +129,26 @@ export async function setSuggestionMode(enabled: boolean): Promise<{ success: bo
   return data
 }
 
-// 获取运行时配置（maxRpm / port / proxyUrl）
+// 获取运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）
 export async function getRuntimeConfig(): Promise<{
   maxRpmPerCredential: number
   port: number
   proxyUrl: string | null
+  writeChunkingMaxLines: number
 }> {
   const { data } = await api.get<{
     maxRpmPerCredential: number
     port: number
     proxyUrl: string | null
+    writeChunkingMaxLines: number
   }>('/config/runtime')
   return data
 }
 
-// 设置运行时配置（仅更新传入字段；maxRpm 热生效，port/proxyUrl 重启后生效）
+// 设置运行时配置（仅更新传入字段；maxRpm / writeChunkingMaxLines 热生效，port/proxyUrl 重启后生效）
 export async function setRuntimeConfig(payload: {
   maxRpmPerCredential?: number
+  writeChunkingMaxLines?: number
   port?: number
   proxyUrl?: string
 }): Promise<{ success: boolean; message: string }> {

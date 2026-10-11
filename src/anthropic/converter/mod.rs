@@ -98,6 +98,9 @@ mod websearch;
 pub use convert::convert_request;
 pub(crate) use model::map_model;
 pub use result::{ConversionError, ConversionResult};
+pub use tools::{
+    DEFAULT_WRITE_CHUNKING_MAX_LINES, set_write_chunking_max_lines, write_chunking_max_lines,
+};
 
 pub(crate) use thinking::{
     additional_fields_skipped, is_gpt_model, is_luna_model, native_thinking_supported,

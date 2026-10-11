@@ -388,7 +388,7 @@ pub struct SetThinkingAsTextRequest {
     pub enabled: bool,
 }
 
-/// 运行时配置（maxRpm / port / proxyUrl）查询响应
+/// 运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）查询响应
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeConfigResponse {
@@ -398,9 +398,11 @@ pub struct RuntimeConfigResponse {
     pub port: u16,
     /// 上游代理地址（config.json 持久化值，重启后生效；空表示未配置）
     pub proxy_url: Option<String>,
+    /// 分块写入约束的行数上限（运行时当前值，0 = 不追加约束，热生效）
+    pub write_chunking_max_lines: u32,
 }
 
-/// 设置运行时配置请求（三字段均为可选，仅更新显式传入的字段）
+/// 设置运行时配置请求（字段均为可选，仅更新显式传入的字段）
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetRuntimeConfigRequest {
@@ -410,6 +412,8 @@ pub struct SetRuntimeConfigRequest {
     pub port: Option<u16>,
     /// 上游代理地址（空串/None = 清除；支持 http/https/socks5，重启后生效）
     pub proxy_url: Option<String>,
+    /// 分块写入约束的行数上限（0 = 不追加约束，热生效，仅影响之后的新请求）
+    pub write_chunking_max_lines: Option<u32>,
 }
 
 // ============ 通用响应 ============

@@ -695,6 +695,8 @@
     "clientTokenPassthroughDesc": "Controls whether the usage fields are reported 1:1 with real token consumption. When enabled, actual values are passed through, for third-party clients that compute context usage from returned usage; when disabled (default), values are scaled by 0.6657 for display. Regardless of the switch state, Claude Code's auto-compact trigger timing remains unchanged.",
     "maxRpmPerCredential": "Per-Account RPM Limit",
     "maxRpmPerCredentialDesc": "Maximum requests per minute for each account; hot-applied on save (0 = unlimited).",
+    "writeChunkingMaxLines": "Chunked-Write Line Limit",
+    "writeChunkingMaxLinesDesc": "When a request carries Write / Edit / MultiEdit, the system prompt asks for no more than about N lines per tool call, so the upstream does not reset the stream after ~240s of silence on a huge tool argument. Larger saves credits (fewer split turns, fewer re-thinks) but makes the 240s reset more likely; smaller is safer but costs more; 0 = do not append the instruction. Default 300. Hot-applied on save; affects new requests only.",
     "port": "Listen Port",
     "portDesc": "HTTP port the service listens on (1–65535). Saved to config.json; takes effect after restart.",
     "proxyUrl": "Upstream Proxy URL",

@@ -337,7 +337,7 @@ fn persist_suggestion_mode(config_path: &std::path::Path, enabled: bool) -> anyh
 }
 
 /// GET /api/admin/config/runtime
-/// 获取运行时配置（maxRpm / port / proxyUrl）
+/// 获取运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）
 pub async fn get_runtime_config(State(state): State<AdminState>) -> impl IntoResponse {
     let max_rpm = state.service.max_rpm_per_credential();
 
@@ -359,6 +359,7 @@ pub async fn get_runtime_config(State(state): State<AdminState>) -> impl IntoRes
         max_rpm_per_credential: max_rpm,
         port,
         proxy_url,
+        write_chunking_max_lines: crate::anthropic::write_chunking_max_lines(),
     })
 }
 
@@ -377,7 +378,7 @@ fn validate_proxy_url(url: &str) -> Result<(), String> {
 }
 
 /// PUT /api/admin/config/runtime
-/// 设置运行时配置：maxRpm 热切换 + 三字段写回 config.json（port/proxyUrl 重启后生效）
+/// 设置运行时配置：maxRpm / writeChunkingMaxLines 热切换 + 各字段写回 config.json（port/proxyUrl 重启后生效）
 pub async fn set_runtime_config(
     State(state): State<AdminState>,
     Json(payload): Json<super::types::SetRuntimeConfigRequest>,
@@ -403,10 +404,16 @@ pub async fn set_runtime_config(
     if let Some(max_rpm) = payload.max_rpm_per_credential {
         state.service.set_max_rpm_per_credential(max_rpm);
     }
+    if let Some(lines) = payload.write_chunking_max_lines {
+        crate::anthropic::set_write_chunking_max_lines(lines);
+    }
     if let Some(ref config_path) = state.config_path {
         let result = persist_config_field(config_path, |json| {
             if let Some(max_rpm) = payload.max_rpm_per_credential {
                 json["maxRpmPerCredential"] = serde_json::json!(max_rpm);
+            }
+            if let Some(lines) = payload.write_chunking_max_lines {
+                json["writeChunkingMaxLines"] = serde_json::json!(lines);
             }
             if let Some(port) = payload.port {
                 json["port"] = serde_json::json!(port);
@@ -433,6 +440,9 @@ pub async fn set_runtime_config(
     let mut parts = Vec::new();
     if payload.max_rpm_per_credential.is_some() {
         parts.push("maxRpmPerCredential 已热生效");
+    }
+    if payload.write_chunking_max_lines.is_some() {
+        parts.push("writeChunkingMaxLines 已热生效（仅影响之后的新请求）");
     }
     if payload.port.is_some() {
         parts.push("port 已保存（重启后生效）");

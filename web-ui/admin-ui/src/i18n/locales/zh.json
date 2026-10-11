@@ -695,6 +695,8 @@
     "clientTokenPassthroughDesc": "控制接口 usage 字段是否 1:1 上报真实 Token 消耗。开启后透传实际数值，适配按返回用量统计上下文占用的第三方客户端；关闭（默认）则乘以 0.6657 系数缩放展示。无论开关状态如何，Claude Code 的 auto-compact 自动压缩触发时机均保持不变。",
     "maxRpmPerCredential": "每账号 RPM 上限",
     "maxRpmPerCredentialDesc": "单个账号每分钟最大请求数，保存后立即热生效（0 = 不限）。",
+    "writeChunkingMaxLines": "分块写入行数上限",
+    "writeChunkingMaxLinesDesc": "请求带 Write / Edit / MultiEdit 工具时，在系统提示末尾要求单次工具调用的参数不超过约 N 行，避免上游对大块工具参数静默约 240s 后重置流。调大更省 credits（拆分轮数更少、思考次数更少），但单次写入更容易撞到 240s 重置；调小更稳但更贵；0 = 不追加约束。默认 300，保存后热生效，仅影响之后的新请求。",
     "port": "监听端口",
     "portDesc": "服务监听的 HTTP 端口（1–65535）。保存后写入 config.json，重启后生效。",
     "proxyUrl": "上游代理地址",
