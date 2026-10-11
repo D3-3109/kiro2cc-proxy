@@ -7,7 +7,11 @@ use std::path::Path;
 use crate::http_client::ProxyConfig;
 use crate::model::config::Config;
 
-use super::model::{KiroCredentials, canonicalize_auth_method_value, fallback_profile_arn_value};
+use super::model::{
+    BUILDER_ID_PLACEHOLDER_PROFILE_ARN, ENTERPRISE_FALLBACK_PROFILE_ARN_EU,
+    ENTERPRISE_FALLBACK_PROFILE_ARN_US, KiroCredentials, canonicalize_auth_method_value,
+    fallback_profile_arn_value,
+};
 
 impl KiroCredentials {
     /// 特殊值：显式不使用代理
@@ -134,6 +138,30 @@ impl KiroCredentials {
                 true
             }
             None => false,
+        }
+    }
+
+    /// 是否 idc 账号（含 BuilderId 与企业版 IdC，二者共用 OIDC clientId/clientSecret 刷新）
+    pub fn is_idc(&self) -> bool {
+        self.auth_method
+            .as_deref()
+            .is_some_and(|m| canonicalize_auth_method_value(m.trim()) == "idc")
+    }
+
+    /// profileArn 缺失、为空，或只是代理自带的占位 / 备用 ARN（BuilderId 占位符、企业备用 ARN），
+    /// 不是该账号租户自己的真实 ARN。
+    ///
+    /// 企业版 IdC 账号在这种状态下可能无法通过额度/对话请求，需要先用
+    /// `ListAvailableProfiles` 发现真实 ARN（issue #43）。
+    pub fn has_no_real_profile_arn(&self) -> bool {
+        match self.profile_arn.as_deref().map(str::trim) {
+            None | Some("") => true,
+            Some(arn) => [
+                BUILDER_ID_PLACEHOLDER_PROFILE_ARN,
+                ENTERPRISE_FALLBACK_PROFILE_ARN_US,
+                ENTERPRISE_FALLBACK_PROFILE_ARN_EU,
+            ]
+            .contains(&arn),
         }
     }
 

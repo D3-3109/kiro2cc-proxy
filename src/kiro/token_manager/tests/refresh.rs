@@ -4,9 +4,12 @@
 pub(crate) mod tests {
 
     use super::super::super::refresh::{
-        is_invalid_grant_response, sha256_hex, validate_refresh_token,
+        UsageLimitsHttpError, extract_profile_arns, is_invalid_grant_response, kam_style_region,
+        kiro_ide_user_agents, pick_profile_arn, send_list_profiles, sha256_hex,
+        should_try_next_region, validate_refresh_token, with_kiro_ide_headers,
     };
     use super::super::super::types::MultiTokenManager;
+    use crate::kiro::token_manager::tests::ext_idp::tests::spawn_single_response_server;
 
     use crate::kiro::model::credentials::KiroCredentials;
 
@@ -425,5 +428,163 @@ pub(crate) mod tests {
         };
         MultiTokenManager::apply_update_fields(&mut cred, &update);
         assert_eq!(cred.provider.as_deref(), Some("GitHub"));
+    }
+
+    #[test]
+    fn test_extract_profile_arns_supports_arn_and_profile_arn_fields() {
+        let v = serde_json::json!({
+            "profiles": [
+                {"arn": "arn:aws:codewhisperer:us-east-1:111:profile/A", "profileName": "a"},
+                {"profileArn": "arn:aws:codewhisperer:eu-central-1:111:profile/B"},
+                {"arn": ""},
+                {"name": "no-arn"}
+            ]
+        });
+        assert_eq!(
+            extract_profile_arns(&v),
+            vec![
+                "arn:aws:codewhisperer:us-east-1:111:profile/A".to_string(),
+                "arn:aws:codewhisperer:eu-central-1:111:profile/B".to_string(),
+            ]
+        );
+        assert!(extract_profile_arns(&serde_json::json!({})).is_empty());
+        assert!(extract_profile_arns(&serde_json::json!({"profiles": null})).is_empty());
+    }
+
+    #[test]
+    fn test_pick_profile_arn_prefers_region_match_then_first() {
+        let arns = vec![
+            "arn:aws:codewhisperer:us-east-1:111:profile/A".to_string(),
+            "arn:aws:codewhisperer:eu-central-1:111:profile/B".to_string(),
+        ];
+        assert_eq!(
+            pick_profile_arn(&arns, "eu-central-1").as_deref(),
+            Some("arn:aws:codewhisperer:eu-central-1:111:profile/B")
+        );
+        // 无区域匹配 → 第一个
+        assert_eq!(
+            pick_profile_arn(&arns, "ap-southeast-1").as_deref(),
+            Some("arn:aws:codewhisperer:us-east-1:111:profile/A")
+        );
+        assert_eq!(pick_profile_arn(&[], "us-east-1"), None);
+    }
+
+    #[test]
+    fn test_kam_style_region_maps_to_supported_control_plane_regions() {
+        assert_eq!(kam_style_region("us-east-1"), "us-east-1");
+        assert_eq!(kam_style_region("us-west-2"), "us-east-1");
+        assert_eq!(kam_style_region("eu-central-1"), "eu-central-1");
+        assert_eq!(kam_style_region("EU-WEST-1"), "eu-central-1");
+    }
+
+    #[test]
+    fn test_kiro_ide_headers_are_identical_for_both_list_profiles_shapes() {
+        // ListAvailableProfiles 的 REST / JSON-RPC 两种形态必须带同一套 Kiro IDE 请求头，
+        // 否则一种形态被上游按指纹拦截时无法与另一种对比排查
+        let credentials = KiroCredentials::default();
+        let config = crate::model::config::Config::default();
+        let agents = kiro_ide_user_agents(&credentials, &config);
+        assert!(agents.user_agent.contains("KiroIDE-"));
+        assert!(agents.amz_user_agent.contains("KiroIDE-"));
+
+        let client = reqwest::Client::new();
+        for url in [
+            "https://example.com/ListAvailableProfiles",
+            "https://example.com/",
+        ] {
+            let req = with_kiro_ide_headers(client.post(url), &agents)
+                .build()
+                .unwrap();
+            let h = req.headers();
+            assert_eq!(h["user-agent"].to_str().unwrap(), agents.user_agent);
+            assert_eq!(
+                h["x-amz-user-agent"].to_str().unwrap(),
+                agents.amz_user_agent
+            );
+            assert!(h.contains_key("amz-sdk-invocation-id"));
+            assert_eq!(h["amz-sdk-request"], "attempt=1; max=1");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_send_list_profiles_parses_arns_on_success() {
+        let url = spawn_single_response_server(
+            200,
+            r#"{"profiles":[{"arn":"arn:aws:codewhisperer:us-east-1:111122223333:profile/ABCDEFGHIJKL"}]}"#,
+        )
+        .await;
+        let arns = send_list_profiles(reqwest::Client::new().post(url))
+            .await
+            .unwrap();
+        assert_eq!(
+            arns,
+            vec!["arn:aws:codewhisperer:us-east-1:111122223333:profile/ABCDEFGHIJKL"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_send_list_profiles_reports_status_on_http_error() {
+        let url = spawn_single_response_server(403, r#"{"message":"denied"}"#).await;
+        let err = send_list_profiles(reqwest::Client::new().post(url))
+            .await
+            .unwrap_err();
+        assert!(err.contains("403") && err.contains("denied"), "实际: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_send_list_profiles_reports_unparseable_body_as_error() {
+        // 2xx 但响应体不是 JSON：应作为可重试的 Err 返回，让调用方换另一种请求形态
+        let url = spawn_single_response_server(200, "not json").await;
+        let err = send_list_profiles(reqwest::Client::new().post(url))
+            .await
+            .unwrap_err();
+        assert!(err.contains("响应解析失败"), "实际: {err}");
+    }
+
+    fn http_error(code: u16, body: &str) -> anyhow::Error {
+        UsageLimitsHttpError::from_response(
+            reqwest::StatusCode::from_u16(code).unwrap(),
+            body.to_string(),
+        )
+        .into()
+    }
+
+    #[test]
+    fn test_usage_limits_http_error_display_keeps_legacy_message_format() {
+        // admin/service.rs 的错误分类依赖这些关键字，格式变动会让其静默失效
+        assert_eq!(
+            http_error(403, "denied").to_string(),
+            "权限不足，无法获取使用额度: 403 Forbidden denied"
+        );
+        assert!(
+            http_error(401, "")
+                .to_string()
+                .starts_with("认证失败，Token 无效或已过期: 401")
+        );
+        assert!(
+            http_error(429, "")
+                .to_string()
+                .starts_with("请求过于频繁，已被限流: 429")
+        );
+        assert!(
+            http_error(503, "")
+                .to_string()
+                .starts_with("服务器错误，AWS 服务暂时不可用: 503")
+        );
+        assert!(
+            http_error(418, "")
+                .to_string()
+                .starts_with("获取使用额度失败: 418")
+        );
+    }
+
+    #[test]
+    fn test_should_try_next_region_only_on_403_status() {
+        assert!(should_try_next_region(&http_error(403, "")));
+        for code in [400, 401, 429, 500, 503] {
+            assert!(!should_try_next_region(&http_error(code, "")), "{code}");
+        }
+        // 非 HTTP 状态错误（网络等）不换区域；不依赖文案：含“权限不足”字样的普通错误同样不触发
+        assert!(!should_try_next_region(&anyhow::anyhow!("权限不足")));
     }
 }

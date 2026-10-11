@@ -220,15 +220,45 @@ pub(crate) const BUILDER_ID_PLACEHOLDER_PROFILE_ARN: &str =
 pub(crate) const SOCIAL_PROFILE_ARN: &str =
     "arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK";
 
+/// 企业版（provider=Enterprise）账号自动发现 profileArn 失败时的备用 ARN（按区域）。
+///
+/// 来源：Kiro-account-manager `getEnterpriseFallbackArn`（其更新日志称为“Enterprise 备用 ARN”）。
+/// 它不像上面两个常量那样标注为 Kiro IDE `FixedProfileArns`，本仓库未用真实企业账号验证，
+/// 只作为 `ListAvailableProfiles` 发现失败后的最后手段，且仅对声明 provider=Enterprise 的账号生效；
+/// 一旦发现到真实 ARN（持久化后）会被取代。
+pub(crate) const ENTERPRISE_FALLBACK_PROFILE_ARN_US: &str =
+    "arn:aws:codewhisperer:us-east-1:610548660232:profile/VNECVYCYYAWN";
+pub(crate) const ENTERPRISE_FALLBACK_PROFILE_ARN_EU: &str =
+    "arn:aws:codewhisperer:eu-central-1:610548660232:profile/VNECVYCYYAWN";
+
 /// 无 profile_arn 账号按账号类型推导的 fallback ARN（对齐 Kiro IDE FixedProfileArns 行为）。
 ///
 /// - social → 固定 Social ARN
 /// - idc → BuilderId 占位符（本仓库将 builder-id 归一化为 idc，且
 ///   BuilderId 账号同样以 OIDC clientId/clientSecret 刷新，无法进一步区分；
 ///   Kiro IDE 对该类账号即使用此占位符）
+/// - provider 声明为 Enterprise 的账号 → 区域化的企业备用 ARN（见
+///   [`ENTERPRISE_FALLBACK_PROFILE_ARN_US`]）。BuilderId 占位符属于另一个 AWS 账号，
+///   用在企业账号上会被上游拒绝（issue #43），因此不能落入下面的 idc 分支
 /// - external_idp（企业 IdC）及未知/未归一化值（含空字符串，视为未知类型）
 ///   → None：真实 ARN 因租户而异
 pub(crate) fn fallback_profile_arn_value(credentials: &KiroCredentials) -> Option<&'static str> {
+    if credentials
+        .provider
+        .as_deref()
+        .is_some_and(|p| p.trim().eq_ignore_ascii_case("enterprise"))
+    {
+        let region = credentials
+            .api_region
+            .as_deref()
+            .or(credentials.region.as_deref())
+            .unwrap_or("us-east-1");
+        return Some(if region.trim().to_ascii_lowercase().starts_with("eu-") {
+            ENTERPRISE_FALLBACK_PROFILE_ARN_EU
+        } else {
+            ENTERPRISE_FALLBACK_PROFILE_ARN_US
+        });
+    }
     let auth_method = credentials
         .auth_method
         .as_deref()

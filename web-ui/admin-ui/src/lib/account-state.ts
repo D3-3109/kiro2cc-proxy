@@ -32,6 +32,21 @@ export function normalizeLoginSource(raw: string | undefined | null): LoginSourc
 }
 
 /**
+ * 批量导入（KAM `accounts` 格式）的 provider 归一化：在 {@link normalizeLoginSource} 的基础上
+ * 额外保留 `Enterprise`（IAM Identity Center 企业版）。
+ *
+ * 后端据此区分企业版 IdC 账号：企业租户的 profileArn 因租户而异，不能补 BuilderId 占位符
+ * （issue #43）。不并入 normalizeLoginSource，是因为后者同时驱动「添加 / 编辑账号」里
+ * 仅限 social 账号的 Google / GitHub 下拉，加入 Enterprise 会让该下拉出现无法选择的值。
+ */
+export function normalizeImportProvider(
+  raw: string | undefined | null,
+): LoginSource | 'Enterprise' | undefined {
+  if (raw?.trim().toLowerCase() === 'enterprise') return 'Enterprise'
+  return normalizeLoginSource(raw)
+}
+
+/**
  * 登录来源展示侧派生。判定顺序：
  *   1. idc（含 BuilderId / IAM，加载时已归一化）→ BuilderId
  *   2. external_idp → Idp（调用方展示 provider 原值，如 AzureAD）

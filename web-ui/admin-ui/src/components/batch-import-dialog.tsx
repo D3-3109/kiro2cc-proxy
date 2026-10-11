@@ -26,7 +26,7 @@ import { getCredentialBalance } from '@/api/credentials'
 import { KAM_RELEASES_URL } from '@/lib/constants'
 import { extractErrorMessage } from '@/lib/utils'
 import { sha256Hex } from '@/lib/hash'
-import { normalizeLoginSource } from '@/lib/account-state'
+import { normalizeImportProvider } from '@/lib/account-state'
 
 interface BatchImportDialogProps {
   open: boolean
@@ -111,9 +111,10 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
             clientSecret: a.credentials?.clientSecret || undefined,
             profileArn: a.credentials?.profileArn || a.profileArn || undefined,
             // 登录来源：KAM 在 credentials.provider 与顶层 idp 两处都可能带；
-            // 归一化后仅 Google / GitHub 入库，其余（含 BuilderId）不写入
+            // 归一化后仅 Google / GitHub / Enterprise 入库，其余（含 BuilderId）不写入；
+            // Enterprise 必须保留：后端据此避免给企业版 IdC 账号补 BuilderId 占位 ARN（issue #43）
             provider:
-              normalizeLoginSource(a.credentials?.provider) ?? normalizeLoginSource(a.idp),
+              normalizeImportProvider(a.credentials?.provider) ?? normalizeImportProvider(a.idp),
           }))
           .filter((c: CredentialInput) => c.refreshToken)
       } else {

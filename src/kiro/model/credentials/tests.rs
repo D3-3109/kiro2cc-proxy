@@ -5,7 +5,8 @@
 mod tests {
     use crate::http_client::ProxyConfig;
     use crate::kiro::model::credentials::{
-        BUILDER_ID_PLACEHOLDER_PROFILE_ARN, CredentialsConfig, KiroCredentials, SOCIAL_PROFILE_ARN,
+        BUILDER_ID_PLACEHOLDER_PROFILE_ARN, CredentialsConfig, ENTERPRISE_FALLBACK_PROFILE_ARN_EU,
+        ENTERPRISE_FALLBACK_PROFILE_ARN_US, KiroCredentials, SOCIAL_PROFILE_ARN,
         canonicalize_auth_method_value, fallback_profile_arn_value,
     };
     use crate::model::config::Config;
@@ -132,6 +133,79 @@ mod tests {
         let mut cred = KiroCredentials::default();
         cred.auth_method = Some(String::new());
         assert_eq!(fallback_profile_arn_value(&cred), Some(SOCIAL_PROFILE_ARN));
+    }
+
+    #[test]
+    fn test_enterprise_provider_never_gets_builder_id_placeholder() {
+        // issue #43：provider=Enterprise 的账号不得被补全 BuilderId 占位符
+        // （占位符属于另一个 AWS 账号，企业账号用它会被上游拒绝），改用区域化企业备用 ARN
+        for provider in ["Enterprise", "enterprise", " ENTERPRISE "] {
+            let mut cred = KiroCredentials::default();
+            cred.auth_method = Some("idc".to_string());
+            cred.client_id = Some("c".to_string());
+            cred.client_secret = Some("s".to_string());
+            cred.provider = Some(provider.to_string());
+            assert_eq!(
+                fallback_profile_arn_value(&cred),
+                Some(ENTERPRISE_FALLBACK_PROFILE_ARN_US),
+                "provider={provider}"
+            );
+            assert!(cred.fill_missing_profile_arn(), "provider={provider}");
+            assert_eq!(
+                cred.profile_arn.as_deref(),
+                Some(ENTERPRISE_FALLBACK_PROFILE_ARN_US)
+            );
+        }
+
+        // eu-* 区域用欧洲备用 ARN（api_region 优先于 region）
+        let mut cred = KiroCredentials::default();
+        cred.auth_method = Some("idc".to_string());
+        cred.provider = Some("Enterprise".to_string());
+        cred.region = Some("us-east-1".to_string());
+        cred.api_region = Some("eu-west-1".to_string());
+        assert_eq!(
+            fallback_profile_arn_value(&cred),
+            Some(ENTERPRISE_FALLBACK_PROFILE_ARN_EU)
+        );
+
+        // BuilderId / 未声明 provider 的 idc 账号行为不变
+        for provider in [None, Some("BuilderId")] {
+            let mut cred = KiroCredentials::default();
+            cred.auth_method = Some("idc".to_string());
+            cred.provider = provider.map(str::to_string);
+            assert_eq!(
+                fallback_profile_arn_value(&cred),
+                Some(BUILDER_ID_PLACEHOLDER_PROFILE_ARN)
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_idc_and_has_no_real_profile_arn() {
+        let mut cred = KiroCredentials::default();
+        assert!(!cred.is_idc());
+        for m in ["idc", "IdC", "builder-id", "IAM"] {
+            cred.auth_method = Some(m.to_string());
+            assert!(cred.is_idc(), "{m}");
+        }
+        for m in ["social", "external_idp"] {
+            cred.auth_method = Some(m.to_string());
+            assert!(!cred.is_idc(), "{m}");
+        }
+
+        // 缺失 / 空 / 仍是 BuilderId 占位符都视为“没有真实 ARN”
+        for arn in [
+            None,
+            Some(""),
+            Some("  "),
+            Some(BUILDER_ID_PLACEHOLDER_PROFILE_ARN),
+        ] {
+            cred.profile_arn = arn.map(str::to_string);
+            assert!(cred.has_no_real_profile_arn(), "{arn:?}");
+        }
+        cred.profile_arn =
+            Some("arn:aws:codewhisperer:us-east-1:123456789012:profile/REALTENANT".to_string());
+        assert!(!cred.has_no_real_profile_arn());
     }
 
     #[test]
