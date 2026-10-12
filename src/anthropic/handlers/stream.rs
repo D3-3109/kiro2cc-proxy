@@ -47,9 +47,9 @@ pub(crate) async fn handle_stream_request(
     bridge_ctx: Option<BridgeContext>,
     // 请求的 effort 级别（output_config 存在时取值，否则 None），随 usage 记录入库
     effort: Option<String>,
-    // 思考文本化是否允许（配置开启且客户端为 Claude Code）；是否实际生效还取决于
+    // 思考文本化的渲染样式（配置开启且客户端支持时为 Some）；是否实际生效还取决于
     // 选中账号后的最终 thinking 状态
-    thinking_as_text_allowed: bool,
+    thinking_as_text_allowed: Option<crate::anthropic::stream::ThinkingTextStyle>,
 ) -> Response {
     // 调用 Kiro API（支持多账号故障转移）
     let (response, credential_id) = match provider
@@ -81,7 +81,7 @@ pub(crate) async fn handle_stream_request(
         effective = thinking_enabled,
         "[THINKING] 账号开关裁决后的深度思考状态"
     );
-    let thinking_as_text = thinking_as_text_allowed && thinking_enabled;
+    let thinking_as_text = thinking_as_text_allowed.filter(|_| thinking_enabled);
 
     // effort 入库口径与 thinking 裁决联动（口径说明见 resolve_recorded_effort 文档）
     let effort = super::helpers::resolve_recorded_effort(thinking_enabled, effort);

@@ -152,8 +152,11 @@ impl StreamContext {
     }
 
     /// 开启思考文本化：出站 SSE 的 thinking 块改写为 text 块（见 `thinking_text` 模块）
-    pub fn with_thinking_as_text(mut self, enabled: bool) -> Self {
-        self.thinking_text = enabled.then(crate::anthropic::stream::ThinkingTextRewriter::new);
+    pub fn with_thinking_as_text(
+        mut self,
+        style: Option<crate::anthropic::stream::ThinkingTextStyle>,
+    ) -> Self {
+        self.thinking_text = style.map(crate::anthropic::stream::ThinkingTextRewriter::with_style);
         self
     }
 

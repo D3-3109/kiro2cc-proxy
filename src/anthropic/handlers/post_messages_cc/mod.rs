@@ -239,7 +239,8 @@ pub async fn post_messages_cc(
 
     // 思考文本化仅对 Claude Code 客户端生效
     let thinking_as_text = crate::anthropic::stream::thinking_as_text_enabled()
-        && crate::anthropic::stream::is_claude_code_client(&headers);
+        .then(|| crate::anthropic::stream::thinking_text_style(&headers))
+        .flatten();
 
     if payload.stream {
         // 流式响应：与 /v1 相同的实时转发，额外带 300s 全局 deadline

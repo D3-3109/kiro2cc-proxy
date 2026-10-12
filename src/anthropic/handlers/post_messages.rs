@@ -276,7 +276,8 @@ pub async fn post_messages(
 
     // 思考文本化仅对 Claude Code 客户端生效（OpenAI 兼容端点等保持原生 thinking 语义）
     let thinking_as_text = crate::anthropic::stream::thinking_as_text_enabled()
-        && crate::anthropic::stream::is_claude_code_client(&headers);
+        .then(|| crate::anthropic::stream::thinking_text_style(&headers))
+        .flatten();
 
     if payload.stream {
         // 流式响应
