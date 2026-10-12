@@ -655,7 +655,8 @@
     "toastCopiedIds": "Copied model IDs ({{n}})",
     "toastExported": "JSON exported",
     "cheapestBadge": "Lowest",
-    "mostExpensiveBadge": "Highest"
+    "mostExpensiveBadge": "Highest",
+    "badgeRecentlyAdded": "NEW"
   },
   "login": {
     "description": "Enter the Admin Password to access the admin panel",

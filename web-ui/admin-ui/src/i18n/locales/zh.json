@@ -655,7 +655,8 @@
     "toastCopiedIds": "已复制 {{n}} 个模型 ID",
     "toastExported": "已导出 JSON",
     "cheapestBadge": "最低",
-    "mostExpensiveBadge": "最高"
+    "mostExpensiveBadge": "最高",
+    "badgeRecentlyAdded": "NEW"
   },
   "login": {
     "description": "请输入 Admin Password 以访问管理面板",

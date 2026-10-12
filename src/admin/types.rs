@@ -590,6 +590,8 @@ pub struct AdminModelItem {
     pub model: crate::anthropic::types::Model,
     /// 官方费率倍率（实时查询，无法匹配或上游调用失败时为 None）
     pub rate_multiplier: Option<f64>,
+    /// 模型发布日期（`YYYY-MM-DD`）；未登记为 None，前端据此实时计算「最近新增」标记
+    pub released_at: Option<String>,
 }
 
 /// 支持模型列表响应

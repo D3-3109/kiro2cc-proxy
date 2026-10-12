@@ -197,6 +197,8 @@ export interface ModelItem {
   type: string
   max_tokens: number
   rate_multiplier?: number | null
+  /** 模型发布日期（YYYY-MM-DD）；未登记为 null，前端据此实时计算「最近新增」标记 */
+  released_at?: string | null
 }
 
 export interface ModelsResponse {

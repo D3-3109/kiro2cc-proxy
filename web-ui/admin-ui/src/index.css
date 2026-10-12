@@ -46,6 +46,15 @@
     --brand-fg: #FFFFFF;
     --brand-soft: #E4F2F0;
     --brand-line: #B9DEDA;
+    /* NEW 徽章专用色板：亮色模式为浅青玉渐变（浅底深字），与暗色实心胶囊各自适配底色。
+       独立成组而非复用 --brand/--brand-deep/--brand-fg —— 后者被按钮/登录页/勾选框共用，直接改会牵连全局。
+       文字 #0A6259 on 渐变最暗端 #C9E5E0 对比度 5.43:1，超 WCAG AA 4.5 */
+    --badge-new-from: #EAF6F4;
+    --badge-new-to: #C9E5E0;
+    --badge-new-fg: #0A6259;
+    /* 浅色胶囊底色 vs 白卡对比度仅 1.28:1（低于 WCAG 1.4.11 的 3:1），靠这圈淡描边界定轮廓 */
+    --badge-new-line: #A8D2CC;
+    --badge-new-shadow: 0 1px 2px -1px rgba(13, 122, 111, .18), inset 0 1px 0 rgba(255, 255, 255, .9);
     --ok: #137A4C;
     --ok-soft: #E5F3EB;
     --ok-line: #BADFC9;
@@ -115,6 +124,14 @@
     --brand-fg: #04201D;
     --brand-soft: rgba(43, 184, 166, .13);
     --brand-line: rgba(43, 184, 166, .32);
+    /* NEW 徽章专用色板（暗色）：暗色维持原有实心胶囊观感不变，故取值与 --brand / --brand-deep / --brand-fg
+       及原硬编码高光逐值等价，仅令牌化以便浅色侧独立调色 */
+    --badge-new-from: #2BB8A6;
+    --badge-new-to: #1D897B;
+    --badge-new-fg: #04201D;
+    /* 暗色实心胶囊自带足够边界对比，保持透明以零回归 */
+    --badge-new-line: transparent;
+    --badge-new-shadow: 0 1px 3px -0.5px rgba(43, 184, 166, .3), inset 0 1px 0 rgba(255, 255, 255, .22);
     --ok: #41BE7F;
     --ok-soft: rgba(65, 190, 127, .13);
     --ok-line: rgba(65, 190, 127, .3);

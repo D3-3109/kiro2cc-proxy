@@ -30,6 +30,30 @@ function formatK(n: number): string {
   return `${Number.isInteger(k) ? k : k.toFixed(1)}K`
 }
 
+/** 「最近新增」窗口（天），与后端 src/admin/model_release.rs 的口径保持一致 */
+const RECENT_WINDOW_DAYS = 31
+
+/** 发布日期是否落在「最近新增」窗口内（按当前时间实时判定，避免页面久留后徽章不消失） */
+function isRecentlyAdded(releasedAt: string | null | undefined): boolean {
+  if (releasedAt == null || releasedAt === '') return false
+  const released = Date.parse(releasedAt)
+  if (Number.isNaN(released)) return false
+  return Date.now() - released < RECENT_WINDOW_DAYS * 86_400_000
+}
+
+/** NEW 徽章：渐变胶囊。色值全部走 --badge-new-* 双轨令牌 —— 浅色为浅青玉渐变（浅底深字），
+    深色为实心亮青渐变（亮底深墨）；浅色底 vs 白卡对比不足，另由 --badge-new-line 描边界定轮廓。
+    按 index.css 组件类白名单约定以原子类表达 */
+const BADGE_NEW =
+  'inline-flex flex-none items-center justify-center h-4 whitespace-nowrap rounded-full px-1.5 ' +
+  'text-[9.5px] font-bold leading-none tracking-[.06em] text-[color:var(--badge-new-fg)] ' +
+  'bg-[linear-gradient(135deg,var(--badge-new-from)_0%,var(--badge-new-to)_100%)] ' +
+  // ring-inset 而非 border：border 会撑大盒模型，h-4 下多 2px 破坏胶囊几何
+  'ring-1 ring-inset ring-[color:var(--badge-new-line)] ' +
+  // 「shadow:」类型提示必需：裸 var() 会被 Tailwind boxShadowColor 插件（type 含 any）抢走，
+  // 编译成 --tw-shadow-color + --tw-shadow:var(--tw-shadow-colored)，而后者默认 0 0 #0000 → 阴影全丢
+  'shadow-[shadow:var(--badge-new-shadow)]'
+
 /** 取首个匹配该倍率的模型名，用于指标卡脚注 */
 function rateModelName(models: ModelItem[], rate: number): string {
   const hit = models.find((m) => m.rate_multiplier === rate)
@@ -358,7 +382,14 @@ export function ModelListPage() {
                           </td>
                           <td className={CELL}>
                             <div className="flex min-w-0 flex-col gap-[3px]">
-                              <span className="truncate font-mono text-[12px] text-ink">{model.id}</span>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate font-mono text-[12px] text-ink">{model.id}</span>
+                                {isRecentlyAdded(model.released_at) && (
+                                  <span className={BADGE_NEW} title={model.released_at ?? ''}>
+                                    {t('models.badgeRecentlyAdded')}
+                                  </span>
+                                )}
+                              </div>
                               {model.display_name !== '' && model.display_name !== model.id && (
                                 <span className="truncate text-[11px] text-ink-3">{model.display_name}</span>
                               )}

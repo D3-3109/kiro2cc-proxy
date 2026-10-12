@@ -42,6 +42,7 @@ fn live_model_to_admin_item(
     super::types::AdminModelItem {
         model: crate::anthropic::handlers::available_model_to_model(info),
         rate_multiplier: info.rate_multiplier,
+        released_at: super::model_release::release_date(&info.model_id).map(str::to_string),
     }
 }
 
@@ -52,6 +53,7 @@ fn fallback_model_to_admin_item(
     model: crate::anthropic::types::Model,
 ) -> super::types::AdminModelItem {
     super::types::AdminModelItem {
+        released_at: super::model_release::release_date(&model.id).map(str::to_string),
         model,
         rate_multiplier: None,
     }
@@ -767,6 +769,7 @@ mod tests {
                     max_tokens: 64_000,
                 },
                 rate_multiplier: None,
+                released_at: None,
             }
         }
 
