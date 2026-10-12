@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.24".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "修复 Claude Desktop 客户端开启 thinkingAsText 时思考内容出现 ANSI 转义乱码（[2m / [0m 与方块字符）：终端能渲染 ANSI，但 Desktop 是图形界面不解析，ESC 直接显示为乱码。现按 User-Agent 括号内的入口字段选择渲染样式——cli 或解析不出入口仍用 ANSI（行为不变），claude-desktop* 改用无转义的纯文本（标记行与正文、时长行间留空行，正文换行用 Markdown 硬换行以适配渲染），其余入口（claude-vscode、sdk-ts 等渲染能力未知）不启用该功能、回退原生 thinking（issue #48）",
+                "Fixed ANSI escape garbage ([2m / [0m and box characters) in thinking output when thinkingAsText is enabled on Claude Desktop: terminals render ANSI but Desktop is a GUI that does not parse it, so the ESC byte shows as garbage. The render style is now chosen by the entrypoint field in the User-Agent — cli or unparseable entrypoints keep ANSI (unchanged), claude-desktop* switches to escape-free plain text (blank lines around the marker and duration lines, Markdown hard breaks for body newlines), and other entrypoints (claude-vscode, sdk-ts, etc., whose rendering capability is unknown) leave the feature off and fall back to native thinking (issue #48)",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.22".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![
