@@ -137,6 +137,20 @@ pub(crate) fn should_try_next_region(err: &anyhow::Error) -> bool {
         .is_some_and(|e| e.status == reqwest::StatusCode::FORBIDDEN)
 }
 
+/// 额度查询错误是否为与 profileArn 无关的瞬时故障（限流 / 服务端错误 / 网络抖动）。
+///
+/// 这些情况下触发 profileArn 自愈链路只会盲目放大请求，调用方应直接返回原错误；
+/// 其余状态码（如 400/403）可能与 profileArn 无效或权限缺失有关，仍走自愈。
+pub(crate) fn is_transient_usage_limits_error(err: &anyhow::Error) -> bool {
+    if err.downcast_ref::<UsageLimitsHttpError>().is_some_and(|e| {
+        e.status == reqwest::StatusCode::TOO_MANY_REQUESTS || e.status.is_server_error()
+    }) {
+        return true;
+    }
+    // 网络层错误（超时、连接失败等）：链路里没有 UsageLimitsHttpError，直接看根因类型
+    err.downcast_ref::<reqwest::Error>().is_some()
+}
+
 impl std::error::Error for RefreshTokenInvalidError {}
 
 /// 判断刷新响应是否为服务端已撤销 refreshToken（invalid_grant）
@@ -768,7 +782,9 @@ pub(crate) async fn list_available_profiles(
     .header("Authorization", format!("Bearer {}", token))
     .json(&serde_json::json!({}));
     let rest_err = match send_list_profiles(rest).await {
-        Ok(arns) => return Ok(arns),
+        // 200 但空列表不算成功，继续走形态 B 兜底探测
+        Ok(arns) if !arns.is_empty() => return Ok(arns),
+        Ok(_) => "REST 端点返回空 profiles 列表".to_string(),
         Err(e) => e,
     };
 

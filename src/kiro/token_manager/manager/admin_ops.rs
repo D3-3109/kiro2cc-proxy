@@ -4,8 +4,9 @@ use anyhow::Context;
 use super::super::entry::{CredentialEntry, DisabledReason};
 use super::super::refresh::{
     UsageLimitsUnsupportedError, get_usage_limits, get_usage_limits_without_profile_arn,
-    is_token_expired, is_token_expiring_soon, list_available_models, list_available_profiles,
-    pick_profile_arn, refresh_token, sha256_hex, validate_refresh_token,
+    is_token_expired, is_token_expiring_soon, is_transient_usage_limits_error,
+    list_available_models, list_available_profiles, pick_profile_arn, refresh_token, sha256_hex,
+    validate_refresh_token,
 };
 use super::super::types::{
     CredentialEntrySnapshot, ManagerSnapshot, MultiTokenManager, TOKEN_REFRESH_COOLDOWN,
@@ -140,9 +141,10 @@ impl MultiTokenManager {
 
     /// 比对「会影响上游返回内容」的身份字段。
     ///
-    /// 不包含 `provider`：它是纯展示字段（登录来源 Google / GitHub），既不参与 token 刷新，
-    /// 也不参与 API 请求，更不影响上游返回的订阅等级。若纳入比对，则「仅改登录来源」的更新
-    /// 会让在途刷新/额度查询以「身份已变更」失败，进而累计 `refresh_failure_count` 误禁用账号。
+    /// 不包含 `provider`：它除被 `fallback_profile_arn_value` 用于判定 Enterprise 备用 ARN 外，
+    /// 既不参与 token 刷新，也不参与 API 请求，更不影响上游返回的订阅等级。若纳入比对，则
+    /// 「仅改登录来源 / 补充 provider」的更新会让在途刷新/额度查询以「身份已变更」失败，
+    /// 进而累计 `refresh_failure_count` 误禁用账号。
     fn has_same_subscription_identity(
         current: &KiroCredentials,
         queried: &KiroCredentials,
@@ -433,10 +435,13 @@ impl MultiTokenManager {
                 Ok(usage) => usage,
                 // idc 账号没有真实 profileArn 时的自愈（issue #43）。
                 // BuilderId 个人账号的“不支持额度查询”不是该问题，不触发。
+                // 429 限流 / 5xx / 网络错误与 profileArn 无关，直接返回，避免自愈链路
+                //（ListAvailableProfiles → 重试 → 不带 ARN 重试）在故障期间放大请求。
                 Err(e)
                     if e.downcast_ref::<UsageLimitsUnsupportedError>().is_none()
                         && credentials.is_idc()
-                        && credentials.has_no_real_profile_arn() =>
+                        && credentials.has_no_real_profile_arn()
+                        && !is_transient_usage_limits_error(&e) =>
                 {
                     self.heal_and_retry_usage_limits(id, &mut credentials, &token, e)
                         .await?
