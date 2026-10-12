@@ -182,9 +182,22 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub thinking_as_text: bool,
 
+    /// 分块写入约束的行数上限（issue #46）
+    ///
+    /// 请求带 Write / Edit / MultiEdit 工具时，代理在系统提示末尾追加“单次工具调用参数不超过
+    /// N 行”的约束，避免上游对大块工具参数静默约 240s 后重置流。约束会让模型把大写入拆成
+    /// 多轮，每轮重新思考，credits 随之上升。默认 300；调大更省 credits 但更容易撞 240s 重置；
+    /// 0 表示不追加约束。可在 Admin 设置页热修改（仅影响之后的新请求）。
+    #[serde(default = "default_write_chunking_max_lines")]
+    pub write_chunking_max_lines: u32,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
+}
+
+fn default_write_chunking_max_lines() -> u32 {
+    crate::anthropic::DEFAULT_WRITE_CHUNKING_MAX_LINES
 }
 
 fn default_host() -> String {
@@ -259,6 +272,7 @@ impl Default for Config {
             client_token_passthrough: false,
             forward_suggestion_mode: false,
             thinking_as_text: true,
+            write_chunking_max_lines: default_write_chunking_max_lines(),
             config_path: None,
         }
     }
@@ -374,6 +388,11 @@ impl Config {
         {
             self.thinking_as_text = b;
         }
+        if let Ok(v) = env::var("WRITE_CHUNKING_MAX_LINES")
+            && let Ok(n) = v.parse::<u32>()
+        {
+            self.write_chunking_max_lines = n;
+        }
 
         // CacheSimulationConfig 嵌套字段覆盖
         if let Ok(v) = env::var("CACHE_SIMULATION_FINGERPRINT_ENABLED")
@@ -433,6 +452,17 @@ mod tests {
         // 缺省该字段时必须为 false（维持展示缩放，Issue #44 修复的默认零回归前提）
         let config: Config = serde_json::from_str("{}").unwrap();
         assert!(!config.client_token_passthrough);
+    }
+
+    #[test]
+    fn test_write_chunking_max_lines_default_and_override() {
+        assert_eq!(Config::default().write_chunking_max_lines, 300);
+        let c: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(c.write_chunking_max_lines, 300);
+        let c: Config = serde_json::from_str(r#"{"writeChunkingMaxLines": 0}"#).unwrap();
+        assert_eq!(c.write_chunking_max_lines, 0);
+        let c: Config = serde_json::from_str(r#"{"writeChunkingMaxLines": 450}"#).unwrap();
+        assert_eq!(c.write_chunking_max_lines, 450);
     }
 
     #[test]

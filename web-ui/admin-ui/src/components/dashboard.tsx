@@ -682,8 +682,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <SettingsPanel
             theme={theme}
             onToggleTheme={toggleTheme}
-            sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebarCollapsed={toggleSidebarCollapsed}
             onOpenChangelog={() => {
               setActiveTab('changelog')
               setDetailKeyId(null)
@@ -816,6 +814,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
       {/* 对话框群（自本文件拆出，纯代码搬移） */}
       <DashboardDialogs
         selectedCredentialId={selectedCredentialId}
+        selectedCredential={
+          data?.credentials.find((c) => c.id === selectedCredentialId) ?? null
+        }
         balanceDialogOpen={balanceDialogOpen}
         setBalanceDialogOpen={setBalanceDialogOpen}
         modelsCredentialId={modelsCredentialId}

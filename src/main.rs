@@ -68,6 +68,17 @@ async fn main() {
     // 客户端 token 直通开关（true 时 usage 字段 1:1 上报，见 Issue #44）
     anthropic::set_client_token_passthrough(config.client_token_passthrough);
     anthropic::set_thinking_as_text(config.thinking_as_text);
+    anthropic::set_write_chunking_max_lines(config.write_chunking_max_lines);
+    if config.write_chunking_max_lines == 0 {
+        tracing::info!(
+            "分块写入约束已关闭（writeChunkingMaxLines=0）：大块工具参数可能触发上游约 240s 重置"
+        );
+    } else {
+        tracing::info!(
+            "分块写入约束行数上限: {}（writeChunkingMaxLines）",
+            config.write_chunking_max_lines
+        );
+    }
     if config.thinking_as_text {
         tracing::info!(
             "思考文本化已开启（thinkingAsText=true）：Claude Code 的 thinking 将以引用文本逐行展示"

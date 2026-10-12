@@ -47,8 +47,9 @@ pub(crate) async fn handle_stream_request(
     bridge_ctx: Option<BridgeContext>,
     // 请求的 effort 级别（output_config 存在时取值，否则 None），随 usage 记录入库
     effort: Option<String>,
-    // 思考文本化：thinking 块改写为 text 块逐行展示（配置开启且客户端为 Claude Code）
-    thinking_as_text: bool,
+    // 思考文本化是否允许（配置开启且客户端为 Claude Code）；是否实际生效还取决于
+    // 选中账号后的最终 thinking 状态
+    thinking_as_text_allowed: bool,
 ) -> Response {
     // 调用 Kiro API（支持多账号故障转移）
     let (response, credential_id) = match provider
@@ -63,6 +64,27 @@ pub(crate) async fn handle_stream_request(
         Ok(resp) => resp,
         Err(e) => return map_provider_error_with_context(e, model, input_tokens),
     };
+
+    // 账号级 thinking 开关是最终裁决（开 = 强制思考，关 = 禁止思考），必须在选中账号后
+    // 才能确定；故障转移后的账号即 credential_id 对应账号
+    let client_thinking_enabled = thinking_enabled;
+    let thinking_enabled = super::helpers::effective_thinking_enabled(
+        &provider,
+        credential_id,
+        model,
+        client_thinking_enabled,
+    );
+    tracing::info!(
+        model = %model,
+        credential_id,
+        client_request = client_thinking_enabled,
+        effective = thinking_enabled,
+        "[THINKING] 账号开关裁决后的深度思考状态"
+    );
+    let thinking_as_text = thinking_as_text_allowed && thinking_enabled;
+
+    // effort 入库口径与 thinking 裁决联动（口径说明见 resolve_recorded_effort 文档）
+    let effort = super::helpers::resolve_recorded_effort(thinking_enabled, effort);
 
     // 创建流处理上下文
     let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
@@ -162,6 +184,32 @@ pub(crate) fn stream_interrupted_error_event() -> SseEvent {
     )
 }
 
+/// 带流持续时长的"流中断"error 事件。
+///
+/// 与 [`stream_interrupted_error_event`] 同为 `overloaded_error`（保持客户端可重试语义，
+/// 因为偶发的上游抖动重试仍然有效），区别是 message 中带上流断开时已持续的秒数，
+/// 便于用户/客户端日志对照代理日志的 `stream_elapsed_secs` 排查（见 issue #46）。
+///
+/// 有意**不**在 message 中断言断流原因：#46 的 ~247s 恒定重置根因未确认，实测 361s 的
+/// 流可正常完成，已排除"无条件的单次流总时长上限"，但 thinking 路径看门狗、端点差异、
+/// 账号/网络链路等解释均未证实，不能据此引导用户做可能无效的操作（如缩短输出）。
+pub(crate) fn stream_interrupted_error_event_after(elapsed: Duration) -> SseEvent {
+    let secs = elapsed.as_secs();
+    SseEvent::new(
+        "error",
+        serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "overloaded_error",
+                "message": format!(
+                    "Upstream connection was interrupted before the response finished \
+                     (after {secs}s). Please retry."
+                )
+            }
+        }),
+    )
+}
+
 /// /cc 全局 deadline 触发时返回给客户端的 error 事件（两处 deadline 收尾路径共用）
 pub(crate) fn deadline_error_event() -> SseEvent {
     SseEvent::new(
@@ -206,6 +254,8 @@ fn create_sse_stream(
     // stream::pending()（具体类型），与 reqwest bytes_stream 的 opaque type
     // 无法直接统一，借 Box<dyn Stream> 擦除为同一类型。
     let body_stream = response.bytes_stream().boxed();
+    // 流起点（上游响应头已到达）：读流失败时用于诊断/提示"流已持续多久"
+    let stream_started_at = Instant::now();
 
     // bridge_ctx 与 provider Arc 一并放入 unfold 状态元组：闭包为 FnMut + async move，
     // 环境捕获的 Owned 值无法逐次 move 进 future（E0507/E0373），
@@ -213,7 +263,7 @@ fn create_sse_stream(
     // 状态元组第 10 元：进行中的桥接轮（修复③保活用，None = 无轮次执行中）。
     let processing_stream = stream::unfold(
         (body_stream, ctx, EventStreamDecoder::new(), false, interval_at(Instant::now() + Duration::from_secs(PING_INTERVAL_SECS), Duration::from_secs(PING_INTERVAL_SECS)), deadline, bridge, bridge_ctx, provider, None::<InFlightRound>),
-        |(mut body_stream, mut ctx, mut decoder, finished, mut ping_interval, deadline, mut bridge, bridge_ctx, provider, mut round_in_flight)| async move {
+        move |(mut body_stream, mut ctx, mut decoder, finished, mut ping_interval, deadline, mut bridge, bridge_ctx, provider, mut round_in_flight)| async move {
             if finished {
                 return None;
             }
@@ -339,6 +389,7 @@ fn create_sse_stream(
                                 is_timeout = e.is_timeout(),
                                 is_body = e.is_body(),
                                 is_decode = e.is_decode(),
+                                stream_elapsed_secs = stream_started_at.elapsed().as_secs(),
                                 "读取响应流失败"
                             );
                             let final_events = if ctx.is_empty_response() {
@@ -354,11 +405,13 @@ fn create_sse_stream(
                                     vec![empty_response_error_event(false)]
                                 }
                             } else {
+                                let elapsed = stream_started_at.elapsed();
                                 tracing::warn!(
                                     est_input_tokens = ctx.input_tokens,
+                                    stream_elapsed_secs = elapsed.as_secs(),
                                     "流读取错误但已产生部分内容，补发 error 事件防止伪装成正常完成"
                                 );
-                                vec![stream_interrupted_error_event()]
+                                vec![stream_interrupted_error_event_after(elapsed)]
                             };
                             let bytes: Vec<Result<Bytes, Infallible>> = final_events
                                 .into_iter()

@@ -450,7 +450,7 @@ fn test_client_workflow_tool_descriptions_are_not_augmented() {
 #[test]
 fn test_rendered_thinking_header_stripped_from_assistant_history() {
     // thinkingAsText 开启时，客户端会把渲染出的思考 text 块当正文回传；
-    // 历史转换仅剥离「💭 Thinking」标记行，思考正文按普通助手文本保留回传上游
+    // 无时长行（流被中断）无法判定思考范围：降级为仅剥离「💭 Thinking」标记行，正文保留
     use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
     let req = MessagesRequest {
         model: "claude-sonnet-4-6".to_string(),
@@ -486,7 +486,218 @@ fn test_rendered_thinking_header_stripped_from_assistant_history() {
     let r = convert_request(&req).unwrap();
     let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
     assert!(hist.contains("visible answer"));
-    // 标记行已剥；正文保留（用户已确认的语义：上下文略增，显示最干净）
+    // 标记行已剥；无时长行时正文保守保留（完整思考块的整块丢弃见下方专门测试）
     assert!(!hist.contains("💭 Thinking"), "{hist}");
     assert!(hist.contains("secret reasoning"), "{hist}");
+}
+
+#[test]
+fn test_rendered_thinking_block_fully_dropped_from_assistant_history() {
+    // 完整的文本化思考块（标记行 + 正文 + 时长行）整块不回传上游；
+    // 思考块后的答案与工具调用保留，纯思考 + 工具调用的消息不会留下空 content
+    use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
+    let thinking = "💭 Thinking\nsecret reasoning\n💭 Thought for 3s (12 tokens)\n";
+    let req = MessagesRequest {
+        model: "claude-sonnet-4-6".to_string(),
+        max_tokens: 2048,
+        messages: vec![
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q1"),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([
+                    {"type": "text", "text": thinking},
+                    {"type": "text", "text": "visible answer"},
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}
+                ]),
+            },
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!([
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}
+                ]),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([
+                    {"type": "text", "text": thinking},
+                    {"type": "tool_use", "id": "t2", "name": "Read", "input": {}}
+                ]),
+            },
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!([
+                    {"type": "tool_result", "tool_use_id": "t2", "content": "ok"}
+                ]),
+            },
+        ],
+        stream: false,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    };
+    let r = convert_request(&req).unwrap();
+    let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
+    assert!(!hist.contains("secret reasoning"), "{hist}");
+    assert!(
+        !hist.contains("Thinking") && !hist.contains("Thought for"),
+        "{hist}"
+    );
+    assert!(hist.contains("visible answer"), "{hist}");
+    // 仅含思考块 + tool_use 的 assistant 消息：content 为占位符，不为空
+    for m in &r.conversation_state.history {
+        if let crate::kiro::model::requests::conversation::Message::Assistant(a) = m {
+            assert!(
+                !a.assistant_response_message.content.is_empty(),
+                "assistant content 不得为空"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_consecutive_thinking_only_assistants_merge_to_non_empty_content() {
+    // 连续 assistant 消息（Issue #79 合并路径）均只含被丢弃的思考（文本化完整思考块 /
+    // 原生 thinking 块）且无 tool_use：合并后 content 必须非空（Kiro 要求）
+    use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
+    let rendered = "💭 Thinking\nsecret reasoning\n💭 Thought for 3s (12 tokens)\n";
+    let req = MessagesRequest {
+        model: "claude-sonnet-4-6".to_string(),
+        max_tokens: 2048,
+        messages: vec![
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q1"),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([{"type": "text", "text": rendered}]),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([{"type": "text", "text": rendered}]),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([
+                    {"type": "thinking", "thinking": "native secret", "signature": "s"}
+                ]),
+            },
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q2"),
+            },
+        ],
+        stream: false,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    };
+    let r = convert_request(&req).unwrap();
+    let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
+    assert!(!hist.contains("secret"), "{hist}");
+    let mut assistants = 0;
+    for m in &r.conversation_state.history {
+        if let crate::kiro::model::requests::conversation::Message::Assistant(a) = m {
+            assistants += 1;
+            assert!(
+                !a.assistant_response_message.content.is_empty(),
+                "合并后的 assistant content 不得为空: {hist}"
+            );
+        }
+    }
+    assert_eq!(assistants, 1, "三条连续 assistant 应合并为一条: {hist}");
+}
+
+#[test]
+fn test_dim_markers_stripped_from_assistant_history() {
+    // 文本化思考正文每行带 dim 转义，客户端原样回传；模型模仿产生的字面 `[2m…[0m` 整行包裹
+    // 同样不应留在上游上下文里（否则会强化模型继续输出该格式）
+    use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
+    let req = MessagesRequest {
+        model: "claude-sonnet-4-5".to_string(),
+        max_tokens: 2048,
+        messages: vec![
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q1"),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([
+                    {"type": "text", "text": "\u{1b}[2m💭 Thinking\u{1b}[0m\n\u{1b}[2mreal reasoning\u{1b}[0m\n\n\u{1b}[2m💭 Thought for 2s (9 tokens)\u{1b}[0m\n"},
+                    {"type": "text", "text": "[2mimitated reasoning[0m\n[2m[0m\nvisible answer"}
+                ]),
+            },
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q2"),
+            },
+        ],
+        stream: false,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    };
+    let r = convert_request(&req).unwrap();
+    let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
+    assert!(
+        !hist.contains("[2m") && !hist.contains("[0m") && !hist.contains("\\u001b"),
+        "{hist}"
+    );
+    assert!(!hist.contains("💭 Thinking"), "{hist}");
+    // 带时长行的完整思考块整块丢弃（上游不含思考内容）；其余内容（含模型模仿内容）保留
+    assert!(!hist.contains("real reasoning"), "{hist}");
+    assert!(!hist.contains("Thought for"), "{hist}");
+    for kept in ["imitated reasoning", "visible answer"] {
+        assert!(hist.contains(kept), "{kept}: {hist}");
+    }
+}
+
+#[test]
+fn test_code_example_with_literal_dim_line_survives_history() {
+    // 普通回答里讲解 ANSI 的 fenced 代码示例（无任何思考标记）不得被改写
+    use crate::anthropic::types::{Message as AnthropicMessage, MessagesRequest};
+    let answer = "示例：\n```\n[2mhello[0m\n[2mworld[0m\n```\n以上。";
+    let req = MessagesRequest {
+        model: "claude-sonnet-4-5".to_string(),
+        max_tokens: 2048,
+        messages: vec![
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q1"),
+            },
+            AnthropicMessage {
+                role: "assistant".to_string(),
+                content: serde_json::json!([{"type": "text", "text": answer}]),
+            },
+            AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("q2"),
+            },
+        ],
+        stream: false,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    };
+    let r = convert_request(&req).unwrap();
+    let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
+    let expected = serde_json::to_string(answer).unwrap();
+    let expected = &expected[1..expected.len() - 1];
+    assert!(hist.contains(expected), "{hist}");
 }

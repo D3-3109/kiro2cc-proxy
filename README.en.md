@@ -10,7 +10,7 @@
 
 ![Admin Panel](docs/assets/admin-panel.png)
 
-> **✅ Supported Models: Claude Sonnet 5.5 / Claude Sonnet 5 / Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 5.5 / Claude Opus 5 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Opus 4.8 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.1 / MiniMax M2.5 / Qwen3-Coder / GPT-5.6 Sol / GPT-5.6 Terra / GPT-5.6 Luna**
+> **✅ Supported Models: Claude Sonnet 5.5 / Claude Sonnet 5 / Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 5.5 / Claude Opus 5 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Opus 4.8 / Claude Haiku 5.5 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.1 / MiniMax M2.5 / Qwen3-Coder / GPT-5.6 Sol / GPT-5.6 Terra / GPT-5.6 Luna**
 
 ### 📖 Quick Navigation
 
@@ -485,7 +485,8 @@ Lower `priority` value = higher priority. Up to 3 retries per account, 9 per req
 | `maxRpmPerCredential` | No | `0` | Maximum requests per minute for each account; `0` means unlimited. Saving from the settings page applies it immediately and persists it to `config.json` |
 | `forwardSuggestionMode` | No | `false` | Suggestion Mode input-prediction switch. With the default `false`, the proxy intercepts Claude Code's automatic full-context prediction request after each turn and returns an empty response without Token usage. `true` forwards it upstream to show input suggestions, but each turn incurs one additional full-context billed request. Override with `FORWARD_SUGGESTION_MODE` |
 | `clientTokenPassthrough` | No | `false` | Client token passthrough: `true` reports returned `usage` fields 1:1 with real values; the default `false` displays values scaled by `0.6657`. It supports third-party clients that calculate context usage from returned usage values. Claude Code's auto-compact trigger timing remains unchanged in either mode. Override with `CLIENT_TOKEN_PASSTHROUGH` |
-| `thinkingAsText` | No | `false` | Thinking-as-text display for Claude Code only. `true` rewrites thinking blocks into markdown quote text streamed line by line with ANSI dim (gray) styling, similar to Kiro CLI. This avoids Claude Code appearing stalled while native thinking is folded. The text is stripped from returned history before reaching upstream, but remains in Claude Code's context and can make auto-compact happen earlier. Override with `THINKING_AS_TEXT` |
+| `writeChunkingMaxLines` | No | `300` | Line limit of the chunked-writing instruction (see the `Reset(StreamId(1), INTERNAL_ERROR, Remote)` FAQ entry): when a request carries Write / Edit / MultiEdit, the system prompt asks for no more than ~N lines per tool call. Larger saves credits but makes the ~240s upstream stream reset more likely; `0` disables the instruction. Editable in the Admin settings page and hot-applied to subsequent requests. Override with `WRITE_CHUNKING_MAX_LINES` |
+| `thinkingAsText` | No | `false` | Thinking-as-text display for Claude Code only. `true` rewrites thinking blocks into markdown quote text streamed line by line with ANSI dim (gray) styling, similar to Kiro CLI. This avoids Claude Code appearing stalled while native thinking is folded. In both modes Claude Code's own context contains the thinking content, but it is dropped entirely when history is sent upstream: with the switch off, native thinking blocks are dropped; with it on, the marker line, thinking body and duration line are dropped, so the upstream context never contains thinking (only when the stream is interrupted and the duration line is missing does it conservatively fall back to stripping just the marker line). Override with `THINKING_AS_TEXT` |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -517,6 +518,7 @@ After configuring `adminPsw`, the Admin settings page manages the following opti
 | Client token passthrough | `clientTokenPassthrough` | Applies immediately |
 | Thinking-as-text display | `thinkingAsText` | Applies immediately to subsequent requests only |
 | Per-account RPM limit | `maxRpmPerCredential` | Applies immediately; `0` means unlimited |
+| Chunked-write line limit | `writeChunkingMaxLines` | Applies immediately to subsequent requests only; `0` disables the instruction |
 | Listen port | `port` | Takes effect after restart; valid range: `1–65535` |
 | Upstream proxy URL | `proxyUrl` | Takes effect after restart; accepts `http`, `https`, and `socks5`; empty disables the proxy |
 
@@ -752,6 +754,7 @@ Any model name containing the following keywords is automatically mapped to the 
 | `*opus*` (including 4.8/4-8) | `claude-opus-4.8` |
 | `*opus*` (others) | `claude-opus-4.6` |
 | `*fable*` | `claude-fable-5` |
+| `*haiku*` (including 5.5/5-5) | `claude-haiku-5.5` |
 | `*haiku*` | `claude-haiku-4.5` |
 | `*deepseek*` | `deepseek-3.2` |
 | `*glm*` | `glm-5` |
@@ -825,6 +828,20 @@ This has been fixed: the AWS SSO OIDC refresh endpoint returns both an `accessTo
 **Q: Can sub-API-Key spending limits be metered in real Kiro credits instead of estimated USD?**
 
 Yes. When creating/editing a sub API Key, the limit unit can be set to "USD estimate" or "real credits" (`limitUnit`: usd/credits). With credits, the limit is checked against the real `credits_used` accumulated in usage records (falls back to `estimated_cost × k_ref` for older records without `credits_used`). Defaults to `usd`, fully backward compatible.
+
+**Q: After a long generation of about 4 minutes (~247s) the client reports `Server error mid-response`, and the proxy log shows `Reset(StreamId(1), INTERNAL_ERROR, Remote)`**
+
+The **upstream (Kiro gateway) reset the HTTP/2 stream**; this is not a proxy timeout (the proxy's upstream timeout is 1000s). If some output was already produced when the reset arrives, the proxy immediately sends an `overloaded_error` to the client (it never disguises the interruption as a normal completion), and the client then retries automatically. The issue also **reproduces when using the Kiro CLI directly against the upstream, without this proxy**, which confirms the root cause is on the upstream side — unrelated to the proxy's forwarding path or the client.
+
+A reproducible trigger was found in testing: **the model generates a very large tool-call argument in one go (typically a single `Write` of tens of thousands of characters)**. The upstream does not stream tool arguments incrementally, so the stream carries no data while the call is being generated, and after about 240s of silence the upstream resets it with `RST_STREAM(INTERNAL_ERROR)` (in tests a write of ~8,000 characters took ~215s and succeeded, ~20,000 characters failed at ~240s every time, independent of the thinking-adaptive switch; retrying the same request fails again; HTTP/2 PING keep-alive does not help). Plain text streams and the thinking phase emit data continuously and finished normally after 794s.
+
+What the proxy does: when a request carries any of the `Write` / `Edit` / `MultiEdit` tools, it appends a fixed chunked-writing instruction to the end of the system prompt (no more than ~N lines per call, N defaults to 300 and is set by `writeChunkingMaxLines`: Write `content`, Edit `new_string`, and the combined content of all edits inside one MultiEdit call all count toward the limit; for larger content, write the first part with Write and append the rest with several Edit / Bash calls, and split a large MultiEdit into several calls), so the model splits big changes into several calls. For Write, all 4 large-file write requests in tests then finished normally within about 2 minutes (Edit / MultiEdit have not been validated separately). The client's tool descriptions are not modified.
+
+**Trade-off (follow-up on issue #46)**: the instruction makes the model split one large write into several turns, and the client sends `thinking: adaptive` on every turn, so the model re-thinks each time. A user's own statistics show about 3x the credits for comparable tasks (not reproduced by me). The limit is therefore configurable via `writeChunkingMaxLines`: a larger value saves credits but makes the ~240s upstream stream reset more likely; a smaller value is safer but costs more; `0` stops appending the instruction (you then control write size yourself). The default 300 is an estimate derived from the output speed measured in the issue (~8000 CJK characters in ~215s succeeds, ~20000 in ~240s always fails) and has not been verified with a real Claude Code; lower it if you still see resets. It can be changed in the Admin settings page (hot-applied to subsequent requests); `WRITE_CHUNKING_MAX_LINES` overrides it.
+
+It can still happen when the model ignores the instruction, or when several write-type tools are called in parallel within one turn (each within the limit but too slow in total; this case has not been tested). In that case ask the model to write in pieces, or attach the log to the issue (the `stream_elapsed_secs` field records how long the stream had run when it broke). Note: this is based on local tests (single account, Opus 4.6, SOCKS5 egress); the issue reporter's environment has not been verified.
+
+> Note: `agentContinuationId` is a session-stable identifier the proxy derives from the conversationId (used for prompt cache and sticky account routing); it is not an upstream "resume" handle, so the proxy cannot continue the remaining output after a Reset. The proxy already sends a `ping` to the client every 25 seconds, but the Reset originates on the upstream side, so client-side keep-alive cannot prevent it.
 
 **Q: Port already in use**
 
@@ -907,5 +924,11 @@ Thanks to all the contributors of this project:
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
+
+**Special thanks** — the following issues directly drove critical fixes:
+
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) pinpointed the `history[0]` freeze-cache key drift that invalidated the Kiro prefix cache every turn
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) pinpointed the upstream stream reset at ~247s on long generations, leading to the chunked-write constraint for large tool arguments
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) reported slow responses from the proxied sonnet 5, leading to the lower default effort fallback
 
 > Thanks to everyone who has filed issues, shared feedback, and joined the discussions — you keep making this project better.

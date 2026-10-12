@@ -10,7 +10,7 @@
 
 ![Admin 管理面板](docs/assets/admin-panel.png)
 
-> **✅ 支持模型**：Claude Sonnet 5.5 · Claude Sonnet 5 · Claude Sonnet 4.5 · Claude Sonnet 4.6 · Claude Opus 5.5 · Claude Opus 5 · Claude Opus 4.5 · Claude Opus 4.6 · Claude Opus 4.7 · Claude Opus 4.8 · Claude Haiku 4.5 · DeepSeek 3.2 · GLM-5 · MiniMax M2.1 · MiniMax M2.5 · Qwen3-Coder · GPT-5.6 Sol · GPT-5.6 Terra · GPT-5.6 Luna
+> **✅ 支持模型**：Claude Sonnet 5.5 · Claude Sonnet 5 · Claude Sonnet 4.5 · Claude Sonnet 4.6 · Claude Opus 5.5 · Claude Opus 5 · Claude Opus 4.5 · Claude Opus 4.6 · Claude Opus 4.7 · Claude Opus 4.8 · Claude Haiku 5.5 · Claude Haiku 4.5 · DeepSeek 3.2 · GLM-5 · MiniMax M2.1 · MiniMax M2.5 · Qwen3-Coder · GPT-5.6 Sol · GPT-5.6 Terra · GPT-5.6 Luna
 
 ### 📖 快速导航
 
@@ -506,7 +506,8 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 | `maxRpmPerCredential` | 否 | `0` | 单个账号每分钟最大请求数；`0` 表示不限。设置页保存后立即热生效并写入 `config.json` |
 | `forwardSuggestionMode` | 否 | `false` | Suggestion Mode 输入建议请求放行开关。`false`（默认）时服务端拦截 Claude Code 每轮对话后自动发起的全量上下文预测请求并返回空响应，不产生 Token 消耗；`true` 时正常转发上游，以展示输入建议，但每轮会额外产生一次全量上下文计费请求。可用环境变量 `FORWARD_SUGGESTION_MODE` 覆盖 |
 | `clientTokenPassthrough` | 否 | `false` | 客户端 token 直通：`true` 时返回给客户端的 `usage` 字段 1:1 上报真实值；`false`（默认）时按 `0.6657` 系数缩放展示。适用于按返回用量统计上下文占用的第三方客户端；无论开关状态如何，Claude Code 的 auto-compact 触发时机保持不变。可用环境变量 `CLIENT_TOKEN_PASSTHROUGH` 覆盖 |
-| `thinkingAsText` | 否 | `false` | 思考内容文本化（仅 Claude Code 客户端）：`true` 时把 thinking 块改写为 markdown 引用文本、以 ANSI 变暗（灰色）样式逐行流式展示（类似 Kiro CLI），解决 CC 默认折叠/隐藏 thinking 导致长推理期间像卡住的问题。回传历史中这些文本会被自动剥离，上游看不到；代价是客户端上下文包含这些文本，auto-compact 会更早触发。可用环境变量 `THINKING_AS_TEXT` 覆盖 |
+| `writeChunkingMaxLines` | 否 | `300` | 分块写入约束的行数上限（见常见问题中 `Reset(StreamId(1), INTERNAL_ERROR, Remote)` 一条）：请求带 Write / Edit / MultiEdit 工具时，在系统提示末尾要求单次工具调用的参数不超过约 N 行。调大更省 credits 但更易触发上游约 240s 的流重置，`0` 表示不追加约束。可在 Admin 设置页热修改，仅影响之后的新请求。可用环境变量 `WRITE_CHUNKING_MAX_LINES` 覆盖 |
+| `thinkingAsText` | 否 | `false` | 思考内容文本化（仅 Claude Code 客户端）：`true` 时把 thinking 块改写为 markdown 引用文本、以 ANSI 变暗（灰色）样式逐行流式展示（类似 Kiro CLI），解决 CC 默认折叠/隐藏 thinking 导致长推理期间像卡住的问题。两种模式下客户端（Claude Code）上下文都包含思考内容，但回传上游时都会整块丢弃：关闭时丢弃原生 thinking 块，开启时丢弃「💭 Thinking」标记行、思考正文与时长行，上游上下文不含思考内容（仅当流被中断、缺少时长行时，保守降级为只剥标记行）。可用环境变量 `THINKING_AS_TEXT` 覆盖 |
 
 > **TLS 说明**：如遇到 Token 刷新失败或请求报错，尝试将 `tlsBackend` 改为 `native-tls`。
 
@@ -538,6 +539,7 @@ Kiro 上游的 4 个接入端点（`ide` / `runtime` / `codewhisperer` / `amazon
 | 客户端 token 直通 | `clientTokenPassthrough` | 立即热生效 |
 | 思考内容文本化展示 | `thinkingAsText` | 立即热生效，仅影响之后的新请求 |
 | 每账号 RPM 上限 | `maxRpmPerCredential` | 立即热生效，`0` 表示不限 |
+| 分块写入行数上限 | `writeChunkingMaxLines` | 立即热生效，仅影响之后的新请求，`0` 表示不追加约束 |
 | 监听端口 | `port` | 重启服务后生效，范围为 `1–65535` |
 | 上游代理地址 | `proxyUrl` | 重启服务后生效；支持 `http`、`https`、`socks5`，留空表示不使用代理 |
 
@@ -773,6 +775,7 @@ Authorization: Bearer your-api-key
 | `*opus*`（含 4.8/4-8） | `claude-opus-4.8` |
 | `*opus*`（其他） | `claude-opus-4.6` |
 | `*fable*` | `claude-fable-5` |
+| `*haiku*`（含 5.5/5-5） | `claude-haiku-5.5` |
 | `*haiku*` | `claude-haiku-4.5` |
 | `*deepseek*` | `deepseek-3.2` |
 | `*glm*` | `glm-5` |
@@ -846,6 +849,20 @@ GPT-5.6 系列的 Kiro 后端 schema 不支持 `additionalModelRequestFields`（
 **Q：子 API Key 消费额度能按真实 Kiro credits 计量吗（而不是估算的美元）**
 
 能。创建/编辑子 API Key 时，额度单位可选「美元估算」或「真实 Credits」（limitUnit：usd/credits）。选择 credits 时，额度按 usage 记录中的真实 credits_used 累加计量（旧记录无 credits_used 字段时按 estimated_cost × k_ref 回退估算）。默认为 usd，向后兼容现有配置。
+
+**Q：长生成轮约 4 分钟（~247s）后报 `Server error mid-response`，代理日志出现 `Reset(StreamId(1), INTERNAL_ERROR, Remote)`**
+
+这是**上游（Kiro 网关）主动重置 HTTP/2 流**，不是代理超时（代理上游超时为 1000s）。代理收到 Reset 时若已有部分输出，会立即向客户端补发 `overloaded_error`（不会伪装成正常完成），客户端随后自动重试。该问题在**不经代理、直接使用 Kiro CLI 时同样复现**，可确认根因在上游一侧，与代理转发链路和客户端无关。
+
+实测定位到一个可复现的触发条件：**模型一次生成很大的工具调用参数（典型是用 `Write` 一次写入上万字的文件）**。上游不会增量流式输出工具参数，生成期间该流没有任何数据，静默约 240s 后上游以 `RST_STREAM(INTERNAL_ERROR)` 重置（实测写入约 8000 字耗时约 215s 可成功，约 20000 字约 240s 必定失败，且与 thinking adaptive 开关无关；原样重试会再次失败；HTTP/2 PING 保活无效）。纯文本流和 thinking 阶段持续输出，实测 794s 仍正常结束。
+
+代理的处理：请求带 `Write` / `Edit` / `MultiEdit` 任一工具时，会在系统提示末尾追加一条固定的分块写入约束（单次工具调用的参数不超过约 N 行，N 默认 300，由 `writeChunkingMaxLines` 配置：Write 的 `content`、Edit 的 `new_string`、一次 MultiEdit 内所有编辑的合计都按此计；更大内容先用 Write 写开头，再用多次 Edit / Bash 追加，大的 MultiEdit 拆成多次调用），让模型把大改动拆成多次调用。该约束对 Write 的实测使 4 次大文件写入请求全部在约 2 分钟内正常结束（Edit / MultiEdit 部分尚未单独实测）；不改动客户端的工具描述。
+
+**取舍（issue #46 后续反馈）**：该约束会让模型把一次大写入拆成多轮，而客户端每轮都携带 `thinking: adaptive`、每轮都会重新思考。用户在自己环境的统计显示，同类任务的 credits 约为无约束时的 3 倍（我没有复现）。因此上限做成了可配置的 `writeChunkingMaxLines`：调大更省 credits，但单次写入更容易撞到约 240s 的重置；调小更稳但更贵；设为 `0` 则完全不追加约束（需自行控制单次写入粒度）。默认值 300 是按 issue 里的实测输出速度（约 8000 汉字 ~215s 可成功、约 20000 汉字 ~240s 必失败）折算的估计，未在真实 Claude Code 上验证；如仍遇到 Reset，请调小。可在 Admin 设置页热修改（仅影响之后的新请求），也可用环境变量 `WRITE_CHUNKING_MAX_LINES` 覆盖。
+
+仍可能发生的情况：模型不遵从约束，或同一回合并行调用多个写入类工具（各自不超限、但合计生成时间过长，该场景尚未实测）时，仍可能触发同样的重置，此时可手动让模型分段写入，或在 issue 中附上日志（`stream_elapsed_secs` 字段记录流断开时已持续的时长）。注意：这是在本地环境（单账号、Opus 4.6、SOCKS5 出口）的实测结论，issue 作者环境未验证。
+
+> 说明：`agentContinuationId` 是代理从 conversationId 派生的会话稳定标识（用于 prompt cache 与账号粘性路由），并不是上游的"断点续跑"句柄，代理无法在 Reset 后自动续写剩余内容；代理到客户端方向已每 25 秒发送 `ping` 保活，而 Reset 来自上游一侧，客户端侧保活无法避免。
 
 **Q：端口被占用**
 
@@ -928,5 +945,11 @@ MIT
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
+
+**特别致谢**——以下 Issue 直接推动了关键修复：
+
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) 定位 `history[0]` 冻结缓存 key 漂移导致 Kiro 前缀缓存逐轮失效
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) 定位长生成轮约 247s 被上游 Reset，促成大参数工具调用分块写入约束
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) 反馈 sonnet 5 反代响应慢，促成 effort 兜底值下调
 
 > 感谢每一位提交 Issue、反馈建议和参与讨论的用户，是你们让这个项目不断完善。

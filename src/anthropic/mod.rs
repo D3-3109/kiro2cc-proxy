@@ -31,6 +31,9 @@ mod stream;
 pub mod types;
 mod websearch;
 
+pub use converter::{
+    DEFAULT_WRITE_CHUNKING_MAX_LINES, set_write_chunking_max_lines, write_chunking_max_lines,
+};
 pub use router::create_router_with_provider_and_state;
 pub use stream::{
     client_token_passthrough_enabled, set_client_token_passthrough, set_thinking_as_text,

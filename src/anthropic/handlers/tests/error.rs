@@ -7,7 +7,9 @@ mod tests {
     use super::super::super::helpers::resolve_thinking_enabled;
 
     use super::super::super::nonstream::build_non_stream_content;
-    use super::super::super::stream::{stream_interrupted_error_event, wait_deadline};
+    use super::super::super::stream::{
+        stream_interrupted_error_event, stream_interrupted_error_event_after, wait_deadline,
+    };
 
     use crate::anthropic::stream::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
 
@@ -34,6 +36,24 @@ mod tests {
                 .contains("interrupted"),
             "错误信息应说明是连接中断导致，而非正常结束"
         );
+    }
+
+    #[test]
+    fn test_stream_interrupted_after_reports_elapsed_without_asserting_cause() {
+        // 短流/长流（含 issue #46 的 ~247s）一律：可重试的 overloaded_error + 耗时，
+        // 且不断言"时长上限"等未证实的原因
+        for secs in [30u64, 247, 361] {
+            let event = stream_interrupted_error_event_after(Duration::from_secs(secs));
+            assert_eq!(event.event, "error");
+            assert_eq!(event.data["error"]["type"], "overloaded_error");
+            let msg = event.data["error"]["message"].as_str().unwrap();
+            assert!(msg.contains("interrupted"));
+            assert!(msg.contains(&format!("after {secs}s")));
+            assert!(
+                !msg.contains("maximum duration"),
+                "不得断言未证实的时长上限"
+            );
+        }
     }
 
     async fn response_body_text(resp: Response) -> String {
@@ -255,6 +275,22 @@ mod tests {
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "thinking");
         assert_eq!(content[1]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_resolve_effective_thinking_account_switch_is_final() {
+        use super::super::super::helpers::resolve_effective_thinking as r;
+        // 开关关闭：即使客户端请求了 thinking 也关闭
+        assert!(!r(Some(false), true, true));
+        assert!(!r(Some(false), false, true));
+        // 开关开启 + 模型支持原生字段：即使客户端未请求也开启
+        assert!(r(Some(true), true, false));
+        // 开关开启 + 模型不支持强制：退回客户端请求
+        assert!(r(Some(true), false, true));
+        assert!(!r(Some(true), false, false));
+        // 账号不存在：退回客户端请求
+        assert!(r(None, true, true));
+        assert!(!r(None, true, false));
     }
 
     #[test]

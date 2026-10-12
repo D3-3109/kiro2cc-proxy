@@ -15,11 +15,19 @@ use crate::kiro::model::requests::tool::ToolUseEntry;
 
 use super::cache::{CacheEntry, PREV_H0, evict_oldest_if_full};
 use super::message::process_message_content;
-use super::prompt::{is_dynamic_hook_injection, normalize_billing_header};
-use super::result::ConversionError;
-use super::thinking::{
-    generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags, is_gpt_model,
+use super::prompt::{
+    is_dynamic_hook_injection, is_token_budget_reminder, normalize_billing_header,
 };
+use super::result::ConversionError;
+use super::thinking::{generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags};
+
+/// 历史 assistant 文本回传上游前的净化：先整块剥离文本化思考（标记行 + 正文 + 时长行），
+/// 再剥 dim 样式码（含模型模仿产生的字面 `[2m…[0m` 整行包裹），避免上游模型模仿该格式。
+/// 顺序不可颠倒：标记行识别依赖 dim 转义包裹的兼容判断。
+fn sanitize_rendered_history_text(text: &str) -> String {
+    let stripped = crate::anthropic::stream::strip_rendered_thinking(text);
+    crate::anthropic::stream::strip_dim_markers(&stripped).into_owned()
+}
 
 /// 构建历史消息
 ///
@@ -43,27 +51,27 @@ pub(super) fn build_history(
     let anti_pseudo_tag_hint = gpt_anti_pseudo_tag_hint(req, model_id);
 
     // 1. 处理系统消息
-    // 仅 GPT 系：CC 中途注入的动态块（hook 输出、工具/MCP 状态通知）逐轮累积，
-    // 留在 history[0] 会使冻结缓存 key 每轮漂移、前缀缓存持续 miss。这里把它们
-    // 从 history[0] 拼接中剔除，并返回给调用方放到当前消息开头——模型仍可见
+    // 所有模型：CC 中途注入的动态块（hook 输出、工具/MCP 状态通知）逐轮累积，
+    // 留在 history[0] 会使冻结缓存 key 每轮漂移、history[0] 之后的整段前缀缓存
+    // 持续 miss（issue #47：claude-opus-5.5 会话 history[0] 每轮 +50~+970 字节）。
+    // 这里把它们从 history[0] 拼接中剔除，并返回给调用方放到当前消息开头——模型仍可见
     // （hook 注入的用户规则不丢失），但不参与缓存 hash。
-    // 非 GPT 模型不分流：stable_system 即完整 system，dynamic 恒为空，
-    // history[0] 与此前逐字节一致。
     let (stable_system, dynamic_system): (Vec<&str>, Vec<&str>) = match system {
-        Some(blocks) if is_gpt_model(model_id) => blocks
+        Some(blocks) => blocks
             .iter()
             .copied()
-            .partition(|s| !is_dynamic_hook_injection(s)),
-        Some(blocks) => (blocks.to_vec(), Vec::new()),
+            .partition(|s| !is_dynamic_hook_injection(s) && !is_token_budget_reminder(s)),
         None => (Vec::new(), Vec::new()),
     };
-    // 全部块都被分流（stable 为空）时按"无系统消息"处理，保留 thinking 前缀 / 引导语注入
+    // 全部块都被分流（stable 拼接结果为空，含仅剩空文本块）时按"无系统消息"处理，
+    // 保留 thinking 前缀 / 引导语注入
+    let stable_content = stable_system.join("\n");
     let system_present =
-        system.is_some() && (dynamic_system.is_empty() || !stable_system.is_empty());
+        system.is_some() && (dynamic_system.is_empty() || !stable_content.is_empty());
     let dynamic_content = dynamic_system.join("\n\n");
 
     if system_present {
-        let system_content = stable_system.join("\n");
+        let system_content = stable_content;
 
         if !system_content.is_empty() {
             // 注入thinking标签到系统消息最前面（如果需要且不存在）
@@ -126,14 +134,14 @@ pub(super) fn build_history(
             let user_msg = HistoryUserMessage::new(final_content, model_id);
             history.push(Message::User(user_msg));
 
-            let assistant_msg = HistoryAssistantMessage::new("I will follow these instructions.");
+            let assistant_msg = HistoryAssistantMessage::new(HistoryAssistantMessage::SYSTEM_ACK);
             history.push(Message::Assistant(assistant_msg));
         } else if let Some(hint) = anti_pseudo_tag_hint {
             // 无系统消息内容，但仍需为 GPT 系模型注入反伪标签引导语
             let user_msg = HistoryUserMessage::new(hint.to_string(), model_id);
             history.push(Message::User(user_msg));
 
-            let assistant_msg = HistoryAssistantMessage::new("I will follow these instructions.");
+            let assistant_msg = HistoryAssistantMessage::new(HistoryAssistantMessage::SYSTEM_ACK);
             history.push(Message::Assistant(assistant_msg));
         }
     } else if let Some(ref prefix) = thinking_prefix {
@@ -141,7 +149,7 @@ pub(super) fn build_history(
         let user_msg = HistoryUserMessage::new(prefix.clone(), model_id);
         history.push(Message::User(user_msg));
 
-        let assistant_msg = HistoryAssistantMessage::new("I will follow these instructions.");
+        let assistant_msg = HistoryAssistantMessage::new(HistoryAssistantMessage::SYSTEM_ACK);
         history.push(Message::Assistant(assistant_msg));
     } else if let Some(hint) = anti_pseudo_tag_hint {
         // 没有系统消息、非 Claude thinking 协议模型（GPT 系），但客户端仍请求了
@@ -149,7 +157,7 @@ pub(super) fn build_history(
         let user_msg = HistoryUserMessage::new(hint.to_string(), model_id);
         history.push(Message::User(user_msg));
 
-        let assistant_msg = HistoryAssistantMessage::new("I will follow these instructions.");
+        let assistant_msg = HistoryAssistantMessage::new(HistoryAssistantMessage::SYSTEM_ACK);
         history.push(Message::Assistant(assistant_msg));
     }
 
@@ -255,7 +263,7 @@ pub(super) fn convert_assistant_message(
 
     match &msg.content {
         serde_json::Value::String(s) => {
-            text_content = crate::anthropic::stream::strip_rendered_thinking(s).to_string();
+            text_content = sanitize_rendered_history_text(s);
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
@@ -267,12 +275,10 @@ pub(super) fn convert_assistant_message(
                         "thinking" => {}
                         "text" => {
                             if let Some(text) = block.text {
-                                // thinkingAsText 渲染出的 text 块：仅剥首行「💭 Thinking」标记，
-                                // 思考正文按普通助手文本保留（上下文略增，已确认接受）。
-                                // 注意与上方原生 thinking 的处置差异 —— 前者整块丢弃，后者保留正文。
-                                text_content.push_str(
-                                    crate::anthropic::stream::strip_rendered_thinking(&text),
-                                );
+                                // thinkingAsText 渲染出的 text 块：与上方原生 thinking 一致整块
+                                // 丢弃（标记行 + 思考正文 + 时长行），上游上下文不含思考内容；
+                                // 仅在找不到时长行（流被中断）时降级为只剥标记行。
+                                text_content.push_str(&sanitize_rendered_history_text(&text));
                             }
                         }
                         "tool_use" => {
@@ -292,11 +298,12 @@ pub(super) fn convert_assistant_message(
         _ => {}
     }
 
-    // Kiro API 要求 content 字段不能为空，当只有 tool_use 时需要占位符。
+    // Kiro API 要求 content 字段不能为空：只有 tool_use，或文本全是被丢弃的思考块
+    // （thinking / 文本化思考）而清空时，都需要占位符。
     // 注意：此处与 user 侧（convert_request / merge_user_messages）的 "(tool result above)"
     // 策略不同 —— assistant 侧是"模型自己历史的 tool_use 调用"，仅需占位无需语义引导；
     // 而 user 侧需明示"上方为工具结果"以避免模型误读为"用户让我继续"。
-    let final_content = if text_content.is_empty() && !tool_uses.is_empty() {
+    let final_content = if text_content.is_empty() {
         " ".to_string()
     } else {
         text_content
@@ -370,7 +377,9 @@ pub(super) fn merge_assistant_messages(
         }
     }
 
-    let content = if content_parts.is_empty() && !all_tool_uses.is_empty() {
+    // 各条的占位符 " " 已被上面的 trim 过滤；全部为空（只有 tool_use，或全是被丢弃的
+    // 思考块）时必须重新补占位符，与 convert_assistant_message 的非空约束保持一致
+    let content = if content_parts.is_empty() {
         " ".to_string()
     } else {
         content_parts.join("\n\n")

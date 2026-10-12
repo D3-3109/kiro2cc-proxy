@@ -94,6 +94,63 @@ impl std::fmt::Display for UsageLimitsUnsupportedError {
 
 impl std::error::Error for UsageLimitsUnsupportedError {}
 
+/// getUsageLimits 返回非成功状态码的错误，携带 HTTP 状态码供调用方按状态码分支
+/// （避免依赖错误文案）。
+///
+/// `Display` 输出必须保持 `"{message}: {status} {body}"`：`admin/service.rs` 的错误分类
+/// 仍按文案关键字（“权限不足”“已被限流”“服务器错误”等）做字符串匹配。
+#[derive(Debug)]
+pub(crate) struct UsageLimitsHttpError {
+    pub(crate) status: reqwest::StatusCode,
+    message: &'static str,
+    body: String,
+}
+
+impl std::fmt::Display for UsageLimitsHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {} {}", self.message, self.status, self.body)
+    }
+}
+
+impl std::error::Error for UsageLimitsHttpError {}
+
+impl UsageLimitsHttpError {
+    pub(crate) fn from_response(status: reqwest::StatusCode, body: String) -> Self {
+        let message = match status.as_u16() {
+            401 => "认证失败，Token 无效或已过期",
+            403 => "权限不足，无法获取使用额度",
+            429 => "请求过于频繁，已被限流",
+            500..=599 => "服务器错误，AWS 服务暂时不可用",
+            _ => "获取使用额度失败",
+        };
+        Self {
+            status,
+            message,
+            body,
+        }
+    }
+}
+
+/// 不带 profileArn 的额度查询是否应换另一个区域端点重试：仅 HTTP 403（与 KAM 一致）。
+pub(crate) fn should_try_next_region(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<UsageLimitsHttpError>()
+        .is_some_and(|e| e.status == reqwest::StatusCode::FORBIDDEN)
+}
+
+/// 额度查询错误是否为与 profileArn 无关的瞬时故障（限流 / 服务端错误 / 网络抖动）。
+///
+/// 这些情况下触发 profileArn 自愈链路只会盲目放大请求，调用方应直接返回原错误；
+/// 其余状态码（如 400/403）可能与 profileArn 无效或权限缺失有关，仍走自愈。
+pub(crate) fn is_transient_usage_limits_error(err: &anyhow::Error) -> bool {
+    if err.downcast_ref::<UsageLimitsHttpError>().is_some_and(|e| {
+        e.status == reqwest::StatusCode::TOO_MANY_REQUESTS || e.status.is_server_error()
+    }) {
+        return true;
+    }
+    // 网络层错误（超时、连接失败等）：链路里没有 UsageLimitsHttpError，直接看根因类型
+    err.downcast_ref::<reqwest::Error>().is_some()
+}
+
 impl std::error::Error for RefreshTokenInvalidError {}
 
 /// 判断刷新响应是否为服务端已撤销 refreshToken（invalid_grant）
@@ -473,9 +530,6 @@ pub(crate) async fn get_usage_limits(
     } else {
         format!("q.{}.amazonaws.com", region_lower)
     };
-    let machine_id = machine_id::generate_from_credentials(credentials, config);
-    let kiro_version = &config.kiro_version;
-
     // 构建 URL
     // resourceType=AGENTIC_REQUEST 对企业 IdC 账号（有 profileArn）有效；实测
     // BuilderId 占位 ARN + resourceType 组合同样返回 200（见函数级 doc 注释），
@@ -494,16 +548,58 @@ pub(crate) async fn get_usage_limits(
         url.push_str(&format!("&profileArn={}", urlencoding::encode(profile_arn)));
     }
 
-    // 构建 User-Agent headers
-    let user_agent = format!(
-        "aws-sdk-js/1.0.0 ua/2.1 os/darwin#24.6.0 lang/js md/nodejs#22.21.1 \
-         api/codewhispererruntime#1.0.0 m/N,E KiroIDE-{}-{}",
-        kiro_version, machine_id
-    );
-    let amz_user_agent = format!(
-        "{} KiroIDE-{}-{}",
-        USAGE_LIMITS_AMZ_USER_AGENT_PREFIX, kiro_version, machine_id
-    );
+    send_usage_limits_request(credentials, config, token, proxy, &host, &url).await
+}
+
+/// Kiro IDE 风格的 UA 指纹（控制面请求共用，避免多处重复维护）。
+pub(crate) struct KiroIdeUserAgents {
+    /// `User-Agent` 头
+    pub(crate) user_agent: String,
+    /// `x-amz-user-agent` 头
+    pub(crate) amz_user_agent: String,
+}
+
+pub(crate) fn kiro_ide_user_agents(
+    credentials: &KiroCredentials,
+    config: &Config,
+) -> KiroIdeUserAgents {
+    let machine_id = machine_id::generate_from_credentials(credentials, config);
+    let kiro_version = &config.kiro_version;
+    KiroIdeUserAgents {
+        user_agent: format!(
+            "aws-sdk-js/1.0.0 ua/2.1 os/darwin#24.6.0 lang/js md/nodejs#22.21.1 \
+             api/codewhispererruntime#1.0.0 m/N,E KiroIDE-{}-{}",
+            kiro_version, machine_id
+        ),
+        amz_user_agent: format!(
+            "{} KiroIDE-{}-{}",
+            USAGE_LIMITS_AMZ_USER_AGENT_PREFIX, kiro_version, machine_id
+        ),
+    }
+}
+
+/// 给请求附加 Kiro IDE 风格的通用头（UA 指纹 + SDK 调用标识）。
+pub(crate) fn with_kiro_ide_headers(
+    request: reqwest::RequestBuilder,
+    agents: &KiroIdeUserAgents,
+) -> reqwest::RequestBuilder {
+    request
+        .header("x-amz-user-agent", &agents.amz_user_agent)
+        .header("User-Agent", &agents.user_agent)
+        .header("amz-sdk-invocation-id", uuid::Uuid::new_v4().to_string())
+        .header("amz-sdk-request", AMZ_SDK_REQUEST_SINGLE_ATTEMPT)
+}
+
+/// 额度查询的共用发送逻辑：Kiro IDE 风格请求头 + 状态码分类。
+async fn send_usage_limits_request(
+    credentials: &KiroCredentials,
+    config: &Config,
+    token: &str,
+    proxy: Option<&ProxyConfig>,
+    host: &str,
+    url: &str,
+) -> anyhow::Result<UsageLimitsResponse> {
+    let agents = kiro_ide_user_agents(credentials, config);
 
     let client = build_client(proxy, KIRO_HTTP_SHORT_TIMEOUT_SECS, config.tls_backend)?;
 
@@ -513,13 +609,8 @@ pub(crate) async fn get_usage_limits(
     // 避免复用 idToken 导致 403 Invalid token（见 issue #31）。非 IdC 账号保持原逻辑不变。
     let effective_token = select_usage_limits_token(credentials, token);
 
-    let response = client
-        .get(&url)
-        .header("x-amz-user-agent", &amz_user_agent)
-        .header("User-Agent", &user_agent)
-        .header("host", &host)
-        .header("amz-sdk-invocation-id", uuid::Uuid::new_v4().to_string())
-        .header("amz-sdk-request", AMZ_SDK_REQUEST_SINGLE_ATTEMPT)
+    let response = with_kiro_ide_headers(client.get(url), &agents)
+        .header("host", host)
         .header("Authorization", format!("Bearer {}", effective_token))
         .header("Connection", "close")
         .send()
@@ -532,18 +623,60 @@ pub(crate) async fn get_usage_limits(
         if status.as_u16() == 400 && body_text.contains("Invalid profileArn") {
             return Err(UsageLimitsUnsupportedError.into());
         }
-        let error_msg = match status.as_u16() {
-            401 => "认证失败，Token 无效或已过期",
-            403 => "权限不足，无法获取使用额度",
-            429 => "请求过于频繁，已被限流",
-            500..=599 => "服务器错误，AWS 服务暂时不可用",
-            _ => "获取使用额度失败",
-        };
-        bail!("{}: {} {}", error_msg, status, body_text);
+        return Err(UsageLimitsHttpError::from_response(status, body_text).into());
     }
 
     let data: UsageLimitsResponse = response.json().await?;
     Ok(data)
+}
+
+/// 不携带 profileArn 查询额度（Kiro-account-manager 对所有账号类型的做法，含企业版 IdC）。
+///
+/// KAM 的 `getUsageLimitsRest` 恒不传 profileArn：q.{us-east-1|eu-central-1} 主端点 +
+/// `resourceType=AGENTIC_REQUEST`，主端点 403 时换另一个区域端点重试。
+/// 用于 idc 账号带占位 ARN 查询失败后的补救（issue #43）：占位 ARN 属于别的 AWS 账号，
+/// 企业账号带着它会被拒绝，而不带 ARN 的查询则不受影响。
+pub(crate) async fn get_usage_limits_without_profile_arn(
+    credentials: &KiroCredentials,
+    config: &Config,
+    token: &str,
+    proxy: Option<&ProxyConfig>,
+) -> anyhow::Result<UsageLimitsResponse> {
+    let primary = kam_style_region(credentials.effective_api_region(config));
+    let secondary = if primary == "eu-central-1" {
+        "us-east-1"
+    } else {
+        "eu-central-1"
+    };
+
+    let mut last_err = None;
+    for region in [primary, secondary] {
+        let host = format!("q.{}.amazonaws.com", region);
+        let url = format!(
+            "https://{}/getUsageLimits?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST&isEmailRequired=true",
+            host
+        );
+        match send_usage_limits_request(credentials, config, token, proxy, &host, &url).await {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                // 仅 403 才换区域端点（与 KAM 一致）；其他错误直接返回
+                if !should_try_next_region(&e) {
+                    return Err(e);
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.expect("循环至少执行一次"))
+}
+
+/// KAM 仅支持 us-east-1 / eu-central-1 两个控制面区域：eu-* 归 eu-central-1，其余归 us-east-1。
+pub(crate) fn kam_style_region(region: &str) -> &'static str {
+    if region.to_ascii_lowercase().starts_with("eu-") {
+        "eu-central-1"
+    } else {
+        "us-east-1"
+    }
 }
 
 /// 获取当前支持的模型列表（含官方费率倍率）
@@ -590,4 +723,108 @@ pub(crate) async fn list_available_models(
 
     let data: AvailableModelsResponse = response.json().await?;
     Ok(data)
+}
+
+/// 从 `ListAvailableProfiles` 响应中提取 profile ARN（字段名兼容 `arn` / `profileArn`）。
+pub(crate) fn extract_profile_arns(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("profiles")
+        .and_then(|p| p.as_array())
+        .map(|profiles| {
+            profiles
+                .iter()
+                .filter_map(|p| {
+                    p.get("arn")
+                        .or_else(|| p.get("profileArn"))
+                        .and_then(|a| a.as_str())
+                        .map(str::trim)
+                        .filter(|a| !a.is_empty())
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 在候选 ARN 中优先选与 API region 一致的，否则取第一个。
+pub(crate) fn pick_profile_arn(arns: &[String], region: &str) -> Option<String> {
+    let marker = format!(":{}:", region.to_lowercase());
+    arns.iter()
+        .find(|a| a.to_lowercase().contains(&marker))
+        .or_else(|| arns.first())
+        .cloned()
+}
+
+/// 查询账号可用的 Q Developer profile ARN（企业版 IdC 账号的真实 profileArn 来源）。
+///
+/// 请求形态取自 Kiro-account-manager 的 `fetchEnterpriseProfileArn`：
+/// `POST https://codewhisperer.{us-east-1|eu-central-1}.amazonaws.com/ListAvailableProfiles`，
+/// JSON 空对象 body，Kiro IDE 风格请求头（该应用称官方 IDE 认证后即通过此接口获取 profile）。
+/// 若该形态失败，再尝试 AWS JSON 1.0 形态（POST `/` + `x-amz-target`，OmniRoute 的实现）。
+/// 两种形态均未用真实企业版账号验证；两者都失败时返回合并的错误信息。
+pub(crate) async fn list_available_profiles(
+    credentials: &KiroCredentials,
+    config: &Config,
+    token: &str,
+    proxy: Option<&ProxyConfig>,
+) -> anyhow::Result<Vec<String>> {
+    let region = kam_style_region(credentials.effective_api_region(config));
+    let host = format!("codewhisperer.{}.amazonaws.com", region);
+    let agents = kiro_ide_user_agents(credentials, config);
+    let client = build_client(proxy, LIST_MODELS_TIMEOUT_SECS, config.tls_backend)?;
+
+    // 形态 A：REST 路径（KAM）
+    let rest = with_kiro_ide_headers(
+        client.post(format!("https://{}/ListAvailableProfiles", host)),
+        &agents,
+    )
+    .header("content-type", "application/json")
+    .header("Authorization", format!("Bearer {}", token))
+    .json(&serde_json::json!({}));
+    let rest_err = match send_list_profiles(rest).await {
+        // 200 但空列表不算成功，继续走形态 B 兜底探测
+        Ok(arns) if !arns.is_empty() => return Ok(arns),
+        Ok(_) => "REST 端点返回空 profiles 列表".to_string(),
+        Err(e) => e,
+    };
+
+    // 形态 B：AWS JSON 1.0（x-amz-target）；请求头与形态 A 保持一致，便于对比排查
+    let rpc = with_kiro_ide_headers(client.post(format!("https://{}/", host)), &agents)
+        .header("content-type", "application/x-amz-json-1.0")
+        .header(
+            "x-amz-target",
+            "AmazonCodeWhispererService.ListAvailableProfiles",
+        )
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "maxResults": 10 }));
+    send_list_profiles(rpc).await.map_err(|rpc_err| {
+        anyhow::anyhow!(
+            "获取可用 profile 列表失败: [REST {}] / [JSON-RPC {}]",
+            rest_err,
+            rpc_err
+        )
+    })
+}
+
+/// 发送一次 `ListAvailableProfiles` 请求并解析出 ARN 列表。
+///
+/// 网络错误、非 2xx、响应体无法解析都归为 `Err(描述)`，由调用方决定是否换另一种请求形态重试。
+pub(crate) async fn send_list_profiles(
+    request: reqwest::RequestBuilder,
+) -> Result<Vec<String>, String> {
+    let resp = request.send().await.map_err(|e| format!("请求失败: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "{} {}",
+            status,
+            body.chars().take(200).collect::<String>()
+        ));
+    }
+    let value: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("{} 响应解析失败: {e}", status))?;
+    Ok(extract_profile_arns(&value))
 }

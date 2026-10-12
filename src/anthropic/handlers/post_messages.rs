@@ -275,8 +275,7 @@ pub async fn post_messages(
     let effort = payload.output_config.as_ref().map(|c| c.effort.clone());
 
     // 思考文本化仅对 Claude Code 客户端生效（OpenAI 兼容端点等保持原生 thinking 语义）
-    let thinking_as_text = thinking_enabled
-        && crate::anthropic::stream::thinking_as_text_enabled()
+    let thinking_as_text = crate::anthropic::stream::thinking_as_text_enabled()
         && crate::anthropic::stream::is_claude_code_client(&headers);
 
     if payload.stream {
@@ -321,6 +320,7 @@ pub async fn post_messages(
             thinking_adaptive_requested,
             bridge_ctx,
             effort,
+            thinking_enabled,
         )
         .await
     }

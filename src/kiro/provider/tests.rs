@@ -243,14 +243,253 @@ mod tests {
         );
     }
 
+    fn body_for_model(model_id: &str, history0: Option<&str>) -> String {
+        let mut v = serde_json::json!({
+            "conversationState": {
+                "currentMessage": {"userInputMessage": {"modelId": model_id}}
+            },
+            "additionalModelRequestFields": {"output_config": {"effort": "low"}}
+        });
+        if let Some(content) = history0 {
+            v["conversationState"]["history"] = serde_json::json!([
+                {"userInputMessage": {"content": content}},
+                {"assistantResponseMessage": {"content": "I will follow these instructions."}}
+            ]);
+        }
+        v.to_string()
+    }
+
     #[test]
-    fn test_thinking_adaptive_not_injected_when_absent() {
-        // 请求体不含 thinking（converter 未注入，如 4.5/GPT/无 thinking 请求）→
-        // provider 不创建 additionalModelRequestFields，不补充注入
-        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4-6"}}}}"#;
-        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), true);
+    fn test_thinking_switch_on_force_injects_when_client_did_not_request() {
+        // 开关开启 + 客户端未请求 thinking（体内无 thinking）+ 支持原生字段的模型 → 强制注入，
+        // 同时保留已有字段
+        let body = body_for_model("claude-opus-5.5", Some("SYSTEM RULES"));
+        let result = KiroProvider::rewrite_request_body(&body, &adaptive_cred(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            v["additionalModelRequestFields"]["thinking"]["type"],
+            serde_json::json!("adaptive")
+        );
+        assert_eq!(
+            v["additionalModelRequestFields"]["output_config"]["effort"],
+            serde_json::json!("low")
+        );
+    }
+
+    #[test]
+    fn test_thinking_switch_on_force_creates_fields_object_when_missing() {
+        let body = r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"claude-sonnet-4.6"}}}}"#;
+        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            v["additionalModelRequestFields"]["thinking"]["type"],
+            serde_json::json!("adaptive")
+        );
+    }
+
+    #[test]
+    fn test_thinking_switch_on_does_not_stack_on_enabled_text_tag() {
+        // enabled 请求已由 history[0] 文本标签控制 thinking，不得再叠加原生字段
+        let body = body_for_model("claude-opus-5.5", Some(&format!("{TAG}\nSYSTEM RULES")));
+        let result = KiroProvider::rewrite_request_body(&body, &adaptive_cred(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(v["additionalModelRequestFields"]["thinking"].is_null());
+    }
+
+    #[test]
+    fn test_thinking_switch_on_skips_unsupported_models() {
+        // "4.5" 代际 / 第三方 / GPT 系上游会 400 拒绝该字段，开关只能关闭、不能强制开启
+        for model in [
+            "claude-sonnet-4.5",
+            "deepseek-3.2",
+            "glm-5",
+            "gpt-5.6-terra",
+            // 未被字段黑名单跳过、但并非 Claude 系：不得强制注入
+            "minimax-m2.1",
+            "auto",
+        ] {
+            let body = body_for_model(model, None);
+            let result = KiroProvider::rewrite_request_body(&body, &adaptive_cred(), false);
+            let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+            assert!(
+                v["additionalModelRequestFields"]["thinking"].is_null(),
+                "{model}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_thinking_switch_on_injects_when_body_merely_quotes_tag_literal() {
+        // history[0] 只是正文里引用了标签字面量（非 converter 注入的前缀）→ 仍须强制注入
+        let body = body_for_model(
+            "claude-opus-5.5",
+            Some("请解释字符串 <thinking_mode> 的含义"),
+        );
+        let result = KiroProvider::rewrite_request_body(&body, &adaptive_cred(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            v["additionalModelRequestFields"]["thinking"]["type"],
+            serde_json::json!("adaptive")
+        );
+
+        // 前缀形态相同但没有配对确认语（用户原文）→ 同样视为非注入，仍须注入
+        let body = serde_json::json!({
+            "conversationState": {
+                "history": [
+                    {"userInputMessage": {"content": format!("{TAG}\n用户自带")}},
+                    {"assistantResponseMessage": {"content": "别的回复"}}
+                ],
+                "currentMessage": {"userInputMessage": {"modelId": "claude-opus-5.5"}}
+            }
+        })
+        .to_string();
+        let result = KiroProvider::rewrite_request_body(&body, &adaptive_cred(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            v["additionalModelRequestFields"]["thinking"]["type"],
+            serde_json::json!("adaptive")
+        );
+    }
+
+    #[test]
+    fn test_thinking_switch_on_without_model_id_is_noop() {
+        // MCP 等无 modelId 的请求体不触发注入
+        let body = r#"{"conversationState":{}}"#;
+        let result = KiroProvider::rewrite_request_body(body, &adaptive_cred(), false);
         let v: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert!(v.get("additionalModelRequestFields").is_none());
+    }
+
+    #[test]
+    fn test_thinking_switch_off_never_injects() {
+        let body = body_for_model("claude-opus-5.5", None);
+        let result = KiroProvider::rewrite_request_body(&body, &KiroCredentials::default(), true);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(v["additionalModelRequestFields"]["thinking"].is_null());
+    }
+
+    const TAG: &str =
+        "<thinking_mode>enabled</thinking_mode><max_thinking_length>24576</max_thinking_length>";
+
+    fn body_with_history(history: serde_json::Value) -> String {
+        serde_json::json!({
+            "conversationState": {
+                "history": history,
+                "currentMessage": {"userInputMessage": {"modelId": "claude-sonnet-4.5"}}
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn test_thinking_switch_off_strips_text_tag_keeps_system_prompt() {
+        // enabled 请求（4.5 代际）：标签 + "\n" + 系统提示；开关关闭 → 只去掉标签
+        let body = body_with_history(serde_json::json!([
+            {"userInputMessage": {"content": format!("{TAG}\nSYSTEM RULES")}},
+            {"assistantResponseMessage": {"content": "I will follow these instructions."}}
+        ]));
+        let result = KiroProvider::rewrite_request_body(&body, &KiroCredentials::default(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let h = v["conversationState"]["history"].as_array().unwrap();
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0]["userInputMessage"]["content"], "SYSTEM RULES");
+    }
+
+    #[test]
+    fn test_thinking_switch_off_removes_standalone_tag_pair() {
+        // 无系统消息时 converter 插入的「仅标签 user + ack assistant」配对 → 整对移除
+        let body = body_with_history(serde_json::json!([
+            {"userInputMessage": {"content": TAG}},
+            {"assistantResponseMessage": {"content": "I will follow these instructions."}},
+            {"userInputMessage": {"content": "earlier question"}},
+            {"assistantResponseMessage": {"content": "earlier answer"}}
+        ]));
+        let result = KiroProvider::rewrite_request_body(&body, &KiroCredentials::default(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let h = v["conversationState"]["history"].as_array().unwrap();
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0]["userInputMessage"]["content"], "earlier question");
+    }
+
+    #[test]
+    fn test_thinking_switch_off_keeps_user_authored_tag_with_tool_pairing() {
+        // 用户原文恰为完整标签、后接带 tool_use 的真实 assistant：不得整对删除，
+        // 否则 tool_use 被删而当前 tool_result 残留
+        let history = serde_json::json!([
+            {"userInputMessage": {"content": TAG}},
+            {"assistantResponseMessage": {
+                "content": "reading",
+                "toolUses": [{"toolUseId": "t1", "name": "Read", "input": {}}]
+            }}
+        ]);
+        let body = body_with_history(history.clone());
+        let result = KiroProvider::rewrite_request_body(&body, &KiroCredentials::default(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["conversationState"]["history"], history);
+    }
+
+    #[test]
+    fn test_thinking_switch_off_keeps_tag_when_ack_has_tool_uses_or_differs() {
+        // 确认语相同但带工具调用 / 内容不是确认语：都视为用户原文，不动（含标签+正文形态）
+        for (user, assistant) in [
+            (
+                TAG.to_string(),
+                serde_json::json!({"content": "I will follow these instructions.",
+                    "toolUses": [{"toolUseId": "t1", "name": "Read", "input": {}}]}),
+            ),
+            (
+                format!("{TAG}\nuser text"),
+                serde_json::json!({"content": "something else"}),
+            ),
+        ] {
+            let history = serde_json::json!([
+                {"userInputMessage": {"content": user}},
+                {"assistantResponseMessage": assistant}
+            ]);
+            let body = body_with_history(history.clone());
+            let result =
+                KiroProvider::rewrite_request_body(&body, &KiroCredentials::default(), false);
+            let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(v["conversationState"]["history"], history);
+        }
+    }
+
+    #[test]
+    fn test_thinking_switch_on_keeps_text_tag() {
+        let content = format!("{TAG}\nSYSTEM RULES");
+        let body = body_with_history(serde_json::json!([
+            {"userInputMessage": {"content": content}},
+            {"assistantResponseMessage": {"content": "I will follow these instructions."}}
+        ]));
+        let result = KiroProvider::rewrite_request_body(&body, &adaptive_cred(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            v["conversationState"]["history"][0]["userInputMessage"]["content"],
+            serde_json::json!(content)
+        );
+    }
+
+    #[test]
+    fn test_thinking_switch_off_leaves_unrelated_history_untouched() {
+        // 标签不在 history[0] 开头 / 形态不同 / 无 history → 不动
+        for history in [
+            serde_json::json!([{"userInputMessage": {"content": format!("SYS {TAG}")}}]),
+            serde_json::json!([{"userInputMessage": {"content": "<thinking_mode>enabled</thinking_mode>\nx"}}]),
+            serde_json::json!([{"userInputMessage": {"content": "plain system"}}]),
+            serde_json::json!([]),
+        ] {
+            let body = body_with_history(history.clone());
+            let result =
+                KiroProvider::rewrite_request_body(&body, &KiroCredentials::default(), false);
+            let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(v["conversationState"]["history"], history);
+        }
+        let no_history =
+            r#"{"conversationState":{"currentMessage":{"userInputMessage":{"modelId":"m"}}}}"#;
+        let result =
+            KiroProvider::rewrite_request_body(no_history, &KiroCredentials::default(), false);
+        let v: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(v["conversationState"].get("history").is_none());
     }
 
     #[test]

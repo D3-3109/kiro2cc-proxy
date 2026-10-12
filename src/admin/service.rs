@@ -132,6 +132,9 @@ impl AdminService {
                 refresh_token_hash: entry.refresh_token_hash,
                 email: entry.email,
                 nickname: entry.nickname,
+                provider: entry.provider,
+                auth_region: entry.auth_region,
+                api_region: entry.api_region,
                 success_count: entry.success_count,
                 last_used_at: entry.last_used_at.clone(),
                 has_proxy: entry.has_proxy,
@@ -341,7 +344,7 @@ impl AdminService {
             proxy_password: req.proxy_password,
             disabled: initially_disabled,
             endpoint: None,
-            thinking_adaptive: false, // 新添加的账号默认不注入 thinking 字段
+            thinking_adaptive: true, // 新添加的账号默认注入 thinking 字段（默认开启）
         };
 
         // 调用 token_manager 添加账号

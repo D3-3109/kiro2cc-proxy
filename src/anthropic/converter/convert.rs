@@ -18,7 +18,10 @@ use super::session::{
     derive_agent_continuation_id, derive_fallback_conversation_id, extract_session_id,
     is_compact_request,
 };
-use super::tools::{convert_tools, remove_orphaned_tool_uses, validate_tool_pairing};
+use super::tools::{
+    convert_tools, has_content_writing_tool, remove_orphaned_tool_uses, validate_tool_pairing,
+    write_chunking_max_lines, write_chunking_system_note,
+};
 use super::websearch::{
     collect_history_tool_names, create_placeholder_tool, create_web_search_bridge_tool,
     split_web_search_tool,
@@ -26,6 +29,15 @@ use super::websearch::{
 
 /// 将 Anthropic 请求转换为 Kiro 请求
 pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, ConversionError> {
+    convert_request_with_chunking(req, write_chunking_max_lines())
+}
+
+/// 同 [`convert_request`]，但显式指定分块写入行数上限（0 = 不追加约束）。
+/// 测试用它避免读写全局设置。
+pub(super) fn convert_request_with_chunking(
+    req: &MessagesRequest,
+    chunk_max_lines: u32,
+) -> Result<ConversionResult, ConversionError> {
     // 1. 映射模型
     let model_id = map_model(&req.model)
         .ok_or_else(|| ConversionError::UnsupportedModel(req.model.clone()))?;
@@ -145,6 +157,17 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
         tools.push(create_web_search_bridge_tool());
     }
 
+    // 6c. 带 Write / Edit / MultiEdit 工具的请求在系统提示末尾追加分块写入约束（issue #46：上游对静默约 240s 的
+    // 大块工具参数生成会 Reset）。放在会话 ID 派生之后，不改变既有会话/缓存标识的计算输入。
+    // 延迟初始化：仅在需要追加时才格式化文案；声明在分支外，保证借用不短于 `system`
+    let chunking_note;
+    if chunk_max_lines > 0 && has_content_writing_tool(&tools) {
+        chunking_note = write_chunking_system_note(chunk_max_lines);
+        system
+            .get_or_insert_with(Vec::new)
+            .push(chunking_note.as_str());
+    }
+
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
     let (mut history, dynamic_system) = build_history(
         req,
@@ -153,7 +176,7 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
         &model_id,
         &conversation_id,
     )?;
-    // 仅 GPT 系：被分流出 history[0] 的动态块放到当前消息文本**开头**（非 GPT 恒为空，
+    // 被分流出 history[0] 的动态块放到当前消息文本**开头**（请求无动态块时为空，
     // 不改动 text_content）。放开头而非末尾：当前消息末尾通常是 skill / 用户指令正文，
     // 末尾追加 "deferred tools / MCP 连接中" 之类通知会抢走模型对本轮指令的注意力；
     // 当前消息本身不进缓存前缀，放哪里都不影响缓存命中。

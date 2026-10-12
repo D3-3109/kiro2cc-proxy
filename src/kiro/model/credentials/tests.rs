@@ -5,7 +5,8 @@
 mod tests {
     use crate::http_client::ProxyConfig;
     use crate::kiro::model::credentials::{
-        BUILDER_ID_PLACEHOLDER_PROFILE_ARN, CredentialsConfig, KiroCredentials, SOCIAL_PROFILE_ARN,
+        BUILDER_ID_PLACEHOLDER_PROFILE_ARN, CredentialsConfig, ENTERPRISE_FALLBACK_PROFILE_ARN_EU,
+        ENTERPRISE_FALLBACK_PROFILE_ARN_US, KiroCredentials, SOCIAL_PROFILE_ARN,
         canonicalize_auth_method_value, fallback_profile_arn_value,
     };
     use crate::model::config::Config;
@@ -132,6 +133,104 @@ mod tests {
         let mut cred = KiroCredentials::default();
         cred.auth_method = Some(String::new());
         assert_eq!(fallback_profile_arn_value(&cred), Some(SOCIAL_PROFILE_ARN));
+    }
+
+    #[test]
+    fn test_enterprise_provider_never_gets_builder_id_placeholder() {
+        // issue #43：provider=Enterprise 的账号不得被补全 BuilderId 占位符
+        // （占位符属于另一个 AWS 账号，企业账号用它会被上游拒绝），改用区域化企业备用 ARN
+        for provider in ["Enterprise", "enterprise", " ENTERPRISE "] {
+            let mut cred = KiroCredentials::default();
+            cred.auth_method = Some("idc".to_string());
+            cred.client_id = Some("c".to_string());
+            cred.client_secret = Some("s".to_string());
+            cred.provider = Some(provider.to_string());
+            assert_eq!(
+                fallback_profile_arn_value(&cred),
+                Some(ENTERPRISE_FALLBACK_PROFILE_ARN_US),
+                "provider={provider}"
+            );
+            assert!(cred.fill_missing_profile_arn(), "provider={provider}");
+            assert_eq!(
+                cred.profile_arn.as_deref(),
+                Some(ENTERPRISE_FALLBACK_PROFILE_ARN_US)
+            );
+        }
+
+        // eu-* 区域用欧洲备用 ARN（api_region 优先于 region）
+        let mut cred = KiroCredentials::default();
+        cred.auth_method = Some("idc".to_string());
+        cred.provider = Some("Enterprise".to_string());
+        cred.region = Some("us-east-1".to_string());
+        cred.api_region = Some("eu-west-1".to_string());
+        assert_eq!(
+            fallback_profile_arn_value(&cred),
+            Some(ENTERPRISE_FALLBACK_PROFILE_ARN_EU)
+        );
+
+        // BuilderId / 未声明 provider 的 idc 账号行为不变
+        for provider in [None, Some("BuilderId")] {
+            let mut cred = KiroCredentials::default();
+            cred.auth_method = Some("idc".to_string());
+            cred.provider = provider.map(str::to_string);
+            assert_eq!(
+                fallback_profile_arn_value(&cred),
+                Some(BUILDER_ID_PLACEHOLDER_PROFILE_ARN)
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_idc_infers_from_oidc_fields_only_when_auth_method_missing() {
+        // 与 refresh_token 一致：缺失 authMethod 且 clientId/clientSecret 齐全 → idc
+        let mut cred = KiroCredentials {
+            client_id: Some("cid".to_string()),
+            client_secret: Some("secret".to_string()),
+            ..Default::default()
+        };
+        assert!(cred.is_idc());
+
+        // 字段不完整 → 不是 idc
+        cred.client_secret = None;
+        assert!(!cred.is_idc());
+        cred.client_secret = Some("secret".to_string());
+        cred.client_id = None;
+        assert!(!cred.is_idc());
+
+        // 显式声明优先：external_idp / social 即使带完整 OIDC 字段也不是 idc
+        cred.client_id = Some("cid".to_string());
+        for m in ["external_idp", "social"] {
+            cred.auth_method = Some(m.to_string());
+            assert!(!cred.is_idc(), "{m}");
+        }
+    }
+
+    #[test]
+    fn test_is_idc_and_has_no_real_profile_arn() {
+        let mut cred = KiroCredentials::default();
+        assert!(!cred.is_idc());
+        for m in ["idc", "IdC", "builder-id", "IAM"] {
+            cred.auth_method = Some(m.to_string());
+            assert!(cred.is_idc(), "{m}");
+        }
+        for m in ["social", "external_idp"] {
+            cred.auth_method = Some(m.to_string());
+            assert!(!cred.is_idc(), "{m}");
+        }
+
+        // 缺失 / 空 / 仍是 BuilderId 占位符都视为“没有真实 ARN”
+        for arn in [
+            None,
+            Some(""),
+            Some("  "),
+            Some(BUILDER_ID_PLACEHOLDER_PROFILE_ARN),
+        ] {
+            cred.profile_arn = arn.map(str::to_string);
+            assert!(cred.has_no_real_profile_arn(), "{arn:?}");
+        }
+        cred.profile_arn =
+            Some("arn:aws:codewhisperer:us-east-1:123456789012:profile/REALTENANT".to_string());
+        assert!(!cred.has_no_real_profile_arn());
     }
 
     #[test]
@@ -516,11 +615,11 @@ mod tests {
     // ============ thinking_adaptive 字段测试 ============
 
     #[test]
-    fn test_thinking_adaptive_default_false_for_legacy_json() {
-        // 旧版本 credentials.json 不含 thinkingAdaptive 字段 → 反序列化为 false
+    fn test_thinking_adaptive_default_true_for_legacy_json() {
+        // 旧版本 credentials.json 不含 thinkingAdaptive 字段 → 反序列化为 true（默认开启）
         let json = r#"{"refreshToken": "test"}"#;
         let creds = KiroCredentials::from_json(json).unwrap();
-        assert!(!creds.thinking_adaptive);
+        assert!(creds.thinking_adaptive);
     }
 
     #[test]
@@ -528,6 +627,14 @@ mod tests {
         let json = r#"{"refreshToken": "test", "thinkingAdaptive": true}"#;
         let creds = KiroCredentials::from_json(json).unwrap();
         assert!(creds.thinking_adaptive);
+    }
+
+    #[test]
+    fn test_thinking_adaptive_explicit_false_is_respected() {
+        // 显式落盘 false 的账号不得被 default_true 覆盖（升级后仍保持关闭）
+        let json = r#"{"refreshToken": "test", "thinkingAdaptive": false}"#;
+        let creds = KiroCredentials::from_json(json).unwrap();
+        assert!(!creds.thinking_adaptive);
     }
 
     #[test]

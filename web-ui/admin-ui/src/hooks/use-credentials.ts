@@ -186,7 +186,7 @@ export function useSetSuggestionMode() {
 
 // ============ 运行时配置 Hooks ============
 
-// 获取运行时配置（maxRpm / port / proxyUrl）
+// 获取运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）
 export function useRuntimeConfig() {
   return useQuery({
     queryKey: ['runtimeConfig'],
@@ -194,7 +194,7 @@ export function useRuntimeConfig() {
   })
 }
 
-// 设置运行时配置（仅更新传入字段；maxRpm 热生效，port/proxyUrl 重启后生效）
+// 设置运行时配置（仅更新传入字段；maxRpm / writeChunkingMaxLines 热生效，port/proxyUrl 重启后生效）
 export function useSetRuntimeConfig() {
   const queryClient = useQueryClient()
   return useMutation({

@@ -3,8 +3,10 @@ use anyhow::Context;
 
 use super::super::entry::{CredentialEntry, DisabledReason};
 use super::super::refresh::{
-    get_usage_limits, is_token_expired, is_token_expiring_soon, list_available_models,
-    refresh_token, sha256_hex, validate_refresh_token,
+    UsageLimitsUnsupportedError, get_usage_limits, get_usage_limits_without_profile_arn,
+    is_token_expired, is_token_expiring_soon, is_transient_usage_limits_error,
+    list_available_models, list_available_profiles, pick_profile_arn, refresh_token, sha256_hex,
+    validate_refresh_token,
 };
 use super::super::types::{
     CredentialEntrySnapshot, ManagerSnapshot, MultiTokenManager, TOKEN_REFRESH_COOLDOWN,
@@ -97,6 +99,9 @@ impl MultiTokenManager {
                     refresh_token_hash: e.credentials.refresh_token.as_deref().map(sha256_hex),
                     email: e.credentials.email.clone(),
                     nickname: e.credentials.nickname.clone(),
+                    provider: e.credentials.provider.clone(),
+                    auth_region: e.credentials.auth_region.clone(),
+                    api_region: e.credentials.api_region.clone(),
                     success_count: e.success_count,
                     last_used_at: e.last_used_at.clone(),
                     refresh_failure_count: e.refresh_failure_count,
@@ -134,6 +139,12 @@ impl MultiTokenManager {
             || update.machine_id.is_some()
     }
 
+    /// 比对「会影响上游返回内容」的身份字段。
+    ///
+    /// 不包含 `provider`：它除被 `fallback_profile_arn_value` 用于判定 Enterprise 备用 ARN 外，
+    /// 既不参与 token 刷新，也不参与 API 请求，更不影响上游返回的订阅等级。若纳入比对，则
+    /// 「仅改登录来源 / 补充 provider」的更新会让在途刷新/额度查询以「身份已变更」失败，
+    /// 进而累计 `refresh_failure_count` 误禁用账号。
     fn has_same_subscription_identity(
         current: &KiroCredentials,
         queried: &KiroCredentials,
@@ -143,7 +154,6 @@ impl MultiTokenManager {
             && current.client_id == queried.client_id
             && current.client_secret == queried.client_secret
             && current.profile_arn == queried.profile_arn
-            && current.provider == queried.provider
             && current.token_endpoint == queried.token_endpoint
             && current.scopes == queried.scopes
             && current.region == queried.region
@@ -415,11 +425,29 @@ impl MultiTokenManager {
 
     /// 获取指定账号的使用额度（Admin API）
     pub async fn get_usage_limits_for(&self, id: u64) -> anyhow::Result<UsageLimitsResponse> {
-        let (credentials, token) = self.acquire_token_for_id(id).await?;
+        let (mut credentials, token) = self.acquire_token_for_id(id).await?;
 
         let effective_proxy = credentials.effective_proxy(self.proxy.as_ref());
         let usage_limits =
-            get_usage_limits(&credentials, &self.config, &token, effective_proxy.as_ref()).await?;
+            match get_usage_limits(&credentials, &self.config, &token, effective_proxy.as_ref())
+                .await
+            {
+                Ok(usage) => usage,
+                // idc 账号没有真实 profileArn 时的自愈（issue #43）。
+                // BuilderId 个人账号的“不支持额度查询”不是该问题，不触发。
+                // 429 限流 / 5xx / 网络错误与 profileArn 无关，直接返回，避免自愈链路
+                //（ListAvailableProfiles → 重试 → 不带 ARN 重试）在故障期间放大请求。
+                Err(e)
+                    if e.downcast_ref::<UsageLimitsUnsupportedError>().is_none()
+                        && credentials.is_idc()
+                        && credentials.has_no_real_profile_arn()
+                        && !is_transient_usage_limits_error(&e) =>
+                {
+                    self.heal_and_retry_usage_limits(id, &mut credentials, &token, e)
+                        .await?
+                }
+                Err(e) => return Err(e),
+            };
 
         // 仅允许查询期间身份未变化的结果回写，防止旧凭据恢复过期订阅等级
         let subscription_title = usage_limits
@@ -436,6 +464,153 @@ impl MultiTokenManager {
         }
 
         Ok(usage_limits)
+    }
+
+    /// 企业版 IdC 账号额度查询失败后的补救（issue #43），均借鉴 Kiro-account-manager：
+    /// - 先用 `ListAvailableProfiles` 发现真实 ARN，写回后带它重试（对话也靠它）；
+    /// - 仍不行则不带 profileArn 查询（KAM 对所有账号类型的做法）。
+    ///
+    /// 全部失败时返回 `original`（首次查询的错误）。
+    ///
+    /// 发现到新 ARN 时会更新调用方持有的 `credentials.profile_arn`：调用方随后的
+    /// `commit_subscription_title_if_identity_matches` 通过 profile_arn 比较账号身份，
+    /// 本地副本必须与已写回 entries 的值一致，否则订阅等级会因“身份已变更”而无法回写。
+    async fn heal_and_retry_usage_limits(
+        &self,
+        id: u64,
+        credentials: &mut KiroCredentials,
+        token: &str,
+        original: anyhow::Error,
+    ) -> anyhow::Result<UsageLimitsResponse> {
+        let Some(arn) = self
+            .discover_and_commit_profile_arn(id, credentials, token)
+            .await
+        else {
+            return self
+                .usage_limits_without_arn(credentials, token, original)
+                .await;
+        };
+        tracing::info!("账号 #{} 已自动发现真实 profileArn，重试额度查询", id);
+        credentials.profile_arn = Some(arn);
+
+        let proxy = credentials.effective_proxy(self.proxy.as_ref());
+        match get_usage_limits(credentials, &self.config, token, proxy.as_ref()).await {
+            Ok(usage) => Ok(usage),
+            Err(e) => {
+                tracing::warn!("带真实 profileArn 的额度查询仍失败: {}", e);
+                self.usage_limits_without_arn(credentials, token, e).await
+            }
+        }
+    }
+
+    /// 发现与当前不同的真实 profileArn 并写回账号；仅在“发现且写回成功”时返回 `Some`。
+    ///
+    /// 发现只是尽力而为：写回失败（如账号在此期间被改动或删除）只记日志并返回 `None`，
+    /// 让调用方降级，不中断整个额度查询。持久化失败同样只记日志（内存中已生效）。
+    async fn discover_and_commit_profile_arn(
+        &self,
+        id: u64,
+        credentials: &KiroCredentials,
+        token: &str,
+    ) -> Option<String> {
+        let arn = self
+            .discover_profile_arn(credentials, token)
+            .await
+            .filter(|arn| Some(arn.as_str()) != credentials.profile_arn.as_deref())?;
+
+        if let Err(e) = self.commit_discovered_profile_arn(id, credentials, &arn) {
+            tracing::warn!(
+                "账号 #{} 写回自动发现的 profileArn 失败，降级为不带 ARN 查询: {}",
+                id,
+                e
+            );
+            return None;
+        }
+        if let Err(pe) = self.persist_credentials() {
+            tracing::warn!("profileArn 自动发现后持久化失败（不影响本次请求）: {}", pe);
+        }
+        Some(arn)
+    }
+
+    /// 不带 profileArn 重试额度查询；仍失败时返回原始错误 `original`。
+    async fn usage_limits_without_arn(
+        &self,
+        credentials: &KiroCredentials,
+        token: &str,
+        original: anyhow::Error,
+    ) -> anyhow::Result<UsageLimitsResponse> {
+        let proxy = credentials.effective_proxy(self.proxy.as_ref());
+        match get_usage_limits_without_profile_arn(credentials, &self.config, token, proxy.as_ref())
+            .await
+        {
+            Ok(usage) => {
+                tracing::info!("不带 profileArn 的额度查询成功");
+                Ok(usage)
+            }
+            Err(e) => {
+                tracing::warn!("不带 profileArn 的额度查询也失败: {}", e);
+                Err(original)
+            }
+        }
+    }
+
+    /// 用 `ListAvailableProfiles` 发现账号的真实 profileArn（尽力而为，失败只记日志）。
+    ///
+    /// 依次尝试 SSO portal token 与数据面 token（两者在 IdC 场景下不同，上游接受哪一个
+    /// 未经真实企业账号验证）。返回与 API region 最匹配的 ARN。
+    pub(crate) async fn discover_profile_arn(
+        &self,
+        credentials: &KiroCredentials,
+        token: &str,
+    ) -> Option<String> {
+        // KAM 用 OIDC 的 accessToken（即本项目的 sso_access_token）调用；
+        // 本项目数据面 token 为 idToken。两者都试，SSO token 优先。
+        let mut tokens = Vec::with_capacity(2);
+        if let Some(sso) = credentials.sso_access_token.as_deref()
+            && !sso.is_empty()
+        {
+            tokens.push(sso);
+        }
+        if tokens.first() != Some(&token) {
+            tokens.push(token);
+        }
+
+        let region = credentials.effective_api_region(&self.config);
+        let proxy = credentials.effective_proxy(self.proxy.as_ref());
+        for t in tokens {
+            match list_available_profiles(credentials, &self.config, t, proxy.as_ref()).await {
+                Ok(arns) => {
+                    if let Some(arn) = pick_profile_arn(&arns, region) {
+                        tracing::info!("已通过 ListAvailableProfiles 发现 profileArn");
+                        return Some(arn);
+                    }
+                    tracing::debug!("ListAvailableProfiles 返回空列表");
+                }
+                Err(e) => tracing::warn!("ListAvailableProfiles 调用失败: {}", e),
+            }
+        }
+        None
+    }
+
+    /// 写回自动发现的 profileArn；仅当账号身份在查询期间未变化时生效。
+    pub(crate) fn commit_discovered_profile_arn(
+        &self,
+        id: u64,
+        queried: &KiroCredentials,
+        arn: &str,
+    ) -> anyhow::Result<()> {
+        let mut entries = self.entries.lock();
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| anyhow::anyhow!("账号不存在: {}", id))?;
+        anyhow::ensure!(
+            Self::has_same_subscription_identity(&entry.credentials, queried),
+            "账号 #{} 在 profileArn 发现期间身份已变更，请重试",
+            id
+        );
+        entry.credentials.profile_arn = Some(arn.to_string());
+        Ok(())
     }
 
     /// 添加新账号（Admin API）
@@ -513,6 +688,17 @@ impl MultiTokenManager {
         validated_cred.proxy_url = new_cred.proxy_url;
         validated_cred.proxy_username = new_cred.proxy_username;
         validated_cred.proxy_password = new_cred.proxy_password;
+
+        // idc 账号（BuilderId 与企业版共用 OIDC，刷新响应均不带 profileArn）：先尝试发现真实 ARN。
+        // 企业版必须有租户自己的 ARN，BuilderId 占位符会被上游拒绝（issue #43）；
+        // 发现失败（含 BuilderId 个人账号无 profile）时回退到下面的按类型补全，行为不变。
+        if validated_cred.is_idc()
+            && validated_cred.has_no_real_profile_arn()
+            && let Some(token) = validated_cred.access_token.clone()
+            && let Some(arn) = self.discover_profile_arn(&validated_cred, &token).await
+        {
+            validated_cred.profile_arn = Some(arn);
+        }
 
         // 无 profile_arn 的 social/idc 账号按类型自动补全 fallback ARN 并随凭据持久化，
         // 后续对话、额度查询、订阅展示、模型列表均直接使用该持久化值
@@ -724,6 +910,13 @@ impl MultiTokenManager {
                 None
             } else {
                 Some(nn.clone())
+            };
+        }
+        if let Some(ref pv) = update.provider {
+            cred.provider = if pv.is_empty() {
+                None
+            } else {
+                Some(pv.clone())
             };
         }
         if let Some(ref pu) = update.proxy_url {

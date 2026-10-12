@@ -135,6 +135,60 @@ pub(crate) fn resolve_thinking_enabled(model: &str, thinking: &Option<Thinking>)
     thinking.as_ref().map(|t| t.is_enabled()).unwrap_or(false)
 }
 
+/// 综合账号级 thinking 开关，决定响应侧是否按"启用 thinking"处理（纯函数，便于测试）。
+///
+/// 账号开关是最终裁决，与客户端请求无关：
+/// - `Some(false)`：一律关闭——请求侧已剥离 thinking 控制，响应侧同步丢弃上游推理内容；
+/// - `Some(true)`：`native_supported`（模型支持原生 adaptive 字段，请求侧会强制注入）
+///   时一律开启；否则无法强制，退回客户端请求；
+/// - `None`（账号已不存在）：退回客户端请求。
+pub(crate) fn resolve_effective_thinking(
+    account_switch: Option<bool>,
+    native_supported: bool,
+    client_enabled: bool,
+) -> bool {
+    match account_switch {
+        Some(false) => false,
+        Some(true) => native_supported || client_enabled,
+        None => client_enabled,
+    }
+}
+
+/// effort 入库口径（与 thinking 裁决结果联动，纯函数便于测试）：
+/// - thinking 生效：保留客户端携带值；未携带时补记 "high"——与 `types.rs`
+///   `default_effort()`（output_config 存在但未写 effort 时的 serde 默认）同口径，
+///   仅作徽章展示约定。注意与 `converter/fields.rs` 注入上游的兜底值 "low"
+///   （issue #40 TTFB 实测下调）是两个不同口径：wire 上无 effort 字段的模型
+///   （如 4.5 代际走文本标签协议）徽章值不回传上游，互不影响；
+/// - thinking 未生效（账号开关关闭 / 客户端未请求 / luna）：一律丢弃，徽章不展示。
+pub(crate) fn resolve_recorded_effort(
+    thinking_effective: bool,
+    effort: Option<String>,
+) -> Option<String> {
+    if thinking_effective {
+        Some(effort.unwrap_or_else(|| "high".to_string()))
+    } else {
+        None
+    }
+}
+
+/// 按实际选中的账号计算响应侧 thinking 是否启用（见 [`resolve_effective_thinking`]）。
+///
+/// `model` 为客户端原始模型名，内部经 `map_model` 归一化后判定是否支持原生字段。
+pub(crate) fn effective_thinking_enabled(
+    provider: &crate::kiro::provider::KiroProvider,
+    credential_id: u64,
+    model: &str,
+    client_enabled: bool,
+) -> bool {
+    let mapped = crate::anthropic::converter::map_model(model).unwrap_or_else(|| model.to_string());
+    resolve_effective_thinking(
+        provider.token_manager().thinking_adaptive_of(credential_id),
+        crate::anthropic::converter::native_thinking_supported(&mapped),
+        client_enabled,
+    )
+}
+
 /// POST /v1/messages/count_tokens
 ///
 /// 计算消息的 token 数量
@@ -384,5 +438,31 @@ mod tests {
             ]),
         );
         assert!(!is_suggestion_mode_request(&p));
+    }
+
+    #[test]
+    fn recorded_effort_kept_when_thinking_effective() {
+        assert_eq!(
+            resolve_recorded_effort(true, Some("low".to_string())),
+            Some("low".to_string())
+        );
+    }
+
+    #[test]
+    fn recorded_effort_defaults_high_when_thinking_effective_without_value() {
+        assert_eq!(
+            resolve_recorded_effort(true, None),
+            Some("high".to_string())
+        );
+    }
+
+    #[test]
+    fn recorded_effort_dropped_when_thinking_disabled() {
+        // 账号开关关闭 / 客户端未请求 thinking：即使请求携带 effort 也不入库
+        assert_eq!(
+            resolve_recorded_effort(false, Some("high".to_string())),
+            None
+        );
+        assert_eq!(resolve_recorded_effort(false, None), None);
     }
 }

@@ -67,6 +67,154 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.22".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![
+                Bilingual::new(
+                    "企业版 IdC 账号（IAM Identity Center）支持：新增企业备用 profileArn 兜底，避免企业账号被补上 BuilderId 占位 ARN 导致上游拒绝；添加账号时先调用 ListAvailableProfiles 自动发现真实 ARN 并写回；额度查询失败时自动发现 ARN 重试，仍失败则按 KAM 做法不带 ARN 查询（issue #43）",
+                    "Enterprise IAM Identity Center accounts are now supported: an enterprise fallback profileArn prevents enterprise accounts from being given the BuilderId placeholder ARN that upstream rejects; when adding an account the real ARN is discovered via ListAvailableProfiles and written back; failed usage queries now discover the ARN and retry, falling back to an ARN-less query as KAM does (issue #43)",
+                ),
+                Bilingual::new(
+                    "额度查询换区域重试改为按 HTTP 状态码判定（新增 UsageLimitsHttpError 携带状态码，Display 文案保持原格式以兼容错误分类）",
+                    "The cross-region retry for usage queries is now decided by HTTP status code (a new UsageLimitsHttpError carries the status while its Display text keeps the previous format for error classification)",
+                ),
+            ])],
+        },
+        ReleaseNote {
+            version: "3.4.21".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "分块写入约束的行数上限改为可配置：默认上限由 150 行放宽到 300 行，避免把本可一次写完的内容拆成多轮（客户端每轮都携带 thinking adaptive，轮数越多思考开销越大）；新增 writeChunkingMaxLines 配置项与环境变量 WRITE_CHUNKING_MAX_LINES，设为 0 即完全关闭该约束；可在 Admin 设置页热修改，仅影响之后的新请求（issue #46）",
+                "The line limit of the chunked-writing constraint is now configurable: the default is relaxed from 150 to 300 lines so content that could be written in one call is no longer split across multiple turns (the client carries thinking adaptive on every turn, so more turns means more thinking overhead); a new writeChunkingMaxLines option and WRITE_CHUNKING_MAX_LINES environment variable were added, where 0 disables the constraint entirely; it can be changed live on the Admin settings page and only affects subsequent requests (issue #46)",
+            )])],
+        },
+        ReleaseNote {
+            version: "3.4.20".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "effort 徽章与深度思考状态联动入库：修复已关闭深度思考的账号用量记录仍展示 effort 徽章的问题；修复 sonnet-4.5 等走文本标签协议的模型开启深度思考后不展示 effort 的问题（thinking 生效时未携带 effort 自动补记，未生效一律丢弃）",
+                "Effort badges in usage records now follow the effective thinking decision: fixed accounts with thinking disabled still showing effort badges, and fixed text-label-protocol models like sonnet-4.5 not showing any effort badge even with thinking enabled (effort is now backfilled when thinking is effective and dropped otherwise)",
+            )])],
+        },
+        ReleaseNote {
+            version: "3.4.19".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "修复 issue #47 残留漂移：CC 每轮追加的 <total_tokens>N tokens left</total_tokens> token 预算提示导致 history[0] 冻结 key 仍逐轮 +50 字节漂移——新增 is_token_budget_reminder 谓词整块识别该消息，与 hook 动态块同样分流到当前消息开头的 <system-reminder>，模型仍可见但不参与缓存哈希",
+                "Fixes the residual drift of issue #47: the per-turn <total_tokens>N tokens left</total_tokens> token budget reminder appended by CC still drifted the history[0] freeze key by 50 bytes per turn — a new is_token_budget_reminder predicate now recognizes it whole-block and, like hook dynamic blocks, splits it into a leading <system-reminder> of the current message, visible to the model but excluded from the cache hash",
+            )])],
+        },
+        ReleaseNote {
+            version: "3.4.18".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![Bilingual::new(
+                    "账号级深度思考开关升级为最终裁决：关闭时剥离请求中的 thinking 控制与响应中的推理内容（强制关），开启时对支持的模型强制注入 thinking 配置（强制开），故障转移切换账号后按实际生效账号重新计算",
+                    "The account-level deep-thinking switch becomes the final arbiter: off strips thinking controls from requests and reasoning from responses (forced off), on force-injects thinking config for supported models (forced on), recomputed after account failover based on the effective account",
+                )]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复 issue #47：CC 注入的动态系统块（hook 输出、工具/MCP 通知）逐轮累积导致 history[0] 冻结缓存 key 漂移、前缀缓存持续失效——现分流到当前消息开头的 <system-reminder>，模型仍可见但不参与缓存哈希，对全部模型生效",
+                        "Fixes issue #47: dynamic system blocks injected by CC (hook outputs, tool/MCP notices) accumulated per turn, drifting the history[0] freeze-cache key and continuously invalidating the prefix cache — they are now split into a leading <system-reminder> of the current message, visible to the model but excluded from the cache hash, for all models",
+                    ),
+                    Bilingual::new(
+                        "thinkingAsText 渲染的文本化思考块回传上游时整块丢弃（标记行 + 思考正文 + 时长行），上游上下文不再含思考内容；流中断缺时长行时保守降级为只剥标记行",
+                        "Thinking-as-text blocks are dropped entirely when sent upstream (marker line + thinking body + duration line), so the upstream context no longer contains thinking; conservatively falls back to stripping only the marker line when the duration line is missing due to a stream interruption",
+                    ),
+                    Bilingual::new(
+                        "原生思考支持收紧为仅 claude-* 模型，修复 minimax-m2.1 / auto 等非 Claude 模型被强制注入 thinking 配置导致上游 400",
+                        "Native thinking support is tightened to claude-* models only, fixing upstream 400s caused by force-injecting thinking config into non-Claude models such as minimax-m2.1 / auto",
+                    ),
+                    Bilingual::new(
+                        "连续纯思考 assistant 消息合并后 content 为空违反 Kiro 非空约束的问题补占位符修复",
+                        "Adds placeholder fix for empty content after merging consecutive thinking-only assistant messages, which violated Kiro's non-empty constraint",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
+            version: "3.4.16".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "支持 claude-haiku-5.5 模型映射：1M 窗口 / 128K max output，定价 $0.10/$0.50，输入超 100K 整档跳价 $0.50/$2.50（不加入 /v1/models 模型列表）",
+                "Adds claude-haiku-5.5 model mapping: 1M context / 128K max output, priced at $0.10/$0.50, tiering up to $0.50/$2.50 when input exceeds 100K (not listed in /v1/models)",
+            )])],
+        },
+        ReleaseNote {
+            version: "3.4.15".to_string(),
+            is_latest: false,
+            groups: vec![
+                improve_group(vec![Bilingual::new(
+                    "请求带 Write 工具时，在系统提示末尾追加分块写入约束：上游生成大块工具参数期间不发送数据，静默约 240s 后会重置流，引导模型把大文件拆成多次较小的写入以避免该重置（对客户端规则遵从度的影响尚未验证）",
+                    "When a request carries a Write tool, a chunked-writing instruction is appended to the end of the system prompt: the upstream sends no data while a large tool argument is being generated and resets the stream after about 240s of silence, so the model is guided to split big files into several smaller writes (impact on adherence to client rules not yet verified)",
+                )]),
+                fix_group(vec![Bilingual::new(
+                    "流中断提示不再断言「上游单次流时长上限」等未证实的原因，仅附带流已持续秒数",
+                    "The stream-interruption message no longer asserts unverified causes such as an upstream per-stream duration limit and only includes the elapsed seconds",
+                )]),
+            ],
+        },
+        ReleaseNote {
+            version: "3.4.14".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![Bilingual::new(
+                    "思考文本化时长行追加思考 token 统计（如「Thought for 22s (1.23k tokens)」），历史剥离兼容无后缀的旧格式",
+                    "Thinking-as-text duration line now appends the thinking token count (e.g. \"Thought for 22s (1.23k tokens)\"); history stripping stays compatible with the old suffix-less format",
+                )]),
+                improve_group(vec![Bilingual::new(
+                    "上游中断已产出部分内容的流时，日志新增 stream_elapsed_secs，返回客户端的错误信息附带流已持续的秒数，便于排查",
+                    "When the upstream interrupts a stream that already produced output, the log now records stream_elapsed_secs and the error sent to the client includes the elapsed seconds, to aid troubleshooting",
+                )]),
+            ],
+        },
+        ReleaseNote {
+            version: "3.4.13".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "余额弹窗重设计：新增账号身份、认证与区域、运行健康三组信息卡片，展示登录来源、认证方式、Auth/API Region、代理与自适应注入状态及调用指标",
+                        "Balance dialog redesigned with identity, auth & region, and runtime health cards showing login source, auth method, Auth/API regions, proxy and adaptive injection status, plus call metrics",
+                    ),
+                    Bilingual::new(
+                        "登录来源支持在新增/编辑账号与批量导入时录入（仅 Google / GitHub，服务端无法从令牌推断）",
+                        "Login source can now be set when adding/editing accounts and during batch import (Google / GitHub only; the server cannot infer it from the token)",
+                    ),
+                    Bilingual::new(
+                        "账号级 thinking adaptive 开关默认开启，存量账号缺失该字段时同样视为开启",
+                        "Per-account thinking adaptive now defaults to on; existing accounts missing the field are also treated as on",
+                    ),
+                    Bilingual::new(
+                        "思考文本化收尾追加「Thought for Ns」时长行，历史剥离同步支持新旧两种格式",
+                        "Thinking-as-text output now appends a \"Thought for Ns\" duration line, with history stripping supporting both old and new formats",
+                    ),
+                ]),
+                improve_group(vec![Bilingual::new(
+                    "思考文本化时长行 ≥60s 改为分秒格式（如 1m15s）",
+                    "Thinking-as-text duration line now uses minute-second format for ≥60s (e.g. 1m15s)",
+                )]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "管理台侧边栏语言徽标改为显示当前语言（中文显示「中」，英文显示 EN）",
+                        "Admin sidebar language badge now shows the current language (中 for Chinese, EN for English)",
+                    ),
+                    Bilingual::new(
+                        "移除设置页重复的侧栏收起开关项，保留侧栏折叠按钮",
+                        "Removed the duplicate sidebar collapse toggle from settings, keeping the sidebar collapse button",
+                    ),
+                    Bilingual::new(
+                        "修改登录来源不再清空账号订阅等级",
+                        "Changing the login source no longer clears the account subscription tier",
+                    ),
+                    Bilingual::new(
+                        "清空账号级代理地址时同步清除代理认证信息，避免残留无地址的凭据",
+                        "Clearing a per-account proxy URL now also clears its credentials, avoiding orphaned auth data",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.12".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![Bilingual::new(
