@@ -181,6 +181,31 @@ mod tests {
     }
 
     #[test]
+    fn test_is_idc_infers_from_oidc_fields_only_when_auth_method_missing() {
+        // 与 refresh_token 一致：缺失 authMethod 且 clientId/clientSecret 齐全 → idc
+        let mut cred = KiroCredentials {
+            client_id: Some("cid".to_string()),
+            client_secret: Some("secret".to_string()),
+            ..Default::default()
+        };
+        assert!(cred.is_idc());
+
+        // 字段不完整 → 不是 idc
+        cred.client_secret = None;
+        assert!(!cred.is_idc());
+        cred.client_secret = Some("secret".to_string());
+        cred.client_id = None;
+        assert!(!cred.is_idc());
+
+        // 显式声明优先：external_idp / social 即使带完整 OIDC 字段也不是 idc
+        cred.client_id = Some("cid".to_string());
+        for m in ["external_idp", "social"] {
+            cred.auth_method = Some(m.to_string());
+            assert!(!cred.is_idc(), "{m}");
+        }
+    }
+
+    #[test]
     fn test_is_idc_and_has_no_real_profile_arn() {
         let mut cred = KiroCredentials::default();
         assert!(!cred.is_idc());

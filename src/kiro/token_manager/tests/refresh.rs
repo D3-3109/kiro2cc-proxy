@@ -373,6 +373,67 @@ pub(crate) mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_discovered_profile_arn_commit_rejects_stale_identity() {
+        // 写回 profileArn 仅在账号身份与查询时快照一致时生效；
+        // 查询期间 refreshToken 被更换（身份已变更）时必须拒绝脏写
+        let manager = std::sync::Arc::new(
+            MultiTokenManager::new(
+                crate::model::config::Config::default(),
+                vec![KiroCredentials {
+                    refresh_token: Some("current-refresh-token".to_string()),
+                    ..Default::default()
+                }],
+                None,
+                None,
+                false,
+            )
+            .unwrap(),
+        );
+        let credentials = manager.entries.lock()[0].credentials.clone();
+
+        // 1) 身份一致 → 写回成功
+        manager
+            .commit_discovered_profile_arn(
+                1,
+                &credentials,
+                "arn:aws:codewhisperer:us-east-1:111122223333:profile/ABCDEFGHIJKL",
+            )
+            .expect("身份一致时写回应成功");
+        assert_eq!(
+            manager.entries.lock()[0].credentials.profile_arn.as_deref(),
+            Some("arn:aws:codewhisperer:us-east-1:111122223333:profile/ABCDEFGHIJKL")
+        );
+
+        // 2) 查询快照过期（refreshToken 已更换）→ 拒绝写回，内存中 ARN 不变
+        let mut stale = credentials.clone();
+        stale.refresh_token = Some("rotated-refresh-token".to_string());
+        let err = manager
+            .commit_discovered_profile_arn(
+                1,
+                &stale,
+                "arn:aws:codewhisperer:us-east-1:111122223333:profile/ZZZZZZZZZZZZ",
+            )
+            .expect_err("身份已变更时写回应被拒绝");
+        assert!(err.to_string().contains("身份已变更"));
+        assert_eq!(
+            manager.entries.lock()[0].credentials.profile_arn.as_deref(),
+            Some("arn:aws:codewhisperer:us-east-1:111122223333:profile/ABCDEFGHIJKL"),
+            "拒绝后不应覆盖已写回的 ARN"
+        );
+
+        // 3) 账号不存在 → 报错
+        assert!(
+            manager
+                .commit_discovered_profile_arn(
+                    999,
+                    &credentials,
+                    "arn:aws:codewhisperer:us-east-1:111122223333:profile/AAAAAAAAAAAA",
+                )
+                .is_err()
+        );
+    }
+
     #[test]
     fn test_apply_update_fields_thinking_adaptive() {
         let mut cred = KiroCredentials::default();

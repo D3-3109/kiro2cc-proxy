@@ -593,7 +593,7 @@ impl MultiTokenManager {
     }
 
     /// 写回自动发现的 profileArn；仅当账号身份在查询期间未变化时生效。
-    fn commit_discovered_profile_arn(
+    pub(crate) fn commit_discovered_profile_arn(
         &self,
         id: u64,
         queried: &KiroCredentials,

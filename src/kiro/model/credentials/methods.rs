@@ -142,10 +142,14 @@ impl KiroCredentials {
     }
 
     /// 是否 idc 账号（含 BuilderId 与企业版 IdC，二者共用 OIDC clientId/clientSecret 刷新）
+    ///
+    /// 与 `refresh_token` 的判定保持一致：显式声明的 `auth_method` 优先；
+    /// 缺失（`None`）时，clientId 与 clientSecret 均存在则按 idc 处理（配置文件允许省略 authMethod）。
     pub fn is_idc(&self) -> bool {
-        self.auth_method
-            .as_deref()
-            .is_some_and(|m| canonicalize_auth_method_value(m.trim()) == "idc")
+        match self.auth_method.as_deref() {
+            Some(m) => canonicalize_auth_method_value(m.trim()) == "idc",
+            None => self.client_id.is_some() && self.client_secret.is_some(),
+        }
     }
 
     /// profileArn 缺失、为空，或只是代理自带的占位 / 备用 ARN（BuilderId 占位符、企业备用 ARN），
