@@ -49,7 +49,9 @@ export function useBalanceFetcher({
     setBalanceMap(prev => {
       const next = new Map<number, BalanceResponse>()
       prev.forEach((value, id) => {
-        if (validIds.has(id)) {
+        const cred = credentials.find(c => c.id === id)
+        // 已禁用账号的余额一并清理（残留旧值会在启用瞬间参与汇总，且可能严重过期）
+        if (validIds.has(id) && !cred?.disabled) {
           next.set(id, value)
         }
       })
@@ -121,6 +123,8 @@ export function useBalanceFetcher({
       }
       await patchMissedCredentials(new Set(ids))
       isFetchingBalances.current = false
+      // 拉取期间账号可能被禁用：强制重算一次，按最新禁用态修正过渡展示值
+      setBalanceMap(prev => new Map(prev))
     })()
   }, [credentials]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -168,6 +172,8 @@ export function useBalanceFetcher({
         }
         await patchMissedCredentials(new Set(ids))
         isFetchingBalances.current = false
+        // 拉取期间账号可能被禁用：强制重算一次，按最新禁用态修正过渡展示值
+        setBalanceMap(prev => new Map(prev))
       })()
     }
     prevTabRef.current = activeTab
@@ -220,11 +226,19 @@ export function useBalanceFetcher({
   useEffect(() => {
     if (!initialBalanceFetchDone.current || isFetchingBalances.current) return
 
+    // 已禁用账号的余额不参与全局剩余积分汇总（balanceMap 可能残留禁用前查到的旧数据）
+    const disabledIds = new Set((credentialsRef.current || []).filter(c => c.disabled).map(c => c.id))
     let total = 0
-    balanceMap.forEach(b => { total += b.remaining })
-    setLiveCreditsTotal(balanceMap.size > 0 ? total : null)
-    setLiveCreditsQueried(balanceMap.size)
-  }, [balanceMap]) // eslint-disable-line react-hooks/exhaustive-deps
+    let queried = 0
+    balanceMap.forEach((b, id) => {
+      if (disabledIds.has(id)) return
+      total += b.remaining
+      queried++
+    })
+    setLiveCreditsTotal(queried > 0 ? total : null)
+    setLiveCreditsQueried(queried)
+    // 禁用/启用账号不改变 balanceMap 引用，用禁用状态派生 key 触发重算
+  }, [balanceMap, (credentials || []).map(c => `${c.id}:${c.disabled}`).join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     balanceMap,
