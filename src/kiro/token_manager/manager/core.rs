@@ -155,6 +155,8 @@ impl MultiTokenManager {
             persist_lock: Mutex::new(()),
             next_id_counter: AtomicU64::new(final_max_id),
             max_rpm_per_credential: AtomicU32::new(max_rpm),
+            model_support: Mutex::new(HashMap::new()),
+            model_support_refresh_lock: TokioMutex::new(()),
         };
 
         // 持久化历史最大 ID 计数器（即使本次没有新增账号，也要确保计数器文件与内存一致，
@@ -281,6 +283,9 @@ impl MultiTokenManager {
             })
             .collect();
 
+        // 按账号实际可用模型过滤（探测结果未知时不排除，详见 prefer_model_supporters）
+        let available = self.prefer_model_supporters(available, model);
+
         if available.is_empty() {
             return None;
         }
@@ -384,6 +389,7 @@ impl MultiTokenManager {
                                 && !e.disabled
                                 && Self::compute_health(e) != HealthStatus::Unhealthy
                                 && (!is_opus || e.credentials.supports_opus())
+                                && !self.is_known_unsupported(e.id, model)
                         })
                         .map(|e| (e.id, e.credentials.clone()))
                 };
@@ -606,6 +612,7 @@ impl MultiTokenManager {
                                 )
                                 && (allowed_ids.is_empty() || allowed_ids.contains(&e.id))
                                 && (!is_opus || e.credentials.supports_opus())
+                                && !self.is_known_unsupported(e.id, model)
                         })
                         .map(|e| (e.id, e.credentials.clone()))
                 } else {

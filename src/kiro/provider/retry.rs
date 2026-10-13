@@ -48,6 +48,14 @@ impl KiroProvider {
         thinking_adaptive_requested: bool,
         bound_ids: &[u64],
     ) -> anyhow::Result<(reqwest::Response, u64)> {
+        // 模型感知路由：确保各账号的实际可用模型探测结果是新的。
+        // 探测是全局共享的（缓存 + 串行锁），放在并发 permit 之前，
+        // 避免冷启动时大量请求占着额度排队等探测
+        let model = Self::extract_model_from_request(request_body);
+        self.token_manager
+            .refresh_model_support_if_stale(model.as_deref(), bound_ids)
+            .await;
+
         let _permit = self.concurrency_limit.acquire().await?;
         // 流式请求的响应体在上游 200 headers 返回后仍持续生成，受 reqwest
         // 总超时约束，统一使用 `UPSTREAM_TIMEOUT_SECS` 长超时档；若使用较短
@@ -63,8 +71,7 @@ impl KiroProvider {
         let mut last_error: Option<anyhow::Error> = None;
         let api_type = if is_stream { "流式" } else { "非流式" };
 
-        // 尝试从请求体中提取模型信息和会话 ID
-        let model = Self::extract_model_from_request(request_body);
+        // 尝试从请求体中提取会话 ID（模型信息已在上方提取）
         let continuation_id = Self::extract_continuation_id_from_request(request_body);
         // 本次请求内已限流的账号：重试时避开，但不销毁 sticky 绑定
         let mut throttled_in_request: Vec<u64> = Vec::new();
