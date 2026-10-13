@@ -1,3 +1,7 @@
+/* 34 个色彩主题变量映射：@import 必须位于所有其他语句之前，否则整文件被构建丢弃。
+   主题选择器特异性高于 @layer base 中 :root 基准令牌，此处加载不影响覆盖。 */
+@import './themes.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

@@ -2,7 +2,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
-import { History, Info, Monitor, Moon, Pencil, Server, ShieldCheck, Sun, type LucideIcon } from 'lucide-react'
+import { History, Info, Monitor, Pencil, Palette, Server, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageHead } from '@/components/page-head'
@@ -16,7 +16,6 @@ import {
 } from '@/hooks/use-credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import { LANG_STORAGE_KEY } from '@/i18n'
-import type { Theme } from '@/hooks/use-theme'
 
 /** 分区标题（设计稿 .set-cap） */
 const SET_CAP =
@@ -166,16 +165,12 @@ function Sw({ label, on, onToggle, disabled }: { label: string; on: boolean; onT
 }
 
 interface SettingsPanelProps {
-  /** 主题由 Dashboard 持有：useTheme() 每实例独立 state，
-   *  本页自行调用会与侧栏页脚按钮各持一份而无法同步 */
-  theme: Theme
-  onToggleTheme: (x?: number, y?: number) => void
+  onOpenThemeSettings: () => void
   onOpenChangelog: () => void
 }
 
 export function SettingsPanel({
-  theme,
-  onToggleTheme,
+  onOpenThemeSettings,
   onOpenChangelog,
 }: SettingsPanelProps) {
   const { t, i18n } = useTranslation()
@@ -522,15 +517,10 @@ export function SettingsPanel({
             />
           </Row>
           <Row label={t('settings.theme')} desc={t('settings.themeDesc')}>
-            <Seg
-              groupLabel={t('settings.theme')}
-              value={theme}
-              options={[
-                { value: 'light' as const, label: t('settings.themeLight'), icon: Sun },
-                { value: 'dark' as const, label: t('settings.themeDark'), icon: Moon },
-              ]}
-              onSelect={() => onToggleTheme()}
-            />
+            <Button type="button" variant="ghost" onClick={onOpenThemeSettings}>
+              <Palette aria-hidden="true" />
+              {t('dashboard.navTheme')}
+            </Button>
           </Row>
         </Section>
 
