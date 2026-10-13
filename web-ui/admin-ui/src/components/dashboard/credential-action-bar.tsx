@@ -67,9 +67,18 @@ export function CredentialActionBar({
               )}
               <button
                 type="button"
+                onClick={openAddDialog}
+                aria-label={t('dashboard.addAccount')}
+                className={ACTION_BTN}
+              >
+                <Plus />
+                <span className="hidden sm:inline">{t('dashboard.addAccount')}</span>
+              </button>
+              <button
+                type="button"
                 onClick={openBatchImport}
                 aria-label={t('dashboard.batchImport')}
-                className={ACTION_BTN}
+                className={`${ACTION_BTN_PRIMARY} ml-auto`}
               >
                 <BatchImportIcon />
                 <span className="hidden sm:inline">{t('dashboard.batchImport')}</span>
@@ -81,15 +90,6 @@ export function CredentialActionBar({
                   {t('dashboard.verifyingProgress', { current: verifyProgress.current, total: verifyProgress.total })}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={openAddDialog}
-                aria-label={t('dashboard.addAccount')}
-                className={`${ACTION_BTN_PRIMARY} ml-auto`}
-              >
-                <Plus />
-                <span className="hidden sm:inline">{t('dashboard.addAccount')}</span>
-              </button>
             </div>
   )
 }
