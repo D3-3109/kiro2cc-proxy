@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.25".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "混合账号池按账号实际可用模型路由：调度前用各账号 ListAvailableModels 探测结果前置过滤，请求不再被分发到不支持目标模型的账号（此前上游直接拒绝且不触发故障转移）。探测结果缓存 30 分钟、失败 2 分钟后重试，稳态零网络开销；探测失败/空列表视为未知不过滤，候选全部明确不支持时回退为不过滤（issue #49）",
+                "Model-aware routing for mixed account pools: account availability is probed via ListAvailableModels and requests are no longer dispatched to accounts that do not support the target model (previously rejected upstream without failover). Probe results are cached for 30 minutes with a 2-minute retry after failure, at zero steady-state network cost; failures/empty lists are treated as unknown (no filtering), and when all candidates are known-unsupported the filter is skipped (issue #49)",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.24".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![Bilingual::new(
