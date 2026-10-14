@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.26".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "admin-ui 新增主题设置页：37 套色彩主题（经典网站/浅色/深色/编辑器分组）× 明暗双模式自由组合，带实时预览色板与 View Transition 圆形扩散切换动画，选择持久化到 localStorage；侧栏顶栏新增主题入口，支持一键恢复默认外观",
+                "admin-ui gains a Theme Settings page: 37 color themes (website/light/dark/editor groups) freely combined with light/dark modes, featuring live preview swatches and a View Transition circular reveal animation, with the selection persisted to localStorage; a theme entry is added to the sidebar and top bar, with one-click reset to the default appearance",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.25".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![Bilingual::new(
