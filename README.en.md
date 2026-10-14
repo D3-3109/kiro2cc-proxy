@@ -919,11 +919,12 @@ MIT
 
 This project is based on [kiro.rs](https://github.com/hank9999/kiro.rs). Thanks to the original author for the open-source contribution.
 
-Thanks to all the contributors of this project:
+Thanks to all the contributors of this project (in no particular order):
 
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
+- [zbjincheng](https://github.com/zbjincheng)
 
 **Special thanks** — the following issues directly drove critical fixes:
 

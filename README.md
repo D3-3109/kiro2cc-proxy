@@ -940,11 +940,12 @@ MIT
 
 本项目基于 [kiro.rs](https://github.com/hank9999/kiro.rs) 二次开发，感谢原作者的开源贡献。
 
-感谢所有为本项目做出贡献的开发者：
+感谢所有为本项目做出贡献的开发者（排名不分先后）：
 
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
+- [zbjincheng](https://github.com/zbjincheng)
 
 **特别致谢**——以下 Issue 直接推动了关键修复：
 
