@@ -21,7 +21,7 @@ import { LANG_STORAGE_KEY } from '@/i18n'
 const SET_CAP =
   'flex items-center gap-1.5 px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[.08em] text-ink-3'
 /** 分区卡片（设计稿 .set-card） */
-const SET_CARD = 'overflow-hidden rounded-lg border border-hairline bg-surface shadow-hair'
+const SET_CARD = 'overflow-hidden rounded-lg border border-transparent bg-surface shadow-hair'
 /** 配置行（设计稿 .set-row） */
 const SET_ROW = 'flex items-center gap-4 border-b border-hairline px-4 py-[13px] last:border-b-0'
 /** 行键名（设计稿 .set-k） */
@@ -32,7 +32,7 @@ const SET_D = 'mt-0.5 max-w-[760px] text-[11px] leading-[1.5] text-ink-3'
 const SET_C = 'ml-auto flex flex-none items-center gap-2'
 /** 只读值框（设计稿 .field.w-s） */
 const FIELD_S =
-  'flex h-[31px] min-w-[96px] items-center rounded-[7px] border border-hairline-2 bg-surface-2 px-2.5 font-mono text-[12px] text-ink-2'
+  'flex h-[31px] min-w-[96px] items-center rounded-[7px] border border-transparent bg-surface-2 px-2.5 font-mono text-[12px] text-ink-2'
 /** 分段器容器（设计稿 .seg，8px 圆角与 borderRadius.lg 的 11px 不同，故用字面量） */
 const SEG = 'flex flex-none gap-0.5 rounded-[8px] bg-surface-3 p-0.5'
 /** 分段器档位（设计稿 .seg button） */

@@ -134,7 +134,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-hairline bg-surface">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-transparent bg-surface">
         {/* 阶梯一：顶栏资产标识与全局状态 */}
         <DialogHeader className="flex flex-col gap-1 border-b border-hairline px-[22px] pt-5 pb-4 text-left">
           {/* pr-6 为右上角关闭按钮让位，避免标题与其重叠 */}
@@ -170,7 +170,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
           {error && (() => {
             const parsed = parseError(error)
             return (
-              <div className="space-y-1.5 rounded-xl border border-danger-line bg-danger-soft p-4 text-center">
+              <div className="space-y-1.5 rounded-xl border border-transparent bg-danger-soft p-4 text-center">
                 <div className="flex items-center justify-center gap-1.5 text-[13px] font-medium text-danger">
                   <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
@@ -188,7 +188,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
 
           {/* 阶梯二：核心额度看板 */}
           {balance && (
-            <div className="space-y-3.5 rounded-xl border border-hairline bg-surface-2 p-4 px-[18px]">
+            <div className="space-y-3.5 rounded-xl border border-transparent bg-surface-2 p-4 px-[18px]">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <svg className="h-4 w-4 shrink-0 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -249,7 +249,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
           {credential && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* 卡片 A：核心身份标识 */}
-              <div className="space-y-2.5 rounded-lg border border-hairline bg-surface-2 p-3 px-3.5">
+              <div className="space-y-2.5 rounded-lg border border-transparent bg-surface-2 p-3 px-3.5">
                 <CardHeader
                   label={t('credentials.infoGroupIdentity')}
                   icon={
@@ -283,7 +283,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
               </div>
 
               {/* 卡片 B：认证与路由（保持三行结构） */}
-              <div className="space-y-2.5 rounded-lg border border-hairline bg-surface-2 p-3 px-3.5">
+              <div className="space-y-2.5 rounded-lg border border-transparent bg-surface-2 p-3 px-3.5">
                 <CardHeader
                   label={t('credentials.infoGroupAuth')}
                   icon={
@@ -319,7 +319,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
 
           {/* 阶梯四：运行健康与监控 */}
           {credential && (
-            <div className="space-y-3 rounded-lg border border-hairline bg-surface-2 p-3.5">
+            <div className="space-y-3 rounded-lg border border-transparent bg-surface-2 p-3.5">
               <CardHeader
                 label={`${t('credentials.infoGroupHealth')} & ${t('credentials.infoGroupRuntime')}`}
                 icon={
@@ -333,8 +333,8 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${
                   credential.disabled
-                    ? 'border-danger-line bg-danger-soft text-danger'
-                    : 'border-ok-line bg-ok-soft text-ok'
+                    ? 'border-transparent bg-danger-soft text-danger'
+                    : 'border-transparent bg-ok-soft text-ok'
                 }`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${credential.disabled ? 'bg-danger' : 'bg-ok'}`} />
                   {credential.disabled
@@ -345,7 +345,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
                 </span>
 
                 {/* 代理徽章三态：优先展示地址；仅有代理配置（地址缺失）显示「已配置」，否则「未配置」 */}
-                <span className="inline-flex max-w-full items-center rounded border border-hairline-2 bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-ink-2">
+                <span className="inline-flex max-w-full items-center rounded border border-transparent bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-ink-2">
                   <span className="truncate">
                     {credential.proxyUrl
                       ? `${t('credentials.proxyBadgeLabel')}: ${credential.proxyUrl}`
@@ -355,13 +355,13 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
                   </span>
                 </span>
 
-                <span className="inline-flex items-center rounded border border-hairline-2 bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-ink-2">
+                <span className="inline-flex items-center rounded border border-transparent bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-ink-2">
                   {t('credentials.adaptiveLabel')}: {credential.thinkingAdaptive ? t('credentials.switchOn') : t('credentials.switchOff')}
                 </span>
               </div>
 
               {/* 关键调用指标矩阵 */}
-              <div className="grid grid-cols-3 divide-x divide-hairline rounded-lg border border-hairline bg-surface p-2 px-2.5 text-center">
+              <div className="grid grid-cols-3 divide-x divide-hairline rounded-lg border border-transparent bg-surface p-2 px-2.5 text-center">
                 <div>
                   <div className="text-[10px] text-ink-3">{t('credentials.successCountLabel')}</div>
                   <div className="font-mono text-[13px] font-semibold text-ok">{credential.successCount}</div>

@@ -572,7 +572,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         note={t('apiKeys.pageSubtitle')}
         actions={
           <>
-            <span className="inline-flex h-5 shrink-0 items-center gap-[5px] rounded-md border border-ok-line bg-ok-soft px-[7px] text-[11px] font-semibold text-ok">
+            <span className="inline-flex h-5 shrink-0 items-center gap-[5px] rounded-md border border-transparent bg-ok-soft px-[7px] text-[11px] font-semibold text-ok">
               <span className="h-[5px] w-[5px] shrink-0 animate-pulse rounded-full bg-ok ring-[2.5px] ring-ok-soft" aria-hidden="true" />
               {t('apiKeys.serviceRunningTag')}
             </span>
@@ -591,7 +591,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
 
       {/* 连接卡（设计稿 .conn）：客户端接入所需的 Base URL 与兼容协议一次给全。
           设计稿右侧的「在新窗口打开」未实现 —— 本服务无可浏览端点（/v1/* 均需认证），渲染即死交互 */}
-      <section className="flex shrink-0 flex-wrap items-center gap-4 rounded-[11px] border border-hairline bg-surface px-4 py-[13px] shadow-hair">
+      <section className="flex shrink-0 flex-wrap items-center gap-4 rounded-[11px] border border-transparent bg-surface px-4 py-[13px] shadow-hair">
         <div className="min-w-0">
           <div className="flex items-center gap-[5px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3">
             <Link2 className="size-[13px] shrink-0" />
@@ -643,7 +643,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             {['Anthropic Messages', 'Claude Code /cc/v1', 'Codex Responses', 'OpenAI Chat'].map((protocol) => (
               <span
                 key={protocol}
-                className="whitespace-nowrap rounded-[5px] border border-hairline bg-surface-3 px-1.5 py-px text-[10.5px] font-semibold tracking-[.03em] text-ink-2"
+                className="whitespace-nowrap rounded-[5px] border border-transparent bg-surface-3 px-1.5 py-px text-[10.5px] font-semibold tracking-[.03em] text-ink-2"
               >
                 {protocol}
               </span>

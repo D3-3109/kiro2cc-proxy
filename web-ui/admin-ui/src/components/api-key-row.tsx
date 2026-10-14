@@ -37,14 +37,14 @@ export function quotaTone(percent: number) {
 
 /** 状态徽章配色（设计稿 .tag ok/off/warn + .pip）；详情页页头复用同一份，避免两处配色漂移 */
 export const STATUS_VISUAL: Readonly<Record<KeyStatus, { cls: string; pip: string; labelKey: string }>> = {
-  active: { cls: 'border-ok-line bg-ok-soft text-ok', pip: 'bg-ok', labelKey: 'apiKeys.statusActive' },
-  pending: { cls: 'border-brand-line bg-brand-soft text-brand', pip: 'bg-brand', labelKey: 'apiKeys.statusPending' },
-  expired: { cls: 'border-warn-line bg-warn-soft text-warn', pip: 'bg-warn', labelKey: 'apiKeys.statusExpired' },
-  disabled: { cls: 'border-hairline bg-surface-3 text-ink-3', pip: 'bg-ink-3', labelKey: 'apiKeys.statusDisabled' },
+  active: { cls: 'bg-ok-soft text-ok', pip: 'bg-ok', labelKey: 'apiKeys.statusActive' },
+  pending: { cls: 'bg-brand-soft text-brand', pip: 'bg-brand', labelKey: 'apiKeys.statusPending' },
+  expired: { cls: 'bg-warn-soft text-warn', pip: 'bg-warn', labelKey: 'apiKeys.statusExpired' },
+  disabled: { cls: 'bg-surface-3 text-ink-3', pip: 'bg-ink-3', labelKey: 'apiKeys.statusDisabled' },
 }
 
 export const TAG_BASE =
-  'inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-[6px] border px-[7px] text-[11px] font-semibold'
+  'inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-[6px] border border-transparent px-[7px] text-[11px] font-semibold'
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
@@ -124,7 +124,7 @@ export function ApiKeyRow({
       {/* 名称（设计稿 .acct）：26px 图钥头像 + 名称 + 副行序号；.pri 优先级徽章无对应字段，不渲染 */}
       <td className={CELL}>
         <div className="flex min-w-0 items-center gap-[9px]">
-          <span className="grid size-[26px] flex-none place-items-center rounded-[7px] border border-hairline bg-surface-3 text-ink-3">
+          <span className="grid size-[26px] flex-none place-items-center rounded-[7px] border border-transparent bg-surface-3 text-ink-3">
             <KeyRound className="size-[13px]" strokeWidth={1.7} />
           </span>
           <div className="min-w-0">
@@ -167,7 +167,7 @@ export function ApiKeyRow({
           </span>
           {expiringInDays !== null && (
             <span
-              className={`${TAG_BASE} ${status === 'active' ? 'border-hairline bg-surface-3 text-ink-2' : 'border-warn-line bg-warn-soft text-warn'}`}
+              className={`${TAG_BASE} ${status === 'active' ? 'border-transparent bg-surface-3 text-ink-2' : 'border-transparent bg-warn-soft text-warn'}`}
             >
               {t('apiKeys.expiringSoonTag', { count: expiringInDays })}
             </span>
@@ -184,7 +184,7 @@ export function ApiKeyRow({
           </span>
         ) : (
           <span
-            className="inline-flex min-w-0 max-w-full items-center gap-[5px] rounded-[6px] border border-brand-line bg-brand-soft px-[7px] py-px text-[11px] font-medium text-brand"
+            className="inline-flex min-w-0 max-w-full items-center gap-[5px] rounded-[6px] border border-transparent bg-brand-soft px-[7px] py-px text-[11px] font-medium text-brand"
             title={boundTitle}
           >
             <Link2 className="size-[12px] flex-none" strokeWidth={1.7} />

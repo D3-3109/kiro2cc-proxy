@@ -76,8 +76,8 @@ type RateStatus = 'synced' | 'missing'
  * 此时 rate_multiplier 全为 null。设计稿的「可用 / 已弃用」无对应字段，故改表此语义。
  */
 const RATE_STATUS: Readonly<Record<RateStatus, { cls: string; pip: string; labelKey: string }>> = {
-  synced: { cls: 'border-ok-line bg-ok-soft text-ok', pip: 'bg-ok', labelKey: 'models.statusRateSynced' },
-  missing: { cls: 'border-warn-line bg-warn-soft text-warn', pip: 'bg-warn', labelKey: 'models.statusRateMissing' },
+  synced: { cls: 'border-transparent bg-ok-soft text-ok', pip: 'bg-ok', labelKey: 'models.statusRateSynced' },
+  missing: { cls: 'border-transparent bg-warn-soft text-warn', pip: 'bg-warn', labelKey: 'models.statusRateMissing' },
 }
 
 type ModelFilter = 'all' | RateStatus
@@ -176,7 +176,7 @@ export function ModelListPage() {
             /* 清单来源徽章：倍率全缺失即代表后端已回退本地静态表 */
             <span
               className={`${TAG_BASE} ${
-                syncedCount > 0 ? 'border-ok-line bg-ok-soft text-ok' : 'border-warn-line bg-warn-soft text-warn'
+                syncedCount > 0 ? 'border-transparent bg-ok-soft text-ok' : 'border-transparent bg-warn-soft text-warn'
               }`}
             >
               <span

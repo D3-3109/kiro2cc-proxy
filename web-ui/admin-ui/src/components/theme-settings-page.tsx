@@ -55,8 +55,8 @@ function AppearanceThumbnail({ swatch }: { swatch: ThemePreviewSwatch }) {
   return (
     <div
       aria-hidden
-      className="flex h-14 overflow-hidden rounded-md border"
-      style={{ background: swatch.bg, borderColor: swatch.muted }}
+      className="flex h-14 overflow-hidden rounded-md"
+      style={{ background: swatch.bg }}
     >
       <div className="flex w-6 flex-col gap-1 p-1.5" style={{ background: swatch.sidebar ?? swatch.surface }}>
         {[0, 1, 2].map((i) => (
@@ -75,8 +75,8 @@ function ThemeThumbnail({ swatch }: { swatch: ThemePreviewSwatch }) {
   return (
     <div
       aria-hidden
-      className="flex h-24 overflow-hidden rounded-md border text-left"
-      style={{ background: swatch.bg, borderColor: swatch.muted }}
+      className="flex h-24 overflow-hidden rounded-md text-left"
+      style={{ background: swatch.bg }}
     >
       <div className="flex w-12 shrink-0 flex-col gap-1.5 p-2" style={{ background: swatch.sidebar ?? swatch.surface }}>
         <span className="block h-2 w-6 rounded-sm" style={{ background: swatch.primary }} />
@@ -128,7 +128,7 @@ function ThemeStyleCard({
       aria-label={t('themeSettings.selectTheme', { theme: name })}
       aria-describedby={`theme-description-${item.id}`}
       className={`relative rounded-lg border p-2 text-left transition-colors ${
-        active ? 'border-brand bg-brand-soft' : 'border-hairline bg-surface hover:border-hairline-2'
+        active ? 'border-brand bg-brand-soft' : 'border-transparent bg-surface hover:bg-surface-2'
       }`}
     >
       {item.recommended && (
@@ -147,7 +147,7 @@ function ThemeStyleCard({
         <span className="text-[12.5px] font-medium text-ink">{name}</span>
         <span className="flex gap-0.5">
           {[swatch.primary, swatch.bg, swatch.muted].map((c, i) => (
-            <span key={i} className="h-2 w-2 rounded-full border border-hairline" style={{ background: c }} />
+            <span key={i} className="h-2 w-2 rounded-full border border-transparent" style={{ background: c }} />
           ))}
         </span>
         {active && <span className="ml-auto text-[10px] text-brand">{t('themeSettings.applied')}</span>}
@@ -178,13 +178,13 @@ function ThemeLivePreview({ item, mode }: { item: ColorThemeDef; mode: ThemeMode
   ]
 
   return (
-    <div className="rounded-xl border border-hairline bg-surface-2 p-3">
+    <div className="rounded-xl border border-transparent bg-surface-2 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[12px] font-medium text-ink">{t('themeSettings.previewTitle')}</p>
           <p className="text-[10.5px] text-ink-3">{t('themeSettings.previewDesc')}</p>
         </div>
-        <div role="tablist" aria-label={t('themeSettings.previewScene')} className="flex gap-1 rounded-md border border-hairline bg-surface p-0.5">
+        <div role="tablist" aria-label={t('themeSettings.previewScene')} className="flex gap-1 rounded-md border border-transparent bg-surface p-0.5">
           {scenes.map((s) => (
             <button
               key={s.id}
@@ -211,7 +211,7 @@ function ThemeLivePreview({ item, mode }: { item: ColorThemeDef; mode: ThemeMode
           theme: t(`common.theme.${item.nameKey}`),
           mode: mode === 'dark' ? t('settings.themeDark') : t('settings.themeLight'),
         })}
-        className="overflow-hidden rounded-lg border border-hairline"
+        className="overflow-hidden rounded-lg border border-transparent"
         style={{ background: swatch.bg }}
       >
         <div className="flex items-center gap-1.5 border-b px-3 py-2" style={{ background: swatch.surface, borderColor: swatch.muted }}>
@@ -330,7 +330,7 @@ function ThemeLivePreview({ item, mode }: { item: ColorThemeDef; mode: ThemeMode
           ['muted', swatch.muted],
         ] as const).map(([token, color]) => (
           <span key={token} className="inline-flex items-center gap-1 text-[9.5px] text-ink-3">
-            <span className="h-2.5 w-2.5 rounded-full border border-hairline" style={{ background: color }} />
+            <span className="h-2.5 w-2.5 rounded-full border border-transparent" style={{ background: color }} />
             {t(`themeSettings.token.${token}`)}
           </span>
         ))}
@@ -402,7 +402,7 @@ export function ThemeSettingsPage() {
                 clearFilters()
               }}
               title={t('themeSettings.resetDesc')}
-              className="inline-flex items-center gap-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] text-ink-2 transition-colors hover:border-hairline-2 hover:text-ink"
+              className="inline-flex items-center gap-1 rounded-md border border-transparent bg-surface px-2.5 py-1.5 text-[11.5px] text-ink-2 transition-colors hover:text-ink"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               {t('themeSettings.reset')}
@@ -413,7 +413,7 @@ export function ThemeSettingsPage() {
 
       <div className="space-y-6">
         {/* 外观模式三卡 */}
-        <section aria-labelledby="appearance-modes-heading" className="rounded-xl border border-hairline bg-surface p-4">
+        <section aria-labelledby="appearance-modes-heading" className="rounded-xl border border-transparent bg-surface p-4">
           <h2 id="appearance-modes-heading" className="text-[13px] font-semibold text-ink">
             {t('themeSettings.modeTitle')}
           </h2>
@@ -428,7 +428,7 @@ export function ThemeSettingsPage() {
                   aria-pressed={active}
                   onClick={(e) => setThemeMode(option.id, e.clientX, e.clientY)}
                   className={`rounded-lg border p-3 text-left transition-colors ${
-                    active ? 'border-brand bg-brand-soft' : 'border-hairline bg-surface hover:border-hairline-2'
+                    active ? 'border-brand bg-brand-soft' : 'border-transparent bg-surface hover:bg-surface-2'
                   }`}
                 >
                   <AppearanceThumbnail swatch={getThemePreviewSwatch(activeItem, option.id)} />
@@ -448,7 +448,7 @@ export function ThemeSettingsPage() {
         </section>
 
         {/* 当前主题 + 实时预览 */}
-        <section aria-label={t('themeSettings.currentTheme', { theme: t(`common.theme.${activeItem.nameKey}`) })} className="rounded-xl border border-hairline bg-surface p-4">
+        <section aria-label={t('themeSettings.currentTheme', { theme: t(`common.theme.${activeItem.nameKey}`) })} className="rounded-xl border border-transparent bg-surface p-4">
           <div className="mb-3 flex items-center gap-2.5">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand-soft text-brand">
               <Palette className="h-4 w-4" />
@@ -467,7 +467,7 @@ export function ThemeSettingsPage() {
         </section>
 
         {/* 主题库：搜索 + 分组筛选 + 网格 */}
-        <section aria-labelledby="styles-heading" className="rounded-xl border border-hairline bg-surface p-4">
+        <section aria-labelledby="styles-heading" className="rounded-xl border border-transparent bg-surface p-4">
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="styles-heading" className="text-[13px] font-semibold text-ink">
               {t('themeSettings.stylesTitle')}
@@ -510,7 +510,7 @@ export function ThemeSettingsPage() {
                   aria-pressed={active}
                   onClick={() => setGroup(f.id)}
                   className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                    active ? 'border-brand bg-brand text-brand-fg' : 'border-hairline bg-surface text-ink-2 hover:border-hairline-2'
+                    active ? 'border-brand bg-brand text-brand-fg' : 'border-transparent bg-surface text-ink-2'
                   }`}
                 >
                   {f.icon && <f.icon className="h-3 w-3" />}
@@ -533,7 +533,7 @@ export function ThemeSettingsPage() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="mt-3 rounded-md border border-hairline px-3 py-1.5 text-[11.5px] text-ink-2 hover:border-hairline-2 hover:text-ink"
+                className="mt-3 rounded-md border border-transparent px-3 py-1.5 text-[11.5px] text-ink-2 hover:text-ink"
               >
                 {t('themeSettings.clearFilters')}
               </button>

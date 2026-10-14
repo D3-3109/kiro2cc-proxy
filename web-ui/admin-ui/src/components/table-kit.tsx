@@ -4,7 +4,7 @@ import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
 import { Check, ChevronLeft, ChevronRight, Minus } from 'lucide-react'
 
 /** 面板外壳（设计稿 .panel） */
-export const PANEL = 'overflow-hidden rounded-[11px] border border-hairline bg-surface shadow-panel'
+export const PANEL = 'overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel'
 
 /** 面板上方小标题（设计稿 .panel 前的段标题） */
 export const PANEL_TITLE = 'mb-[7px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3'

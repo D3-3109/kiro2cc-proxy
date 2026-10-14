@@ -160,7 +160,7 @@ export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStat
             />
             {/* 设计稿此处为日历按钮；无日期选择器需求支撑，降级为非交互的区间信息 */}
             <span
-              className="inline-flex h-[31px] flex-none items-center gap-[7px] rounded-[7px] border border-hairline-2 bg-surface px-2.5 font-mono text-[11.5px] tabular-nums text-ink-2 shadow-hair"
+              className="inline-flex h-[31px] flex-none items-center gap-[7px] rounded-[7px] border border-transparent bg-surface px-2.5 font-mono text-[11.5px] tabular-nums text-ink-2 shadow-hair"
               title={t('dailyStats.rangeSpanLabel')}
             >
               <CalendarDays className="size-[15px] flex-none text-ink-3" strokeWidth={1.7} aria-hidden="true" />
@@ -276,7 +276,7 @@ export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStat
       </Toolbar>
 
       {/* 设计稿 .panel.is-static：不吃剩余高度、不内滚，行数受区间上限 30 约束 */}
-      <section className="flex-none overflow-hidden rounded-[11px] border border-hairline bg-surface shadow-panel">
+      <section className="flex-none overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel">
         <table className="w-full border-collapse text-[12.5px]">
           <colgroup>
             {COLUMN_WIDTHS.map((w, i) => (

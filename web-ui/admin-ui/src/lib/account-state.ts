@@ -115,31 +115,31 @@ export interface AccountStateVisual {
 export const ACCOUNT_STATE_VISUAL: Record<AccountState, AccountStateVisual> = {
   healthy: {
     labelKey: 'credentials.stateHealthy',
-    tagClass: 'text-ok bg-ok-soft border-ok-line',
+    tagClass: 'text-ok bg-ok-soft border-transparent',
     pipClass: 'bg-ok ring-[2.5px] ring-ok-soft',
     avatarClass: 'bg-ok-soft text-ok',
   },
   warning: {
     labelKey: 'credentials.stateWarning',
-    tagClass: 'text-warn bg-warn-soft border-warn-line',
+    tagClass: 'text-warn bg-warn-soft border-transparent',
     pipClass: 'bg-warn ring-[2.5px] ring-warn-soft',
     avatarClass: 'bg-warn-soft text-warn',
   },
   error: {
     labelKey: 'credentials.stateError',
-    tagClass: 'text-danger bg-danger-soft border-danger-line',
+    tagClass: 'text-danger bg-danger-soft border-transparent',
     pipClass: 'bg-danger ring-[2.5px] ring-danger-soft',
     avatarClass: 'bg-danger-soft text-danger',
   },
   pending: {
     labelKey: 'credentials.statePending',
-    tagClass: 'text-brand bg-brand-soft border-brand-line',
+    tagClass: 'text-brand bg-brand-soft border-transparent',
     pipClass: 'bg-brand ring-[2.5px] ring-brand-soft',
     avatarClass: 'bg-brand-soft text-brand',
   },
   disabled: {
     labelKey: 'credentials.stateDisabled',
-    tagClass: 'text-ink-3 bg-surface-3 border-hairline-2',
+    tagClass: 'text-ink-3 bg-surface-3 border-transparent',
     pipClass: 'bg-ink-3 ring-[2.5px] ring-surface-3',
     avatarClass: 'bg-surface-3 text-ink-3',
   },
@@ -147,7 +147,7 @@ export const ACCOUNT_STATE_VISUAL: Record<AccountState, AccountStateVisual> = {
   // 文案独立以便跨月自动恢复时给出更明确的提示
   quota_exceeded: {
     labelKey: 'credentials.stateQuotaExceeded',
-    tagClass: 'text-danger bg-danger-soft border-danger-line',
+    tagClass: 'text-danger bg-danger-soft border-transparent',
     pipClass: 'bg-danger ring-[2.5px] ring-danger-soft',
     avatarClass: 'bg-danger-soft text-danger',
   },

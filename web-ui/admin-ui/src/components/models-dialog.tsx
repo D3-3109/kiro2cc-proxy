@@ -71,7 +71,7 @@ export function ModelsDialog({ credentialId, open, onOpenChange }: ModelsDialogP
         {data && (
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             {groups.map((group) => (
-              <div key={group.name} className="border border-hairline rounded-md p-3">
+              <div key={group.name} className="border border-transparent rounded-md p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[13px] font-semibold text-ink-1">
                     {familyLabel(group.name)}

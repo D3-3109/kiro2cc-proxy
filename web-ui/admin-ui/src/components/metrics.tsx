@@ -15,7 +15,7 @@ export function MetricsBar({ cols = 4, children }: { cols?: 3 | 4 | 5; children:
   const template = cols === 5 ? BAR_COLS_5 : cols === 3 ? BAR_COLS_3 : BAR_COLS_4
   return (
     <section
-      className="grid shrink-0 overflow-hidden rounded-[16px] border border-hairline bg-surface shadow-hair [&>*:last-child_.metric-divider]:hidden"
+      className="grid shrink-0 overflow-hidden rounded-[16px] border border-transparent bg-surface shadow-hair [&>*:last-child_.metric-divider]:hidden"
       style={{ gridTemplateColumns: template }}
     >
       {children}

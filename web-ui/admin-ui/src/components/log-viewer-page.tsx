@@ -289,10 +289,10 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
               <span
                 className={`${TAG_BASE} ${
                   paused
-                    ? 'border-hairline-2 bg-surface-3 text-ink-2'
+                    ? 'border-transparent bg-surface-3 text-ink-2'
                     : connected
-                      ? 'border-ok-line bg-ok-soft text-ok'
-                      : 'border-warn-line bg-warn-soft text-warn'
+                      ? 'border-transparent bg-ok-soft text-ok'
+                      : 'border-transparent bg-warn-soft text-warn'
                 }`}
               >
                 <span
@@ -444,7 +444,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
                 {repeat > 1 && (
                   <span
                     title={t('logs.repeatTimes', { n: repeat })}
-                    className="flex-none rounded-[4px] border border-hairline-2 bg-surface-3 px-1 text-[9.5px] font-semibold text-ink-3"
+                    className="flex-none rounded-[4px] border border-transparent bg-surface-3 px-1 text-[9.5px] font-semibold text-ink-3"
                   >
                     ×{repeat}
                   </span>

@@ -200,7 +200,7 @@ export function AccountRow({
               <span className="truncate">{displayName}</span>
               <span
                 title={t('credentials.priorityLabel') + credential.priority}
-                className="flex-none rounded-[4px] border border-hairline-2 px-[3px] text-[9.5px] font-semibold tracking-[0.02em] text-ink-3"
+                className="flex-none rounded-[4px] border border-transparent px-[3px] text-[9.5px] font-semibold tracking-[0.02em] text-ink-3"
               >
                 P{credential.priority}
               </span>
@@ -215,7 +215,7 @@ export function AccountRow({
               {credential.hasProxy && credential.proxyUrl && (
                 <span
                   title={t('credentials.proxyLabel', { url: credential.proxyUrl })}
-                  className="flex-none rounded-[4px] border border-brand-line bg-brand-soft px-[3px] text-[9px] font-semibold tracking-[0.04em] text-brand"
+                  className="flex-none rounded-[4px] border border-transparent bg-brand-soft px-[3px] text-[9px] font-semibold tracking-[0.04em] text-brand"
                 >
                   PROXY
                 </span>
@@ -223,7 +223,7 @@ export function AccountRow({
               {credential.hasProfileArn && (
                 <span
                   title={t('credentials.profileArnBadge')}
-                  className="flex-none rounded-[4px] border border-hairline-2 px-[3px] text-[9px] font-semibold tracking-[0.04em] text-ink-3"
+                  className="flex-none rounded-[4px] border border-transparent px-[3px] text-[9px] font-semibold tracking-[0.04em] text-ink-3"
                 >
                   ARN
                 </span>
@@ -245,7 +245,7 @@ export function AccountRow({
       <td className={CELL}>
         {balance?.subscriptionTitle ? (
           <span
-            className={`inline-block whitespace-nowrap rounded-[5px] border border-hairline bg-surface-3 px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.03em] ${getSubscriptionColor(balance.subscriptionTitle)}`}
+            className={`inline-block whitespace-nowrap rounded-[5px] border border-transparent bg-surface-3 px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.03em] ${getSubscriptionColor(balance.subscriptionTitle)}`}
           >
             {balance.subscriptionTitle}
           </span>
