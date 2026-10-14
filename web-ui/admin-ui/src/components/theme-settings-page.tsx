@@ -411,7 +411,7 @@ export function ThemeSettingsPage() {
         }
       />
 
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="space-y-6">
         {/* 外观模式三卡 */}
         <section aria-labelledby="appearance-modes-heading" className="rounded-xl border border-hairline bg-surface p-4">
           <h2 id="appearance-modes-heading" className="text-[13px] font-semibold text-ink">
