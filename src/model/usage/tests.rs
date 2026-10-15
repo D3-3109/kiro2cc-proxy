@@ -41,6 +41,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         );
         tracker.record(
             1,
@@ -50,6 +52,8 @@ mod tests {
             100,
             None,
             Some(1.0),
+            None,
+            None,
             None,
             None,
             None,
@@ -69,6 +73,8 @@ mod tests {
             "claude-sonnet-4.5".to_string(),
             1_000_000,
             0,
+            None,
+            None,
             None,
             None,
             None,
@@ -96,6 +102,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         );
         tracker.record(
             2,
@@ -105,6 +113,8 @@ mod tests {
             10,
             None,
             Some(99.0),
+            None,
+            None,
             None,
             None,
             None,
@@ -130,6 +140,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         );
         let summary = tracker.get_summary(1);
         assert!((summary.total_credits - tracker.get_total_credits(1)).abs() < 1e-9);
@@ -151,6 +163,8 @@ mod tests {
             None,
             None,
             Some("xhigh".to_string()),
+            None,
+            None,
         );
         tracker.record(
             1,
@@ -158,6 +172,8 @@ mod tests {
             "claude-sonnet-4.5".to_string(),
             100,
             10,
+            None,
+            None,
             None,
             None,
             None,
@@ -174,7 +190,52 @@ mod tests {
         );
         // None 兜底：未传 output_config 的旧请求 effort 保持 None
         assert!(page.records.iter().any(|r| r.effort.is_none()));
+        // 新记录透传耗时字段
+        let with_duration = &page.records[0];
+        assert!(with_duration.first_token_ms.is_none());
+        assert!(with_duration.duration_ms.is_none());
         cleanup_usage_path(&path);
+    }
+
+    #[test]
+    fn test_usage_record_duration_serde_compat() {
+        // 新字段序列化：camelCase + None 时省略
+        let record = crate::model::usage::UsageRecord {
+            api_key_id: 1,
+            credential_id: None,
+            model: "claude-opus-4.6".to_string(),
+            input_tokens: 100,
+            output_tokens: 10,
+            estimated_cost: 0.0,
+            credits_used: None,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_creation_5m_input_tokens: 0,
+            cache_creation_1h_input_tokens: 0,
+            created_at: chrono::Utc::now(),
+            client_ip: None,
+            effort: None,
+            first_token_ms: Some(1234),
+            duration_ms: Some(5678),
+        };
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["firstTokenMs"], 1234);
+        assert_eq!(json["durationMs"], 5678);
+
+        // 旧数据（无新字段）反序列化兼容
+        let old_json = serde_json::json!({
+            "apiKeyId": 1,
+            "model": "claude-opus-4.6",
+            "inputTokens": 100,
+            "outputTokens": 10,
+            "estimatedCost": 0.0,
+            "cacheCreation5mInputTokens": 0,
+            "cacheCreation1hInputTokens": 0,
+            "createdAt": "2026-01-01T00:00:00Z"
+        });
+        let parsed: crate::model::usage::UsageRecord = serde_json::from_value(old_json).unwrap();
+        assert_eq!(parsed.first_token_ms, None);
+        assert_eq!(parsed.duration_ms, None);
     }
 
     #[test]
@@ -268,6 +329,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             );
         }
         let summary = tracker.get_summary(9);
@@ -288,6 +351,8 @@ mod tests {
                 "claude-opus-4.6".to_string(),
                 10,
                 10,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -314,6 +379,8 @@ mod tests {
                     "claude-opus-4.6".to_string(),
                     10,
                     10,
+                    None,
+                    None,
                     None,
                     None,
                     None,
@@ -374,6 +441,8 @@ mod tests {
             Some(800),
             Some(100),
             None,
+            None,
+            None,
         );
         tracker.record(
             1,
@@ -381,6 +450,8 @@ mod tests {
             "claude-opus-4.6".to_string(),
             500,
             50,
+            None,
+            None,
             None,
             None,
             None,
@@ -402,6 +473,8 @@ mod tests {
             "claude-opus-4.6".to_string(),
             200,
             20,
+            None,
+            None,
             None,
             None,
             None,

@@ -210,6 +210,8 @@ pub(crate) async fn handle_non_stream_request(
     // 与账号开关在下方合成最终裁决，供 effort 入库口径与流式路径保持一致
     thinking_client_enabled: bool,
 ) -> Response {
+    // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
+    let request_started_at = std::time::Instant::now();
     // 调用 Kiro API（支持多账号故障转移）
     let (response, credential_id) = match provider
         .call_api(
@@ -652,6 +654,8 @@ pub(crate) async fn handle_non_stream_request(
             Some(report_cache_read),
             Some(report_cache_creation),
             effort.clone(),
+            None,
+            Some(request_started_at.elapsed().as_millis() as u64),
         );
     }
 

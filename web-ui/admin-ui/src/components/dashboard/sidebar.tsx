@@ -130,13 +130,8 @@ export function Sidebar({
                       onClick={onClick}
                       aria-label={fullLabel}
                       aria-current={active ? 'true' : undefined}
-                      className={`relative mb-0.5 flex h-[33px] w-full items-center rounded-[7px] text-[12.5px] transition-colors ${sidebarContentCollapsed ? 'justify-center' : 'gap-[9px] px-2.5'} ${active ? 'bg-brand-soft font-semibold text-brand' : 'font-[450] text-ink-2 hover:bg-surface-3 hover:text-ink'}`}
+                      className={`mb-0.5 flex h-[33px] w-full items-center rounded-[7px] text-[12.5px] transition-colors ${sidebarContentCollapsed ? 'justify-center' : 'gap-[9px] px-2.5'} ${active ? 'bg-brand-soft font-semibold text-brand' : 'font-[450] text-ink-2 hover:bg-surface-3 hover:text-ink'}`}
                     >
-                      {active && (
-                        /* -left-2 与 <nav> 的 px-2 数值耦合：竖条要贴在侧栏左边缘（padding-box x=0），
-                           两处必须同步；展开态与 64px 收起态共用此几何，对齐设计稿 .nav-item::before{left:-8px} */
-                        <span className="absolute -left-2 top-2 bottom-2 w-[2.5px] rounded-r-[3px] bg-brand" aria-hidden="true" />
-                      )}
                       <Icon className="w-4 h-4 shrink-0" />
                       {!sidebarContentCollapsed && (
                         <>

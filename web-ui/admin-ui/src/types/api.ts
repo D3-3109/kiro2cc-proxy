@@ -251,6 +251,8 @@ export interface UsageRecord {
   credentialLabel?: string
   clientIp?: string
   effort?: string
+  firstTokenMs?: number
+  durationMs?: number
 }
 
 // 分页原始记录响应

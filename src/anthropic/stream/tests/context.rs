@@ -126,4 +126,59 @@ mod tests {
         assert_eq!(context_window_for_model("claude-opus-4-8"), 1_000_000);
         assert_eq!(context_window_for_model("claude-sonnet-4-6"), 1_000_000);
     }
+
+    #[test]
+    fn test_first_token_marked_on_business_event() {
+        // 首个上游业务事件（AssistantResponse）应记录首字时刻，first_token_ms 有值
+        // 埋点在 stream.rs 层按事件变体过滤后调用（AssistantResponse/ReasoningContent/ToolUse）
+        let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
+            .with_request_started_at(std::time::Instant::now());
+        let inner = serde_json::from_str::<crate::kiro::model::events::AssistantResponseEvent>(
+            r#"{"content":"hi"}"#,
+        )
+        .unwrap();
+        let event = crate::kiro::model::events::Event::AssistantResponse(inner);
+        ctx.mark_first_token(); // 模拟 stream.rs 在业务事件分发处的埋点调用
+        ctx.process_kiro_event(&event);
+        assert!(ctx.first_token_at.is_some(), "业务事件应计首字");
+    }
+
+    #[test]
+    fn test_first_token_not_marked_by_non_business_events() {
+        // meteringEvent 属元信息事件，不计首字（stream.rs 埋点按变体过滤，Metering 不会触发 mark）
+        // keepalive 在 SSE 层合成，同样不经过埋点
+        let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
+            .with_request_started_at(std::time::Instant::now());
+        let event = crate::kiro::model::events::Event::Metering(
+            crate::kiro::model::events::MeteringEvent {
+                usage: 0.5,
+                unit_plural: "credits".to_string(),
+                unit: String::new(),
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+            },
+        );
+        ctx.process_kiro_event(&event);
+        assert!(ctx.first_token_at.is_none(), "元信息事件不应计首字");
+    }
+
+    #[test]
+    fn test_first_token_mark_is_idempotent() {
+        // 多次 mark 仅首次生效
+        let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
+            .with_request_started_at(std::time::Instant::now());
+        ctx.mark_first_token();
+        let first = ctx.first_token_at;
+        ctx.mark_first_token();
+        assert_eq!(ctx.first_token_at, first);
+    }
+
+    #[test]
+    fn test_record_timing_none_without_started_at() {
+        // 未注入起点（旧调用路径）时首字/耗时均为 None
+        let mut ctx = StreamContext::new_with_thinking("test-model", 10, false);
+        assert!(ctx.request_started_at.is_none());
+        ctx.mark_first_token();
+        assert!(ctx.first_token_at.is_some());
+    }
 }

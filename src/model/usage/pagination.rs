@@ -80,6 +80,8 @@ impl UsageTracker {
                     credential_label,
                     client_ip: r.client_ip,
                     effort: r.effort,
+                    first_token_ms: r.first_token_ms,
+                    duration_ms: r.duration_ms,
                 }
             })
             .collect();
@@ -139,6 +141,12 @@ pub struct UsageRecordItem {
     /// 请求的 effort 级别（None 表示旧数据或客户端未传 output_config）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// 首 token 延迟（毫秒，None 表示旧数据或非流式请求）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
+    /// 服务端处理总耗时（毫秒，None 表示旧数据）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 impl UsageTracker {
@@ -212,6 +220,8 @@ impl UsageTracker {
                     credential_label,
                     client_ip: r.client_ip,
                     effort: r.effort,
+                    first_token_ms: r.first_token_ms,
+                    duration_ms: r.duration_ms,
                 }
             })
             .collect();

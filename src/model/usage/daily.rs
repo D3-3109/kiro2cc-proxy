@@ -220,6 +220,8 @@ impl UsageTracker {
                     credential_label,
                     client_ip: r.client_ip,
                     effort: r.effort,
+                    first_token_ms: r.first_token_ms,
+                    duration_ms: r.duration_ms,
                 }
             })
             .collect();

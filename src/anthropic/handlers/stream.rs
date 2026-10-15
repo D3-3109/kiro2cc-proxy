@@ -51,6 +51,10 @@ pub(crate) async fn handle_stream_request(
     // 选中账号后的最终 thinking 状态
     thinking_as_text_allowed: Option<crate::anthropic::stream::ThinkingTextStyle>,
 ) -> Response {
+    // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
+    // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
+    let request_started_at = std::time::Instant::now();
+
     // 调用 Kiro API（支持多账号故障转移）
     let (response, credential_id) = match provider
         .call_api_stream(
@@ -92,6 +96,8 @@ pub(crate) async fn handle_stream_request(
         .with_prompt_cache_usage(prompt_cache_usage)
         .with_prefix_estimated_tokens(prefix_estimated_tokens)
         .with_effort(effort)
+        // 计时起点在 call_api_stream 之前注入（见函数开头注释）
+        .with_request_started_at(request_started_at)
         .with_thinking_as_text(thinking_as_text);
 
     // 生成初始事件
@@ -356,6 +362,18 @@ fn create_sse_stream(
                                             let (consumed, mut bridge_events) =
                                                 bridge_handle_event(&mut ctx, &mut bridge, &event);
                                             if !consumed {
+                                                // 首字埋点：仅未截获的业务内容事件计首字，
+                                                // 桥接消费的事件客户端不可见，不计；
+                                                // Metering/ContextUsage 等元信息帧与错误帧不计，
+                                                // keepalive 是 SSE 层合成事件，同样不走此处
+                                                if matches!(
+                                                    event,
+                                                    Event::AssistantResponse(_)
+                                                        | Event::ReasoningContent(_)
+                                                        | Event::ToolUse(_)
+                                                ) {
+                                                    ctx.mark_first_token();
+                                                }
                                                 let sse_events = ctx.process_kiro_event(&event);
                                                 bridge_events.extend(sse_events);
                                             }

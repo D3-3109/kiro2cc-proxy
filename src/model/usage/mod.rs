@@ -55,6 +55,12 @@ pub struct UsageRecord {
     /// 请求的 effort 级别（low/medium/high/xhigh/max；None 表示旧数据或客户端未传 output_config）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// 首 token 延迟（请求开始到首个上游业务数据事件，毫秒；None 表示旧数据或非流式请求）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
+    /// 服务端处理总耗时（请求开始到落库前，毫秒；None 表示旧数据）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 /// 单个 API Key 的用量汇总
@@ -337,6 +343,8 @@ impl UsageTracker {
         cache_read_input_tokens: Option<i32>,
         cache_creation_input_tokens: Option<i32>,
         effort: Option<String>,
+        first_token_ms: Option<u64>,
+        duration_ms: Option<u64>,
     ) {
         let cost = calculate_cost(&model, input_tokens, output_tokens);
         let record = UsageRecord {
@@ -354,6 +362,8 @@ impl UsageTracker {
             created_at: Utc::now(),
             client_ip,
             effort,
+            first_token_ms,
+            duration_ms,
         };
         {
             let mut records = self.records.write();

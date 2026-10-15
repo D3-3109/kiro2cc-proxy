@@ -1,6 +1,7 @@
 //! StreamContext 主结构：聚合单次流式请求的全部状态（事件缓冲、块状态、usage 统计），是 SSE 状态机的上下文载体。
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::json;
 use uuid::Uuid;
@@ -92,6 +93,10 @@ pub struct StreamContext {
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
     /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
     echo_guard: super::echo_guard::ResponseEchoGuard,
+    /// 请求计时起点（进入 handler 时注入；None = 未注入，落库时不计耗时）
+    pub(crate) request_started_at: Option<Instant>,
+    /// 首个上游业务事件时刻（keepalive 不计；None = 尚未收到或未注入起点）
+    pub(crate) first_token_at: Option<Instant>,
 }
 
 impl StreamContext {
@@ -135,6 +140,21 @@ impl StreamContext {
             prefix_estimated_tokens: None,
             effort: None,
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
+            request_started_at: None,
+            first_token_at: None,
+        }
+    }
+
+    /// 注入请求计时起点（进入 handler 时调用；首个上游业务事件时计算首字延迟）
+    pub fn with_request_started_at(mut self, started_at: Instant) -> Self {
+        self.request_started_at = Some(started_at);
+        self
+    }
+
+    /// 标记首个上游业务数据事件到达时刻（幂等：仅首次调用生效；keepalive 不经过此路径）
+    pub fn mark_first_token(&mut self) {
+        if self.first_token_at.is_none() {
+            self.first_token_at = Some(Instant::now());
         }
     }
 
@@ -895,6 +915,16 @@ impl StreamContext {
                 key_id,
                 self.credential_id
             );
+            // 计时口径：first_token_ms = 起点 → 首个上游业务事件（keepalive 不计）；
+            // duration_ms = 起点 → 落库前。起点未注入（None）时二者均不计（等价旧数据）
+            let (first_token_ms, duration_ms) = match self.request_started_at {
+                Some(started) => (
+                    self.first_token_at
+                        .map(|t| (t - started).as_millis() as u64),
+                    Some((Instant::now() - started).as_millis() as u64),
+                ),
+                None => (None, None),
+            };
             tracker.record(
                 key_id,
                 self.credential_id,
@@ -906,6 +936,8 @@ impl StreamContext {
                 report_cache_read,
                 report_cache_creation,
                 self.effort.clone(),
+                first_token_ms,
+                duration_ms,
             );
         }
         // 流式 SSE 路径暂未接入 fingerprint，cache_creation 不区分 5m/1h tier，
