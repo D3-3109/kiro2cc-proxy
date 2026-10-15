@@ -156,7 +156,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
                 value={authMethod}
                 onChange={(e) => setAuthMethod(e.target.value as AuthMethod)}
                 disabled={isPending}
-                className="h-[31px] w-full rounded-[7px] border border-hairline-2 bg-surface-2 px-2.5 text-[12px] text-ink outline-none transition-colors focus:border-brand disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-[31px] w-full rounded-[7px] border-[0.5px] border-hairline-2 bg-surface-2 px-2.5 text-[12px] text-ink outline-none transition-colors focus:border-brand disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="social">Social</option>
                 <option value="idc">IdC/Builder-ID/IAM</option>
@@ -174,7 +174,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
                   value={loginSource}
                   onChange={(e) => setLoginSource(e.target.value)}
                   disabled={isPending}
-                  className="h-[31px] w-full rounded-[7px] border border-hairline-2 bg-surface-2 px-2.5 text-[12px] text-ink outline-none transition-colors focus:border-brand disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-[31px] w-full rounded-[7px] border-[0.5px] border-hairline-2 bg-surface-2 px-2.5 text-[12px] text-ink outline-none transition-colors focus:border-brand disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">{t('credentials.loginSourceUnspecified')}</option>
                   <option value="Google">Google</option>

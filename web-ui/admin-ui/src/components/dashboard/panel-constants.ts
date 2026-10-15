@@ -27,7 +27,7 @@ export const ACTION_BTN_DANGER = `${ACTION_BTN_BASE} border-transparent bg-surfa
 /** 主按钮（设计稿 .btn-primary） */
 export const ACTION_BTN_PRIMARY = `${ACTION_BTN_BASE} border-transparent bg-brand font-semibold text-brand-fg [&_svg]:text-brand-fg [&_svg]:opacity-90 hover:bg-brand-hover`
 /** 竖分隔线（设计稿 .actionbar .vdiv） */
-export const ACTION_VDIV = 'mx-0.5 h-[19px] w-px shrink-0 bg-hairline-2'
+export const ACTION_VDIV = 'mx-0.5 h-[19px] w-[0.5px] shrink-0 bg-hairline-2'
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebar-collapsed'
 /** 账号表排序持久化：列 key（account/remaining），缺省即默认排序 */

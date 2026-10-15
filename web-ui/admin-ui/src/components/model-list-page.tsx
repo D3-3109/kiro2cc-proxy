@@ -49,7 +49,7 @@ const BADGE_NEW =
   'text-[9.5px] font-bold leading-none tracking-[.06em] text-[color:var(--badge-new-fg)] ' +
   'bg-[linear-gradient(135deg,var(--badge-new-from)_0%,var(--badge-new-to)_100%)] ' +
   // ring-inset 而非 border：border 会撑大盒模型，h-4 下多 2px 破坏胶囊几何
-  'ring-1 ring-inset ring-[color:var(--badge-new-line)] ' +
+  'ring-[0.5px] ring-inset ring-[color:var(--badge-new-line)] ' +
   // 「shadow:」类型提示必需：裸 var() 会被 Tailwind boxShadowColor 插件（type 含 any）抢走，
   // 编译成 --tw-shadow-color + --tw-shadow:var(--tw-shadow-colored)，而后者默认 0 0 #0000 → 阴影全丢
   'shadow-[shadow:var(--badge-new-shadow)]'
@@ -352,7 +352,7 @@ export function ModelListPage() {
                   <Fragment key={group.name}>
                     {/* 设计稿 .grp 分组行：家族名 + 数量 + 该组倍率区间 */}
                     <tr className="bg-surface-2">
-                      <td colSpan={5} className="border-b border-hairline px-3 py-[7px]">
+                      <td colSpan={5} className="border-b-[0.5px] border-hairline px-3 py-[7px]">
                         <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-ink-2">
                           <Boxes className="size-[13px] flex-none text-ink-3" strokeWidth={1.7} aria-hidden="true" />
                           {familyLabel(group.name)}
@@ -361,7 +361,7 @@ export function ModelListPage() {
                           </span>
                         </span>
                       </td>
-                      <td colSpan={2} className="border-b border-hairline px-3 py-[7px] text-right">
+                      <td colSpan={2} className="border-b-[0.5px] border-hairline px-3 py-[7px] text-right">
                         <span className="whitespace-nowrap font-mono text-[10.5px] tabular-nums text-ink-3">
                           {formatRateRange(rateRange(group.models))}
                         </span>

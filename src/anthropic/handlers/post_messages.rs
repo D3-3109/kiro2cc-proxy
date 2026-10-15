@@ -397,8 +397,10 @@ fn dump_kiro_request_body(request_body: &str) {
         use std::os::unix::fs::OpenOptionsExt;
         open.mode(0o600);
     }
+    // 命名与边界对齐：共 MAX_FILENAME_ATTEMPTS 次尝试（含首次），COLLISION_RETRIES 为重试上限
+    const MAX_FILENAME_ATTEMPTS: usize = COLLISION_RETRIES + 1;
     let mut path = dir.join(format!("body-{ts}.json"));
-    for attempt in 0..=COLLISION_RETRIES {
+    for attempt in 0..MAX_FILENAME_ATTEMPTS {
         path = dir.join(if attempt == 0 {
             format!("body-{ts}.json")
         } else {
@@ -431,14 +433,11 @@ mod dump_switch_tests {
     use super::*;
 
     #[test]
-    fn test_kiro_body_dump_default_false() {
-        // 全局开关默认必须为 false（默认不落盘请求体）
+    fn test_kiro_body_dump_switch() {
+        // 单测试内完成置位/断言/还原：cargo test 默认多线程并行，
+        // 拆成两个测试会竞争进程级全局 AtomicBool，存在 flaky 风险
         set_kiro_body_dump_enabled(false);
         assert!(!kiro_body_dump_enabled());
-    }
-
-    #[test]
-    fn test_kiro_body_dump_set_true() {
         set_kiro_body_dump_enabled(true);
         assert!(kiro_body_dump_enabled());
         // 还原默认，避免影响其他测试

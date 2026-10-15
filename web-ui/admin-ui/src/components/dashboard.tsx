@@ -166,7 +166,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
     ? ((todayCredits - yesterdayStats.totalCredits) / yesterdayStats.totalCredits) * 100
     : null
   // 今日缓存命中率：口径 = cacheRead / input（后端 input 已含 cache 命中部分）；无记录或 input 为 0 时不展示
-  const todayCacheRatePercent = dailyUsageData && todayStats && todayStats.totalInputTokens > 0
+  const todayCacheRatePercent = dailyUsageData && todayStats
+    && Number.isFinite(todayStats.totalInputTokens) && todayStats.totalInputTokens > 0
+    && Number.isFinite(todayStats.totalCacheReadTokens)
     ? (todayStats.totalCacheReadTokens / todayStats.totalInputTokens) * 100
     : null
   const creditsTrend = recent7.map(d => d.totalCredits)

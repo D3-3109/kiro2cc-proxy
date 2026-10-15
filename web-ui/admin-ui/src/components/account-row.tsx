@@ -382,7 +382,7 @@ export function AccountRow({
             <Power className="size-[13px]" strokeWidth={1.7} />
             {credential.disabled ? t('credentials.stateActionEnable') : t('credentials.stateActionDisable')}
           </button>
-          <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
+          <span aria-hidden="true" className="mx-[5px] h-4 w-[0.5px] flex-none bg-hairline" />
           {/* 账号级 thinking adaptive 注入：点击直接切换，图标与颜色显示当前状态 */}
           <button
             type="button"

@@ -11,14 +11,14 @@ export const PANEL_TITLE = 'mb-[7px] text-[10.5px] font-semibold uppercase track
 
 /** 面板脚（设计稿 .panel-foot） */
 export const PANEL_FOOT =
-  'flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-hairline bg-surface-2 px-[13px] py-[9px] text-[11.5px] text-ink-3'
+  'flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t-[0.5px] border-hairline bg-surface-2 px-[13px] py-[9px] text-[11.5px] text-ink-3'
 
 /** 设计稿 thead th：10.5px 大写字距 .07em + surface-2 底 + sticky */
 export const TH_BASE =
-  'sticky top-0 z-[2] whitespace-nowrap border-b border-hairline bg-surface-2 px-3 py-[9px] text-left text-[10.5px] font-semibold uppercase tracking-[0.07em] text-ink-3'
+  'sticky top-0 z-[2] whitespace-nowrap border-b-[0.5px] border-hairline bg-surface-2 px-3 py-[9px] text-left text-[10.5px] font-semibold uppercase tracking-[0.07em] text-ink-3'
 
 /** 单元格基线（设计稿 tbody td）：11px/12px 内边距 + 分隔线 + 垂直居中 */
-export const CELL = 'border-b border-hairline px-3 py-[11px] align-middle'
+export const CELL = 'border-b-[0.5px] border-hairline px-3 py-[11px] align-middle'
 
 /** 26px 图标钮（设计稿 .iconbtn） */
 export const ICON_BTN =

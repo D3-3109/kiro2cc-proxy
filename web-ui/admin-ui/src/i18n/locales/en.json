@@ -719,6 +719,7 @@
     "title": "Settings",
     "headNote": "Most settings take effect immediately on save; listen port and proxy URL require a service restart",
     "capService": "Service",
+    "capDebug": "Debug",
     "capSecurity": "Auth & Security",
     "capUi": "Interface",
     "capAbout": "About",

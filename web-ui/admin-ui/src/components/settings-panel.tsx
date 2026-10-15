@@ -2,7 +2,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
-import { History, Info, Monitor, Pencil, Palette, Server, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { Bug, History, Info, Monitor, Pencil, Palette, Server, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageHead } from '@/components/page-head'
@@ -24,7 +24,7 @@ const SET_CAP =
 /** 分区卡片（设计稿 .set-card） */
 const SET_CARD = 'overflow-hidden rounded-lg border border-transparent bg-surface shadow-hair'
 /** 配置行（设计稿 .set-row） */
-const SET_ROW = 'flex items-center gap-4 border-b border-hairline px-4 py-[13px] last:border-b-0'
+const SET_ROW = 'flex items-center gap-4 border-b-[0.5px] border-hairline px-4 py-[13px] last:border-b-0'
 /** 行键名（设计稿 .set-k） */
 const SET_K = 'flex items-center gap-[7px] text-[12.5px] font-semibold'
 /** 行说明（设计稿 .set-d） */
@@ -378,19 +378,6 @@ export function SettingsPanel({
               }
             />
           </Row>
-          <Row label={t('settings.dumpKiroBody')} desc={dumpKiroBodyError ? t('common.loadFailed') : t('settings.dumpKiroBodyDesc')}>
-            <Sw
-              label={t('settings.dumpKiroBody')}
-              on={!!dumpKiroBodyData?.enabled}
-              disabled={dumpKiroBodyError || isLoadingDumpKiroBody || isSettingDumpKiroBody}
-              onToggle={() =>
-                setDumpKiroBody(!dumpKiroBodyData?.enabled, {
-                  onSuccess: (d) => toast.success(d.message),
-                  onError: (e) => toast.error(extractErrorMessage(e)),
-                })
-              }
-            />
-          </Row>
           <Row label={t('settings.maxRpmPerCredential')} desc={t('settings.maxRpmPerCredentialDesc')}>
             {editingRuntime === 'maxRpm' ? (
               runtimeEditor(
@@ -537,6 +524,22 @@ export function SettingsPanel({
               <Palette aria-hidden="true" />
               {t('dashboard.navTheme')}
             </Button>
+          </Row>
+        </Section>
+
+        <Section icon={Bug} title={t('settings.capDebug')}>
+          <Row label={t('settings.dumpKiroBody')} desc={dumpKiroBodyError ? t('common.loadFailed') : t('settings.dumpKiroBodyDesc')}>
+            <Sw
+              label={t('settings.dumpKiroBody')}
+              on={!!dumpKiroBodyData?.enabled}
+              disabled={dumpKiroBodyError || isLoadingDumpKiroBody || isSettingDumpKiroBody}
+              onToggle={() =>
+                setDumpKiroBody(!dumpKiroBodyData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
+            />
           </Row>
         </Section>
 

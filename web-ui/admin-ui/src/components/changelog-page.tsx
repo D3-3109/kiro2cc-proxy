@@ -276,7 +276,7 @@ export function ChangelogPage({ onBack }: ChangelogPageProps) {
                         const kind = kindOf(group)
                         const Icon = SECTION_ICON[kind]
                         return (
-                          <div key={groupIdx} className="border-b border-hairline px-[14px] py-[11px] last:border-b-0">
+                          <div key={groupIdx} className="border-b-[0.5px] border-hairline px-[14px] py-[11px] last:border-b-0">
                             <div
                               className={`mb-[7px] flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.07em] ${SECTION_STYLE[kind]}`}
                             >

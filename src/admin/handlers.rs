@@ -356,12 +356,14 @@ pub async fn set_dump_kiro_body(
         && let Err(e) = persist_dump_kiro_body(config_path, payload.enabled)
     {
         tracing::error!("持久化 Kiro 请求体落盘开关失败: {}", e);
-        let error = super::types::AdminErrorResponse::internal_error("持久化失败，但运行时已生效");
-        return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!(error)),
-        )
-            .into_response();
+        // 显式区分运行时生效与持久化结果，避免客户端仅凭 500 误判开关未生效
+        let error = serde_json::json!({
+            "success": false,
+            "message": "持久化失败，但运行时已生效",
+            "runtimeEnabled": payload.enabled,
+            "persisted": false,
+        });
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response();
     }
 
     Json(SuccessResponse::new(if payload.enabled {

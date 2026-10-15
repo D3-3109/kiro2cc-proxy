@@ -411,7 +411,9 @@ impl Config {
         {
             self.dump_kiro_body = b;
         }
-        if let Ok(v) = env::var("LOG_FILE") {
+        if let Ok(v) = env::var("LOG_FILE")
+            && !v.trim().is_empty()
+        {
             self.log_file = Some(v);
         }
         if let Ok(v) = env::var("THINKING_AS_TEXT")

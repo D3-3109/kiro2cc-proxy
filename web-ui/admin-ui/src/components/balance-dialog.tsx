@@ -136,7 +136,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-transparent bg-surface">
         {/* 阶梯一：顶栏资产标识与全局状态 */}
-        <DialogHeader className="flex flex-col gap-1 border-b border-hairline px-[22px] pt-5 pb-4 text-left">
+        <DialogHeader className="flex flex-col gap-1 border-b-[0.5px] border-hairline px-[22px] pt-5 pb-4 text-left">
           {/* pr-6 为右上角关闭按钮让位，避免标题与其重叠 */}
           <div className="flex flex-wrap items-center gap-2 pr-6">
             <DialogTitle className="text-[17px] font-semibold tracking-tight text-ink">
@@ -228,7 +228,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
               </div>
 
               {/* 重置周期：虚线分隔行，标签与时间紧挨并整体左对齐 */}
-              <div className="flex items-center gap-1 border-t border-dashed border-hairline pt-2.5 text-[11px] text-ink-3">
+              <div className="flex items-center gap-1 border-t-[0.5px] border-dashed border-hairline pt-2.5 text-[11px] text-ink-3">
                 <span className="flex items-center gap-1">
                   <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -361,7 +361,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
               </div>
 
               {/* 关键调用指标矩阵 */}
-              <div className="grid grid-cols-3 divide-x divide-hairline rounded-lg border border-transparent bg-surface p-2 px-2.5 text-center">
+              <div className="grid grid-cols-3 divide-x-[0.5px] divide-hairline rounded-lg border border-transparent bg-surface p-2 px-2.5 text-center">
                 <div>
                   <div className="text-[10px] text-ink-3">{t('credentials.successCountLabel')}</div>
                   <div className="font-mono text-[13px] font-semibold text-ok">{credential.successCount}</div>

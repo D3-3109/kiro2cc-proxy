@@ -719,6 +719,7 @@
     "title": "设置",
     "headNote": "多数配置项保存后即时生效；监听端口与代理地址需重启服务后生效",
     "capService": "服务",
+    "capDebug": "调试",
     "capSecurity": "认证与安全",
     "capUi": "界面",
     "capAbout": "关于",
