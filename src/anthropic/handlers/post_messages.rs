@@ -179,9 +179,12 @@ pub async fn post_messages(
 
     // 请求体可能包含 API Key 与敏感上下文，禁止整包入日志（cr-result C3）
 
-    // 临时取证：KIRO_DUMP_BODY=1 时把最终发往 Kiro 的 body 写入独立文件（定位后删除）
-    if std::env::var_os("KIRO_DUMP_BODY").is_some_and(|v| v == "1") {
-        dump_kiro_request_body(&request_body);
+    // 临时取证：dump_kiro_body 配置或 KIRO_DUMP_BODY=1 时把最终发往 Kiro 的 body 写入独立文件（定位后关闭）。
+    // dump 涉及目录扫描/排序/删除等同步磁盘 IO，整体挪入 spawn_blocking，不阻塞请求关键路径；
+    // 仅在本函数调用一次（provider 层故障转移重试不会重复触发），重试不会产生重复文件
+    if kiro_body_dump_enabled() || std::env::var_os("KIRO_DUMP_BODY").is_some_and(|v| v == "1") {
+        let request_body_owned = request_body.to_string();
+        tokio::task::spawn_blocking(move || dump_kiro_request_body(&request_body_owned));
     }
 
     // 构造 fingerprint profile（在消耗 payload 前 clone system/messages）
@@ -327,41 +330,119 @@ pub async fn post_messages(
     }
 }
 
-// 临时取证：把最终发往 Kiro 的完整请求体落盘，仅 KIRO_DUMP_BODY=1 时启用。
-// 文件落在 app/config/kiro-body-dump/（gitignore 目录），权限 0600，定位后删除。
+// 临时取证：把最终发往 Kiro 的完整请求体落盘，dump_kiro_body 配置或 KIRO_DUMP_BODY=1 时启用。
+// 文件落在 app/config/kiro-body-dump/（gitignore 目录），权限 0600，定位后关闭。
+
+/// Kiro 请求体落盘取证开关（config `dumpKiroBody`，默认 false）。
+///
+/// 用 AtomicBool 全局量承载（同 client_token_passthrough 模式）：
+/// 判定点在无 &self 的自由函数里，main.rs 启动时按 config 初始化；
+/// 环境变量 `KIRO_DUMP_BODY=1` 仍兼容生效（OR 语义）。
+static KIRO_BODY_DUMP_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 设置 Kiro 请求体落盘开关（main.rs 启动时按 config 调用）。
+pub fn set_kiro_body_dump_enabled(enabled: bool) {
+    KIRO_BODY_DUMP_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 读取 Kiro 请求体落盘开关当前值。
+pub fn kiro_body_dump_enabled() -> bool {
+    KIRO_BODY_DUMP_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn dump_kiro_request_body(request_body: &str) {
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const MAX_DUMP_FILES: usize = 200;
+    const COLLISION_RETRIES: usize = 5;
 
     let dir = std::path::Path::new("app/config/kiro-body-dump");
     if std::fs::create_dir_all(dir).is_err() {
         tracing::warn!("[BODY-DUMP] 创建 dump 目录失败");
         return;
     }
+    // 按文件名排序（毫秒时间戳命名天然按时间有序），保留最近 MAX_DUMP_FILES 个，
+    // 防止长时间开启落盘取证后磁盘无限增长
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    if entries.len() >= MAX_DUMP_FILES {
+        entries.sort();
+        let excess = entries.len() - MAX_DUMP_FILES + 1;
+        for stale in &entries[..excess] {
+            if let Err(e) = std::fs::remove_file(stale) {
+                tracing::warn!(
+                    "[BODY-DUMP] 清理旧 dump 文件失败 {}: {}",
+                    stale.display(),
+                    e
+                );
+            }
+        }
+    }
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
-    let path = dir.join(format!("body-{ts}.json"));
-    // 0600 权限仅 Unix 有意义；Windows 依赖目录 ACL（用户目录默认私有）
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create_new(true);
     #[cfg(unix)]
-    let open = {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut o = std::fs::OpenOptions::new();
-        o.write(true).create_new(true).mode(0o600);
-        o
-    };
-    #[cfg(not(unix))]
-    let open = {
-        let mut o = std::fs::OpenOptions::new();
-        o.write(true).create_new(true);
-        o
-    };
-    match open
-        .open(&path)
-        .and_then(|mut f| f.write_all(request_body.as_bytes()))
     {
-        Ok(()) => tracing::info!("[BODY-DUMP] 已写入 {}", path.display()),
-        Err(e) => tracing::warn!("[BODY-DUMP] 写入失败: {}", e),
+        use std::os::unix::fs::OpenOptionsExt;
+        open.mode(0o600);
+    }
+    let mut path = dir.join(format!("body-{ts}.json"));
+    for attempt in 0..=COLLISION_RETRIES {
+        path = dir.join(if attempt == 0 {
+            format!("body-{ts}.json")
+        } else {
+            format!("body-{ts}-{attempt}.json")
+        });
+        let result = open
+            .open(&path)
+            .and_then(|mut f| f.write_all(request_body.as_bytes()));
+        match result {
+            Ok(()) => {
+                tracing::info!("[BODY-DUMP] 已写入 {}", path.display());
+                return;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                tracing::warn!("[BODY-DUMP] 写入失败: {}", e);
+                return;
+            }
+        }
+    }
+    tracing::warn!(
+        "[BODY-DUMP] 写入失败: 文件名冲突重试 {} 次仍失败（{}）",
+        COLLISION_RETRIES,
+        path.display()
+    );
+}
+
+#[cfg(test)]
+mod dump_switch_tests {
+    use super::*;
+
+    #[test]
+    fn test_kiro_body_dump_default_false() {
+        // 全局开关默认必须为 false（默认不落盘请求体）
+        set_kiro_body_dump_enabled(false);
+        assert!(!kiro_body_dump_enabled());
+    }
+
+    #[test]
+    fn test_kiro_body_dump_set_true() {
+        set_kiro_body_dump_enabled(true);
+        assert!(kiro_body_dump_enabled());
+        // 还原默认，避免影响其他测试
+        set_kiro_body_dump_enabled(false);
+        assert!(!kiro_body_dump_enabled());
     }
 }

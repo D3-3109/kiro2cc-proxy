@@ -165,6 +165,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const creditsDeltaPercent = todayCredits !== null && yesterdayStats && yesterdayStats.totalCredits >= CREDITS_DELTA_MIN_BASE
     ? ((todayCredits - yesterdayStats.totalCredits) / yesterdayStats.totalCredits) * 100
     : null
+  // 今日缓存命中率：口径 = cacheRead / input（后端 input 已含 cache 命中部分）；无记录或 input 为 0 时不展示
+  const todayCacheRatePercent = dailyUsageData && todayStats && todayStats.totalInputTokens > 0
+    ? (todayStats.totalCacheReadTokens / todayStats.totalInputTokens) * 100
+    : null
   const creditsTrend = recent7.map(d => d.totalCredits)
   // 后端无按天失败数，只能给账号池累计值
   const cumulativeFailures = allCredentials.reduce((sum, c) => sum + c.failureCount, 0)
@@ -756,6 +760,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           requestTrend={requestTrend}
           todayCredits={todayCredits}
           todayCreditsSaved={todayCreditsSaved}
+          todayCacheRatePercent={todayCacheRatePercent}
           creditsDeltaPercent={creditsDeltaPercent}
           creditsTrend={creditsTrend}
           cumulativeFailures={cumulativeFailures}

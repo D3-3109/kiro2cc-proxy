@@ -11,6 +11,7 @@ import {
   useSuggestionMode, useSetSuggestionMode,
   useClientTokenPassthrough, useSetClientTokenPassthrough,
   useThinkingAsText, useSetThinkingAsText,
+  useDumpKiroBody, useSetDumpKiroBody,
   useRuntimeConfig, useSetRuntimeConfig,
   useAuthKeys, useSetAuthKeys,
 } from '@/hooks/use-credentials'
@@ -176,12 +177,14 @@ export function SettingsPanel({
   const { t, i18n } = useTranslation()
   const { data: loadBalancingData, isLoading: isLoadingMode } = useLoadBalancingMode()
   const { mutate: setLoadBalancingMode, isPending: isSettingMode } = useSetLoadBalancingMode()
-  const { data: suggestionModeData, isLoading: isLoadingSuggestionMode } = useSuggestionMode()
+  const { data: suggestionModeData, isError: suggestionModeError, isLoading: isLoadingSuggestionMode } = useSuggestionMode()
   const { mutate: setSuggestionMode, isPending: isSettingSuggestionMode } = useSetSuggestionMode()
-  const { data: tokenPassthroughData, isLoading: isLoadingTokenPassthrough } = useClientTokenPassthrough()
+  const { data: tokenPassthroughData, isError: tokenPassthroughError, isLoading: isLoadingTokenPassthrough } = useClientTokenPassthrough()
   const { mutate: setTokenPassthrough, isPending: isSettingTokenPassthrough } = useSetClientTokenPassthrough()
-  const { data: thinkingAsTextData, isLoading: isLoadingThinkingAsText } = useThinkingAsText()
+  const { data: thinkingAsTextData, isError: thinkingAsTextError, isLoading: isLoadingThinkingAsText } = useThinkingAsText()
   const { mutate: setThinkingAsText, isPending: isSettingThinkingAsText } = useSetThinkingAsText()
+  const { data: dumpKiroBodyData, isError: dumpKiroBodyError, isLoading: isLoadingDumpKiroBody } = useDumpKiroBody()
+  const { mutate: setDumpKiroBody, isPending: isSettingDumpKiroBody } = useSetDumpKiroBody()
   const { data: authKeysData, isLoading: isLoadingAuthKeys } = useAuthKeys()
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
   const [adminPswDraft, setAdminPswDraft] = useState('')
@@ -336,11 +339,11 @@ export function SettingsPanel({
               disabled={isLoadingMode || isSettingMode}
             />
           </Row>
-          <Row label={t('settings.suggestionMode')} desc={t('settings.suggestionModeDesc')}>
+          <Row label={t('settings.suggestionMode')} desc={suggestionModeError ? t('common.loadFailed') : t('settings.suggestionModeDesc')}>
             <Sw
               label={t('settings.suggestionMode')}
               on={!!suggestionModeData?.enabled}
-              disabled={isLoadingSuggestionMode || isSettingSuggestionMode}
+              disabled={suggestionModeError || isLoadingSuggestionMode || isSettingSuggestionMode}
               onToggle={() =>
                 setSuggestionMode(!suggestionModeData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
@@ -349,11 +352,11 @@ export function SettingsPanel({
               }
             />
           </Row>
-          <Row label={t('settings.clientTokenPassthrough')} desc={t('settings.clientTokenPassthroughDesc')}>
+          <Row label={t('settings.clientTokenPassthrough')} desc={tokenPassthroughError ? t('common.loadFailed') : t('settings.clientTokenPassthroughDesc')}>
             <Sw
               label={t('settings.clientTokenPassthrough')}
               on={!!tokenPassthroughData?.enabled}
-              disabled={isLoadingTokenPassthrough || isSettingTokenPassthrough}
+              disabled={tokenPassthroughError || isLoadingTokenPassthrough || isSettingTokenPassthrough}
               onToggle={() =>
                 setTokenPassthrough(!tokenPassthroughData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
@@ -362,13 +365,26 @@ export function SettingsPanel({
               }
             />
           </Row>
-          <Row label={t('settings.thinkingAsText')} desc={t('settings.thinkingAsTextDesc')}>
+          <Row label={t('settings.thinkingAsText')} desc={thinkingAsTextError ? t('common.loadFailed') : t('settings.thinkingAsTextDesc')}>
             <Sw
               label={t('settings.thinkingAsText')}
               on={!!thinkingAsTextData?.enabled}
-              disabled={isLoadingThinkingAsText || isSettingThinkingAsText}
+              disabled={thinkingAsTextError || isLoadingThinkingAsText || isSettingThinkingAsText}
               onToggle={() =>
                 setThinkingAsText(!thinkingAsTextData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
+            />
+          </Row>
+          <Row label={t('settings.dumpKiroBody')} desc={dumpKiroBodyError ? t('common.loadFailed') : t('settings.dumpKiroBodyDesc')}>
+            <Sw
+              label={t('settings.dumpKiroBody')}
+              on={!!dumpKiroBodyData?.enabled}
+              disabled={dumpKiroBodyError || isLoadingDumpKiroBody || isSettingDumpKiroBody}
+              onToggle={() =>
+                setDumpKiroBody(!dumpKiroBodyData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
                   onError: (e) => toast.error(extractErrorMessage(e)),
                 })
