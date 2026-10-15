@@ -297,7 +297,7 @@ export function ApiKeyRow({
             <Power className="size-[13px]" strokeWidth={1.7} />
             {apiKey.enabled ? t('apiKeys.disableAction') : t('apiKeys.enableAction')}
           </button>
-          <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
+          <span aria-hidden="true" className="mx-[5px] h-4 w-[0.5px] flex-none bg-hairline" />
           {/* cc-switch 一键导入：Claude Code 与 Codex 是两个独立供应商，各占一条深链接 */}
           <button
             type="button"
@@ -317,7 +317,7 @@ export function ApiKeyRow({
           >
             <ChatGptIcon className="size-[15px]" />
           </button>
-          <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
+          <span aria-hidden="true" className="mx-[5px] h-4 w-[0.5px] flex-none bg-hairline" />
           <button
             type="button"
             className={ICON_BTN}

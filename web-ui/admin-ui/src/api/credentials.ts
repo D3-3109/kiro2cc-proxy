@@ -180,6 +180,18 @@ export async function setThinkingAsText(enabled: boolean): Promise<{ success: bo
   return data
 }
 
+// 获取 Kiro 请求体落盘取证开关
+export async function getDumpKiroBody(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>('/config/dump-kiro-body')
+  return data
+}
+
+// 设置 Kiro 请求体落盘取证开关
+export async function setDumpKiroBody(enabled: boolean): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/dump-kiro-body', { enabled })
+  return data
+}
+
 // ============ 服务器信息 ============
 
 // 获取服务器信息

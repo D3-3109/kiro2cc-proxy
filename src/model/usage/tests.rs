@@ -357,4 +357,62 @@ mod tests {
         );
         cleanup_usage_path(&path);
     }
+
+    #[tokio::test]
+    async fn test_daily_summaries_cache_fields() {
+        let path = temp_usage_path("daily_cache_fields");
+        let tracker = UsageTracker::load(&path).unwrap();
+        // 两条记录：(input=1000, cacheRead=800) 与 (input=500, cacheRead=None)
+        tracker.record(
+            1,
+            None,
+            "claude-opus-4.6".to_string(),
+            1000,
+            100,
+            None,
+            None,
+            Some(800),
+            Some(100),
+            None,
+        );
+        tracker.record(
+            1,
+            None,
+            "claude-opus-4.6".to_string(),
+            500,
+            50,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 1);
+        let s = &summaries[0];
+        assert_eq!(s.total_requests, 2);
+        assert_eq!(s.total_input_tokens, 1500);
+        assert_eq!(s.total_cache_read_tokens, 800);
+
+        // 凭证维度：cacheRead None 按 0 计入
+        tracker.record(
+            1,
+            Some(42),
+            "claude-opus-4.6".to_string(),
+            200,
+            20,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let cred = tracker.get_today_summary_for_credential(42);
+        assert_eq!(cred.total_requests, 1);
+        assert_eq!(cred.total_input_tokens, 200);
+        assert_eq!(cred.total_cache_read_tokens, 0);
+
+        cleanup_usage_path(&path);
+    }
 }

@@ -2,7 +2,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
-import { History, Info, Monitor, Pencil, Palette, Server, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { Bug, History, Info, Monitor, Pencil, Palette, Server, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageHead } from '@/components/page-head'
@@ -11,6 +11,7 @@ import {
   useSuggestionMode, useSetSuggestionMode,
   useClientTokenPassthrough, useSetClientTokenPassthrough,
   useThinkingAsText, useSetThinkingAsText,
+  useDumpKiroBody, useSetDumpKiroBody,
   useRuntimeConfig, useSetRuntimeConfig,
   useAuthKeys, useSetAuthKeys,
 } from '@/hooks/use-credentials'
@@ -23,7 +24,7 @@ const SET_CAP =
 /** 分区卡片（设计稿 .set-card） */
 const SET_CARD = 'overflow-hidden rounded-lg border border-transparent bg-surface shadow-hair'
 /** 配置行（设计稿 .set-row） */
-const SET_ROW = 'flex items-center gap-4 border-b border-hairline px-4 py-[13px] last:border-b-0'
+const SET_ROW = 'flex items-center gap-4 border-b-[0.5px] border-hairline px-4 py-[13px] last:border-b-0'
 /** 行键名（设计稿 .set-k） */
 const SET_K = 'flex items-center gap-[7px] text-[12.5px] font-semibold'
 /** 行说明（设计稿 .set-d） */
@@ -176,12 +177,14 @@ export function SettingsPanel({
   const { t, i18n } = useTranslation()
   const { data: loadBalancingData, isLoading: isLoadingMode } = useLoadBalancingMode()
   const { mutate: setLoadBalancingMode, isPending: isSettingMode } = useSetLoadBalancingMode()
-  const { data: suggestionModeData, isLoading: isLoadingSuggestionMode } = useSuggestionMode()
+  const { data: suggestionModeData, isError: suggestionModeError, isLoading: isLoadingSuggestionMode } = useSuggestionMode()
   const { mutate: setSuggestionMode, isPending: isSettingSuggestionMode } = useSetSuggestionMode()
-  const { data: tokenPassthroughData, isLoading: isLoadingTokenPassthrough } = useClientTokenPassthrough()
+  const { data: tokenPassthroughData, isError: tokenPassthroughError, isLoading: isLoadingTokenPassthrough } = useClientTokenPassthrough()
   const { mutate: setTokenPassthrough, isPending: isSettingTokenPassthrough } = useSetClientTokenPassthrough()
-  const { data: thinkingAsTextData, isLoading: isLoadingThinkingAsText } = useThinkingAsText()
+  const { data: thinkingAsTextData, isError: thinkingAsTextError, isLoading: isLoadingThinkingAsText } = useThinkingAsText()
   const { mutate: setThinkingAsText, isPending: isSettingThinkingAsText } = useSetThinkingAsText()
+  const { data: dumpKiroBodyData, isError: dumpKiroBodyError, isLoading: isLoadingDumpKiroBody } = useDumpKiroBody()
+  const { mutate: setDumpKiroBody, isPending: isSettingDumpKiroBody } = useSetDumpKiroBody()
   const { data: authKeysData, isLoading: isLoadingAuthKeys } = useAuthKeys()
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
   const [adminPswDraft, setAdminPswDraft] = useState('')
@@ -336,11 +339,11 @@ export function SettingsPanel({
               disabled={isLoadingMode || isSettingMode}
             />
           </Row>
-          <Row label={t('settings.suggestionMode')} desc={t('settings.suggestionModeDesc')}>
+          <Row label={t('settings.suggestionMode')} desc={suggestionModeError ? t('common.loadFailed') : t('settings.suggestionModeDesc')}>
             <Sw
               label={t('settings.suggestionMode')}
               on={!!suggestionModeData?.enabled}
-              disabled={isLoadingSuggestionMode || isSettingSuggestionMode}
+              disabled={suggestionModeError || isLoadingSuggestionMode || isSettingSuggestionMode}
               onToggle={() =>
                 setSuggestionMode(!suggestionModeData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
@@ -349,11 +352,11 @@ export function SettingsPanel({
               }
             />
           </Row>
-          <Row label={t('settings.clientTokenPassthrough')} desc={t('settings.clientTokenPassthroughDesc')}>
+          <Row label={t('settings.clientTokenPassthrough')} desc={tokenPassthroughError ? t('common.loadFailed') : t('settings.clientTokenPassthroughDesc')}>
             <Sw
               label={t('settings.clientTokenPassthrough')}
               on={!!tokenPassthroughData?.enabled}
-              disabled={isLoadingTokenPassthrough || isSettingTokenPassthrough}
+              disabled={tokenPassthroughError || isLoadingTokenPassthrough || isSettingTokenPassthrough}
               onToggle={() =>
                 setTokenPassthrough(!tokenPassthroughData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
@@ -362,11 +365,11 @@ export function SettingsPanel({
               }
             />
           </Row>
-          <Row label={t('settings.thinkingAsText')} desc={t('settings.thinkingAsTextDesc')}>
+          <Row label={t('settings.thinkingAsText')} desc={thinkingAsTextError ? t('common.loadFailed') : t('settings.thinkingAsTextDesc')}>
             <Sw
               label={t('settings.thinkingAsText')}
               on={!!thinkingAsTextData?.enabled}
-              disabled={isLoadingThinkingAsText || isSettingThinkingAsText}
+              disabled={thinkingAsTextError || isLoadingThinkingAsText || isSettingThinkingAsText}
               onToggle={() =>
                 setThinkingAsText(!thinkingAsTextData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
@@ -521,6 +524,22 @@ export function SettingsPanel({
               <Palette aria-hidden="true" />
               {t('dashboard.navTheme')}
             </Button>
+          </Row>
+        </Section>
+
+        <Section icon={Bug} title={t('settings.capDebug')}>
+          <Row label={t('settings.dumpKiroBody')} desc={dumpKiroBodyError ? t('common.loadFailed') : t('settings.dumpKiroBodyDesc')}>
+            <Sw
+              label={t('settings.dumpKiroBody')}
+              on={!!dumpKiroBodyData?.enabled}
+              disabled={dumpKiroBodyError || isLoadingDumpKiroBody || isSettingDumpKiroBody}
+              onToggle={() =>
+                setDumpKiroBody(!dumpKiroBodyData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
+            />
           </Row>
         </Section>
 

@@ -36,39 +36,92 @@ async fn main() {
     // 解析命令行参数
     let args = Args::parse();
 
+    // 加载配置（须先于 tracing 初始化：log_file 日志层需要按配置决定是否挂载；
+    // 此时尚无日志设施，加载失败用 eprintln! 输出后退出）
+    let config_path = args
+        .config
+        .unwrap_or_else(|| Config::default_config_path().to_string());
+    let mut config = Config::load(&config_path).unwrap_or_else(|e| {
+        eprintln!("加载配置失败: {}", e);
+        std::process::exit(1);
+    });
+
+    // 环境变量覆盖配置（用于容器化部署）
+    config.apply_env_overrides();
+
     // 初始化日志捕获器（在 tracing 初始化之前创建）
     let log_capture = std::sync::Arc::new(log_capture::LogCapture::new(LOG_CAPTURE_CAPACITY));
 
-    // 初始化日志（registry 风格，同时输出到控制台和 LogCapture）
+    // 初始化日志（registry 风格，同时输出到控制台、LogCapture 与可选的日志文件）
     {
         use tracing_subscriber::prelude::*;
         let make_filter = || {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
         };
-        tracing_subscriber::registry()
+        // log_file 配置时以 append 模式同步写文件；父目录不存在则自动创建；
+        // 打开失败仅告警降级（只输出控制台），不影响启动
+        let mut file_layer = None;
+        if let Some(path) = config.log_file.as_ref() {
+            let path = std::path::Path::new(path);
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                eprintln!(
+                    "创建日志目录 {} 失败（{}），日志仅输出控制台",
+                    parent.display(),
+                    e
+                );
+            } else {
+                match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    Ok(file) => {
+                        file_layer = Some(
+                            tracing_subscriber::fmt::layer().with_writer(std::sync::Arc::new(file)),
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "打开日志文件 {} 失败（{}），日志仅输出控制台",
+                            path.display(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+        let registry = tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer().with_filter(make_filter()))
-            .with(log_capture.as_layer().with_filter(make_filter()))
-            .init();
+            .with(log_capture.as_layer().with_filter(make_filter()));
+        let log_file_enabled = file_layer.is_some();
+        if let Some(layer) = file_layer {
+            registry.with(layer.with_filter(make_filter())).init();
+        } else {
+            registry.init();
+        }
+        // init 之后才能正常输出（subscriber 未设置前 tracing 宏会静默丢弃事件）
+        if log_file_enabled {
+            tracing::info!(
+                "日志文件已启用: {}（append 模式）",
+                config.log_file.as_ref().unwrap()
+            );
+        }
     }
-
-    // 加载配置
-    let config_path = args
-        .config
-        .unwrap_or_else(|| Config::default_config_path().to_string());
-    let config = Config::load(&config_path).unwrap_or_else(|e| {
-        tracing::error!("加载配置失败: {}", e);
-        std::process::exit(1);
-    });
-
-    // 环境变量覆盖配置（用于容器化部署）
-    let mut config = config;
-    config.apply_env_overrides();
 
     // 客户端 token 直通开关（true 时 usage 字段 1:1 上报，见 Issue #44）
     anthropic::set_client_token_passthrough(config.client_token_passthrough);
     anthropic::set_thinking_as_text(config.thinking_as_text);
     anthropic::set_write_chunking_max_lines(config.write_chunking_max_lines);
+    anthropic::set_kiro_body_dump_enabled(config.dump_kiro_body);
+    if config.dump_kiro_body {
+        tracing::warn!(
+            "已开启 Kiro 请求体落盘取证（dumpKiroBody=true）：每个请求体将写入 app/config/kiro-body-dump/，定位问题后请关闭"
+        );
+    }
     if config.write_chunking_max_lines == 0 {
         tracing::info!(
             "分块写入约束已关闭（writeChunkingMaxLines=0）：大块工具参数可能触发上游约 240s 重置"

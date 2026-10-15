@@ -34,6 +34,8 @@ mod websearch;
 pub use converter::{
     DEFAULT_WRITE_CHUNKING_MAX_LINES, set_write_chunking_max_lines, write_chunking_max_lines,
 };
+pub(crate) use handlers::kiro_body_dump_enabled;
+pub(crate) use handlers::set_kiro_body_dump_enabled;
 pub use router::create_router_with_provider_and_state;
 pub use stream::{
     client_token_passthrough_enabled, set_client_token_passthrough, set_thinking_as_text,

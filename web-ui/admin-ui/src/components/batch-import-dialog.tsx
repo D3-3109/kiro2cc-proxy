@@ -493,7 +493,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={`relative rounded-[8px] border bg-surface-2 transition-colors focus-within:border-brand ${
+              className={`relative rounded-[8px] border-[0.5px] bg-surface-2 transition-colors focus-within:border-brand ${
                 dragActive ? 'border-brand' : 'border-hairline-2'
               }`}
             >
@@ -578,7 +578,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               </div>
 
               {/* 结果列表 */}
-              <div className="max-h-[300px] divide-y divide-hairline overflow-y-auto rounded-[8px] border border-transparent">
+              <div className="max-h-[300px] divide-y-[0.5px] divide-hairline overflow-y-auto rounded-[8px] border border-transparent">
                 {results.map((result) => (
                   <div key={result.index} className="p-3">
                     <div className="flex items-start gap-3">

@@ -612,7 +612,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             {window.location.host}
           </div>
         </div>
-        <span aria-hidden="true" className="mx-0.5 hidden w-px self-stretch bg-hairline sm:block" />
+        <span aria-hidden="true" className="mx-0.5 hidden w-[0.5px] self-stretch bg-hairline sm:block" />
         <div className="min-w-0">
           <div className="flex items-center gap-[5px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3">
             <Link2 className="size-[13px] shrink-0" />
@@ -633,7 +633,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             <span className="text-ink-3">/v1</span>
           </div>
         </div>
-        <span aria-hidden="true" className="mx-0.5 hidden w-px self-stretch bg-hairline sm:block" />
+        <span aria-hidden="true" className="mx-0.5 hidden w-[0.5px] self-stretch bg-hairline sm:block" />
         <div className="min-w-0">
           <div className="flex items-center gap-[5px] text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3">
             <Box className="size-[13px] shrink-0" />
@@ -673,7 +673,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         {/* 分隔线随危险按钮一起显隐，无无效 Key 时不留孤立竖线 */}
         {invalidKeys.length > 0 && (
           <>
-            <span aria-hidden="true" className="mx-0.5 h-[19px] w-px shrink-0 bg-hairline-2" />
+            <span aria-hidden="true" className="mx-0.5 h-[19px] w-[0.5px] shrink-0 bg-hairline-2" />
             <Button variant="destructive" onClick={() => setPurgeDialogOpen(true)}>
               <Eraser />
               {t('apiKeys.purgeButton', { count: invalidKeys.length })}

@@ -401,7 +401,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
             })),
           ]}
         />
-        <span aria-hidden="true" className="h-[18px] w-px shrink-0 bg-hairline-2" />
+        <span aria-hidden="true" className="h-[18px] w-[0.5px] shrink-0 bg-hairline-2" />
         <Button variant="outline" onClick={handleDownload}>
           <Download aria-hidden="true" />
           {t('logs.downloadLogsButton')}

@@ -485,7 +485,7 @@ export function ThemeSettingsPage() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('themeSettings.searchPlaceholder')}
                 aria-label={t('themeSettings.searchLabel')}
-                className="w-full rounded-md border border-hairline bg-surface py-1.5 pl-8 pr-8 text-[12px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
+                className="w-full rounded-md border-[0.5px] border-hairline bg-surface py-1.5 pl-8 pr-8 text-[12px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
               />
               {search && (
                 <button

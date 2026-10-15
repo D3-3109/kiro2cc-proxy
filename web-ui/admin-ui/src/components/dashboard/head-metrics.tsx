@@ -20,6 +20,8 @@ interface HeadMetricsProps {
   requestTrend: number[]
   todayCredits: number | null
   todayCreditsSaved: number | null
+  /** 今日缓存命中率（%），口径 = cacheRead / input；无数据时 null */
+  todayCacheRatePercent: number | null
   creditsDeltaPercent: number | null
   creditsTrend: number[]
   cumulativeFailures: number
@@ -42,6 +44,7 @@ export function DashboardHeadMetrics({
   requestTrend,
   todayCredits,
   todayCreditsSaved,
+  todayCacheRatePercent,
   creditsDeltaPercent,
   creditsTrend,
   cumulativeFailures,
@@ -88,6 +91,7 @@ export function DashboardHeadMetrics({
             requestTrend={requestTrend}
             todayCredits={todayCredits}
             todayCreditsSaved={todayCreditsSaved}
+            todayCacheRatePercent={todayCacheRatePercent}
             creditsDeltaPercent={creditsDeltaPercent}
             creditsTrend={creditsTrend}
             cumulativeFailures={cumulativeFailures}

@@ -269,6 +269,8 @@ export interface DailySummary {
   totalCost: number
   totalCredits: number
   totalCreditsSaved?: number
+  totalInputTokens: number      // 累计输入 tokens（含 cache 命中部分）
+  totalCacheReadTokens: number  // 累计 cache 命中的输入 tokens
 }
 
 // 单账号在某 CST 日期的用量汇总（后端 /credentials/:id/usage/today）

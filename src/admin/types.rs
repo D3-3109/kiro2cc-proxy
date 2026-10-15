@@ -388,6 +388,22 @@ pub struct SetThinkingAsTextRequest {
     pub enabled: bool,
 }
 
+/// Kiro 请求体落盘取证开关查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DumpKiroBodyResponse {
+    /// 是否把发往 Kiro 的请求体落盘到 app/config/kiro-body-dump/
+    pub enabled: bool,
+}
+
+/// 设置 Kiro 请求体落盘取证开关请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDumpKiroBodyRequest {
+    /// 是否把发往 Kiro 的请求体落盘到 app/config/kiro-body-dump/
+    pub enabled: bool,
+}
+
 /// 运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）查询响应
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
