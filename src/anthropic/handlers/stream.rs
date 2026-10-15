@@ -361,20 +361,21 @@ fn create_sse_stream(
                                             // 普通 tool_use SSE，改为客户端可见性块（D4/D8）
                                             let (consumed, mut bridge_events) =
                                                 bridge_handle_event(&mut ctx, &mut bridge, &event);
+                                            // 首字埋点：按「本帧是否产出客户端可见的 SSE 事件」
+                                            // 判定，而非按事件变体名 —— 桥接截获同样会产出可见性块
+                                            // （bridge.rs build_web_search_visibility_events），
+                                            // 而空 content / thinking 关闭的 ReasoningContent 等
+                                            // 早退分支返回空事件，客户端零输出不应计首字；
+                                            // Metering/ContextUsage 等元信息帧天然产出空事件，
+                                            // keepalive 是 SSE 层合成事件，同样不走此处
+                                            if !bridge_events.is_empty() {
+                                                ctx.mark_first_token();
+                                            }
                                             if !consumed {
-                                                // 首字埋点：仅未截获的业务内容事件计首字，
-                                                // 桥接消费的事件客户端不可见，不计；
-                                                // Metering/ContextUsage 等元信息帧与错误帧不计，
-                                                // keepalive 是 SSE 层合成事件，同样不走此处
-                                                if matches!(
-                                                    event,
-                                                    Event::AssistantResponse(_)
-                                                        | Event::ReasoningContent(_)
-                                                        | Event::ToolUse(_)
-                                                ) {
+                                                let sse_events = ctx.process_kiro_event(&event);
+                                                if !sse_events.is_empty() {
                                                     ctx.mark_first_token();
                                                 }
-                                                let sse_events = ctx.process_kiro_event(&event);
                                                 bridge_events.extend(sse_events);
                                             }
                                             events.extend(bridge_events);

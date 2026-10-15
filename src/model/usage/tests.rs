@@ -180,8 +180,22 @@ mod tests {
             None,
             None,
         );
+        tracker.record(
+            1,
+            Some(7),
+            "claude-opus-4.6".to_string(),
+            100,
+            10,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(1234),
+            Some(5678),
+        );
         let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
-        assert_eq!(page.records.len(), 2);
+        assert_eq!(page.records.len(), 3);
         // 有 effort 的记录映射到 UsageRecordItem
         assert!(
             page.records
@@ -190,10 +204,20 @@ mod tests {
         );
         // None 兜底：未传 output_config 的旧请求 effort 保持 None
         assert!(page.records.iter().any(|r| r.effort.is_none()));
-        // 新记录透传耗时字段
-        let with_duration = &page.records[0];
-        assert!(with_duration.first_token_ms.is_none());
-        assert!(with_duration.duration_ms.is_none());
+        // 带耗时的记录：record() 入参 → 分页 DTO 的 Some 值透传（按值 find 定位，
+        // 不依赖 newest-first 排序在纳秒同刻并列时的稳定性）
+        let timed = page
+            .records
+            .iter()
+            .find(|r| r.first_token_ms == Some(1234))
+            .expect("带耗时的记录应在分页结果中");
+        assert_eq!(timed.duration_ms, Some(5678));
+        // 未传耗时的旧记录兜底为 None（前两条 effort 测试记录均无耗时）
+        assert!(
+            page.records[1..3]
+                .iter()
+                .all(|r| r.first_token_ms.is_none() && r.duration_ms.is_none())
+        );
         cleanup_usage_path(&path);
     }
 

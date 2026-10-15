@@ -129,8 +129,8 @@ mod tests {
 
     #[test]
     fn test_first_token_marked_on_business_event() {
-        // 首个上游业务事件（AssistantResponse）应记录首字时刻，first_token_ms 有值
-        // 埋点在 stream.rs 层按事件变体过滤后调用（AssistantResponse/ReasoningContent/ToolUse）
+        // 首个客户端可见产出（AssistantResponse 非空 content）应记录首字时刻
+        // 埋点在 stream.rs 按「本帧是否产出非空 SSE 事件」判定后调用
         let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
             .with_request_started_at(std::time::Instant::now());
         let inner = serde_json::from_str::<crate::kiro::model::events::AssistantResponseEvent>(
@@ -138,15 +138,15 @@ mod tests {
         )
         .unwrap();
         let event = crate::kiro::model::events::Event::AssistantResponse(inner);
-        ctx.mark_first_token(); // 模拟 stream.rs 在业务事件分发处的埋点调用
+        ctx.mark_first_token(); // 模拟 stream.rs 在非空 SSE 产出处的埋点调用
         ctx.process_kiro_event(&event);
-        assert!(ctx.first_token_at.is_some(), "业务事件应计首字");
+        assert!(ctx.first_token_at.is_some(), "非空产出应计首字");
     }
 
     #[test]
     fn test_first_token_not_marked_by_non_business_events() {
-        // meteringEvent 属元信息事件，不计首字（stream.rs 埋点按变体过滤，Metering 不会触发 mark）
-        // keepalive 在 SSE 层合成，同样不经过埋点
+        // meteringEvent 产出空 SSE 事件，不计首字（stream.rs 埋点按产出非空判定，
+        // 元信息帧 / 空输出帧天然产出空事件）；keepalive 在 SSE 层合成，同样不经过埋点
         let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
             .with_request_started_at(std::time::Instant::now());
         let event = crate::kiro::model::events::Event::Metering(
@@ -158,8 +158,11 @@ mod tests {
                 cache_creation_input_tokens: None,
             },
         );
-        ctx.process_kiro_event(&event);
-        assert!(ctx.first_token_at.is_none(), "元信息事件不应计首字");
+        assert!(
+            ctx.process_kiro_event(&event).is_empty(),
+            "metering 帧产出应为空，锁定空产出不计首字的语义"
+        );
+        assert!(ctx.first_token_at.is_none(), "空产出不应计首字");
     }
 
     #[test]
@@ -173,12 +176,21 @@ mod tests {
         assert_eq!(ctx.first_token_at, first);
     }
 
-    #[test]
-    fn test_record_timing_none_without_started_at() {
-        // 未注入起点（旧调用路径）时首字/耗时均为 None
-        let mut ctx = StreamContext::new_with_thinking("test-model", 10, false);
-        assert!(ctx.request_started_at.is_none());
+    #[tokio::test]
+    async fn test_record_timing_none_without_started_at() {
+        // 未注入起点（旧调用路径）时落库的 first_token_ms / duration_ms 均为 None
+        let dir = std::env::temp_dir().join(format!("kiro2cc_ctx_none_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api_key_usage.json");
+        let tracker = std::sync::Arc::new(crate::model::usage::UsageTracker::load(&path).unwrap());
+        let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
+            .with_usage_tracking(Some(std::sync::Arc::clone(&tracker)), Some(1), None, None);
         ctx.mark_first_token();
-        assert!(ctx.first_token_at.is_some());
+        let _ = ctx.generate_final_events();
+        let page = tracker.get_records_paged(1, 1, 10, &std::collections::HashMap::new());
+        assert_eq!(page.records.len(), 1);
+        assert!(page.records[0].first_token_ms.is_none());
+        assert!(page.records[0].duration_ms.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

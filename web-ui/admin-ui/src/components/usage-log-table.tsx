@@ -80,7 +80,7 @@ export function recordCredits(record: UsageRecord): number {
 }
 
 /** 毫秒 → 「X.Xs」展示（≥60s 转分秒「Xm XXs」，先取整总秒数避免 60s 进位残留） */
-export function formatDurationMs(ms: number): string {
+function formatDurationMs(ms: number): string {
   const total = Math.round(ms / 1000)
   if (total >= 60) {
     return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`
@@ -89,13 +89,13 @@ export function formatDurationMs(ms: number): string {
 }
 
 /** 快慢分档阈值（ms）：首字 ≤1s 快 / ≥5s 慢，耗时 ≤10s 快 / ≥60s 慢 */
-export const FIRST_TOKEN_FAST_MS = 1_000
-export const FIRST_TOKEN_SLOW_MS = 5_000
-export const DURATION_FAST_MS = 10_000
-export const DURATION_SLOW_MS = 60_000
+const FIRST_TOKEN_FAST_MS = 1_000
+const FIRST_TOKEN_SLOW_MS = 5_000
+const DURATION_FAST_MS = 10_000
+const DURATION_SLOW_MS = 60_000
 
 /** 快/中/慢三档底色（设计令牌，无新增自定义颜色） */
-export function durationTone(ms: number, fastMs: number, slowMs: number): string {
+function durationTone(ms: number, fastMs: number, slowMs: number): string {
   if (ms <= fastMs) return 'bg-ok-soft text-ok'
   if (ms >= slowMs) return 'bg-warn-soft text-warn'
   return 'bg-surface-3 text-ink-2'

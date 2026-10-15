@@ -145,13 +145,14 @@ impl StreamContext {
         }
     }
 
-    /// 注入请求计时起点（进入 handler 时调用；首个上游业务事件时计算首字延迟）
+    /// 注入请求计时起点（进入 handler 时调用；首个客户端可见 SSE 产出时计算首字延迟）
     pub fn with_request_started_at(mut self, started_at: Instant) -> Self {
         self.request_started_at = Some(started_at);
         self
     }
 
-    /// 标记首个上游业务数据事件到达时刻（幂等：仅首次调用生效；keepalive 不经过此路径）
+    /// 标记首个客户端可见 SSE 产出的时刻（幂等：仅首次调用生效；空输出帧与
+    /// keepalive 不经过此路径，调用侧按「本帧是否产出非空 SSE 事件」判定）
     pub fn mark_first_token(&mut self) {
         if self.first_token_at.is_none() {
             self.first_token_at = Some(Instant::now());
@@ -915,8 +916,9 @@ impl StreamContext {
                 key_id,
                 self.credential_id
             );
-            // 计时口径：first_token_ms = 起点 → 首个上游业务事件（keepalive 不计）；
-            // duration_ms = 起点 → 落库前。起点未注入（None）时二者均不计（等价旧数据）
+            // 计时口径：first_token_ms = 起点 → 首个客户端可见 SSE 产出（空输出帧
+            // 与 keepalive 不计）；duration_ms = 起点 → 落库前。
+            // 起点未注入（None）时二者均不计（等价旧数据）
             let (first_token_ms, duration_ms) = match self.request_started_at {
                 Some(started) => (
                     self.first_token_at
