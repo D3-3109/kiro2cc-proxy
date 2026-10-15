@@ -82,6 +82,7 @@ impl UsageTracker {
                     effort: r.effort,
                     first_token_ms: r.first_token_ms,
                     duration_ms: r.duration_ms,
+                    thinking_token_count: r.thinking_token_count,
                 }
             })
             .collect();
@@ -147,6 +148,9 @@ pub struct UsageRecordItem {
     /// 服务端处理总耗时（毫秒，None 表示旧数据）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// 深度思考文案 token 数（None 表示旧数据）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_token_count: Option<i32>,
 }
 
 impl UsageTracker {
@@ -222,6 +226,7 @@ impl UsageTracker {
                     effort: r.effort,
                     first_token_ms: r.first_token_ms,
                     duration_ms: r.duration_ms,
+                    thinking_token_count: r.thinking_token_count,
                 }
             })
             .collect();

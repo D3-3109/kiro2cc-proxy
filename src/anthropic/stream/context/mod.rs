@@ -42,6 +42,9 @@ pub struct StreamContext {
     pub visible_chars_cn: i64,
     /// 上报口径的输出字符累计（不含 thinking），非中文桶
     pub visible_chars_other: i64,
+    /// 客户端实际收到的 thinking 全文缓存（BPE 真值统计口径，
+    /// 落库时一次性 count_tokens）。见 `thinking_token_count()`
+    pub thinking_full_text: String,
     /// 工具块索引映射 (tool_id -> block_index)
     pub tool_block_indices: HashMap<String, i32>,
     /// thinking 是否启用
@@ -117,6 +120,7 @@ impl StreamContext {
             output_chars_other: 0,
             visible_chars_cn: 0,
             visible_chars_other: 0,
+            thinking_full_text: String::new(),
             tool_block_indices: HashMap::new(),
             thinking_enabled,
             thinking_buffer: String::new(),
@@ -637,7 +641,14 @@ impl StreamContext {
     }
 
     /// 创建 thinking_delta 事件
-    fn create_thinking_delta_event(&self, index: i32, thinking: &str) -> SseEvent {
+    ///
+    /// 非空内容同时写入 thinking 全文缓存（落库为 thinking_token_count 的统计口径：
+    /// 客户端实际收到的 thinking 文案 BPE 真值，与 visible_chars 同语义）；空串事件（
+    /// content_block_stop 前的收尾）不计数。
+    fn create_thinking_delta_event(&mut self, index: i32, thinking: &str) -> SseEvent {
+        if !thinking.is_empty() {
+            self.thinking_full_text.push_str(thinking);
+        }
         SseEvent::new(
             "content_block_delta",
             json!({
@@ -824,10 +835,11 @@ impl StreamContext {
                     }
                 } else {
                     // 如果还在 thinking 块内，发送剩余内容作为 thinking_delta
+                    // （mem::take 解借用冲突：参数与 &mut self 同源；该分支块末
+                    // self.thinking_buffer.clear() 无条件清空，take 后无需还回）
                     if let Some(thinking_index) = self.thinking_block_index {
-                        events.push(
-                            self.create_thinking_delta_event(thinking_index, &self.thinking_buffer),
-                        );
+                        let buffer = std::mem::take(&mut self.thinking_buffer);
+                        events.push(self.create_thinking_delta_event(thinking_index, &buffer));
                     }
                     // 关闭 thinking 块：先发送空的 thinking_delta，再发送 content_block_stop
                     if let Some(thinking_index) = self.thinking_block_index {
@@ -927,6 +939,8 @@ impl StreamContext {
                 ),
                 None => (None, None),
             };
+            // 无 thinking 时落 None，与「None = 未产生思考」语义统一（非流式同口径）
+            let thinking_tokens = self.thinking_token_count();
             tracker.record(
                 key_id,
                 self.credential_id,
@@ -940,6 +954,7 @@ impl StreamContext {
                 self.effort.clone(),
                 first_token_ms,
                 duration_ms,
+                (thinking_tokens > 0).then_some(thinking_tokens),
             );
         }
         // 流式 SSE 路径暂未接入 fingerprint，cache_creation 不区分 5m/1h tier，

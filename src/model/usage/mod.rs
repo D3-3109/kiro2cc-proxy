@@ -61,6 +61,11 @@ pub struct UsageRecord {
     /// 服务端处理总耗时（请求开始到落库前，毫秒；None 表示旧数据）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// 深度思考文案 token 数（客户端实际收到的 thinking 内容；None 表示旧数据
+    /// 或该请求未产生 thinking 内容）。流式与非流式均为 BPE 真值（count_tokens），
+    /// 与客户端「Thought for Ns (N tokens)」显示同源同口径
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_token_count: Option<i32>,
 }
 
 /// 单个 API Key 的用量汇总
@@ -345,6 +350,7 @@ impl UsageTracker {
         effort: Option<String>,
         first_token_ms: Option<u64>,
         duration_ms: Option<u64>,
+        thinking_token_count: Option<i32>,
     ) {
         let cost = calculate_cost(&model, input_tokens, output_tokens);
         let record = UsageRecord {
@@ -364,6 +370,7 @@ impl UsageTracker {
             effort,
             first_token_ms,
             duration_ms,
+            thinking_token_count,
         };
         {
             let mut records = self.records.write();

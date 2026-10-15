@@ -40,6 +40,7 @@
     "inputTokensLabel": "Input Tokens: ",
     "outputTokensLabel": "Output Tokens: ",
     "cacheReadLabel": "Cache Read: ",
+    "thinkingLabel": "Thinking: ",
     "totalInputLabel": "Total Input: ",
     "pageInfoSimple": "Page {{current}} / {{total}}",
     "inboundPrefix": "In {{value}}",

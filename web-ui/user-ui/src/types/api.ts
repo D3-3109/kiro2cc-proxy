@@ -51,6 +51,7 @@ export interface UsageRecordItem {
   createdAt: string
   clientIp?: string
   credentialLabel?: string
+  thinkingTokenCount?: number
 }
 
 export interface UsageRecordsPage {

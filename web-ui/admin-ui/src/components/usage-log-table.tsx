@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useTranslation } from 'react-i18next'
-import { Loader2, SearchX } from 'lucide-react'
+import { Brain, Loader2, SearchX } from 'lucide-react'
 import { CELL, TH_BASE } from '@/components/table-kit'
 import { formatDateTime, formatTokenCount } from '@/lib/locale'
 import type { GeoInfo } from '@/hooks/use-ip-geo'
@@ -229,9 +229,18 @@ export function UsageLogTable({
                         {formatTokenCount(Math.max(0, record.inputTokens - (record.cacheReadInputTokens ?? 0)))}
                       </span>
                     </span>
-                    <span>
-                      {t('common.outputTokensLabel')}
-                      <span className="font-mono tabular-nums">{formatTokenCount(record.outputTokens)}</span>
+                    <span className={(record.thinkingTokenCount ?? 0) > 0 ? 'flex items-center gap-2' : undefined}>
+                      <span>
+                        {t('common.outputTokensLabel')}
+                        <span className="font-mono tabular-nums">{formatTokenCount(record.outputTokens)}</span>
+                      </span>
+                      {record.thinkingTokenCount != null && record.thinkingTokenCount > 0 && (
+                        <span className="text-warn" title={t('common.thinkingLabel')}>
+                          <span className="sr-only">{t('common.thinkingLabel')}</span>
+                          <Brain className="inline size-3" aria-hidden="true" />
+                          <span className="font-mono tabular-nums">{formatTokenCount(record.thinkingTokenCount)}</span>
+                        </span>
+                      )}
                     </span>
                     <span className="text-ok">
                       {t('common.cacheReadLabel')}

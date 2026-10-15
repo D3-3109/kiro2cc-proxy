@@ -701,4 +701,101 @@ mod tests {
             "存在 tool_use 时 stop_reason 必须是 tool_use，不能被 model_context_window_exceeded 覆盖"
         );
     }
+
+    /// 任务 1：native reasoning 路径的 thinking token 统计（>0 且不含 signature/可见文本）
+    #[test]
+    fn test_thinking_token_count_native_reasoning_path() {
+        use serde_json::json;
+
+        let mut ctx = StreamContext::new_with_thinking("claude-opus-4.6", 100, true);
+        let _ = ctx.generate_initial_events();
+        assert_eq!(ctx.thinking_token_count(), 0, "未收到思考内容前计数为 0");
+
+        let mut events = ctx.process_kiro_event(&upstream_event(
+            "reasoningContentEvent",
+            json!({"text": "Step one: analyze the request carefully."}),
+        ));
+        assert!(!events.is_empty(), "thinking_delta 应发往客户端");
+        assert!(
+            ctx.thinking_token_count() > 0,
+            "native 路径应累计 thinking 计数"
+        );
+
+        // 与标签路径同款防重计/漏计断言：实际发出的 thinking 文案 BPE 真值
+        // 必须与 thinking_token_count 严格相等
+        let emitted: String = events
+            .iter()
+            .filter_map(|e| e.data["delta"]["thinking"].as_str())
+            .collect();
+        assert!(!emitted.is_empty());
+        assert_eq!(
+            ctx.thinking_token_count(),
+            crate::token::count_tokens(&emitted) as i32,
+            "native 路径 BPE 真值必须与实际发出的 thinking 内容严格等值"
+        );
+
+        // 纯 thinking 响应：visible（不含 thinking）保持 0，output（含 thinking）> 0
+        assert_eq!(ctx.visible_chars_cn + ctx.visible_chars_other, 0);
+        assert!(ctx.output_chars_cn + ctx.output_chars_other > 0);
+
+        // 已收到的内容不因后续空 delta/收尾而重复累计
+        let before = ctx.thinking_token_count();
+        events.extend(ctx.process_kiro_event(&upstream_event(
+            "reasoningContentEvent",
+            json!({"signature": "sig"}),
+        )));
+        events.extend(ctx.generate_final_events());
+        assert_eq!(
+            ctx.thinking_token_count(),
+            before,
+            "signature 与收尾不改变计数"
+        );
+    }
+
+    /// 任务 1：<thinking> 标签解析路径的 thinking token 统计（flush 兜底覆盖）
+    #[test]
+    fn test_thinking_token_count_label_parse_path() {
+        let mut ctx = StreamContext::new_with_thinking("test-model", 100, true);
+        let _ = ctx.generate_initial_events();
+        assert_eq!(ctx.thinking_token_count(), 0);
+
+        let mut all_events = Vec::new();
+        // 思考内容不在同一 chunk 闭合，flush 兜底路径也要计入
+        all_events.extend(ctx.process_assistant_response("<thinking>思考内容 "));
+        all_events.extend(ctx.generate_final_events());
+
+        assert!(
+            ctx.thinking_token_count() > 0,
+            "标签解析+flush 兜底应累计 thinking 计数"
+        );
+        // 发出的 thinking_delta 内容合计与计数一致（不含结束标签与空串收尾）
+        let emitted: String = all_events
+            .iter()
+            .filter_map(|e| e.data["delta"]["thinking"].as_str())
+            .collect();
+        assert!(!emitted.is_empty());
+        assert!(emitted.contains("思考内容"));
+        // 精确等值防重计/漏计：实际发出的 thinking 文案 BPE 真值必须与
+        // thinking_token_count 严格相等（若存在增量发射与 flush 残留重叠，
+        // 缓存全文会比实际发出的内容多出重复片段，此处会因多计而失败）
+        assert_eq!(
+            ctx.thinking_token_count(),
+            crate::token::count_tokens(&emitted) as i32,
+            "BPE 真值必须与实际发出的 thinking 内容严格等值"
+        );
+    }
+
+    /// 任务 1：非 thinking 路径（纯文本）不产生 thinking 计数
+    #[test]
+    fn test_thinking_token_count_zero_for_plain_text() {
+        let mut ctx = StreamContext::new_with_thinking("test-model", 100, true);
+        let _ = ctx.generate_initial_events();
+        ctx.process_assistant_response("普通回复，无思考");
+        ctx.generate_final_events();
+        assert_eq!(
+            ctx.thinking_token_count(),
+            0,
+            "纯文本回复不应产生 thinking 计数"
+        );
+    }
 }
