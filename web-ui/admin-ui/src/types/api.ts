@@ -255,6 +255,7 @@ export interface UsageRecord {
   durationMs?: number
   thinkingTokenCount?: number
   isStream?: boolean
+  userAgent?: string
 }
 
 // 分页原始记录响应

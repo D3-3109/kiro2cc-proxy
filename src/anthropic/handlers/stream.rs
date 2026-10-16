@@ -50,6 +50,8 @@ pub(crate) async fn handle_stream_request(
     // 思考文本化的渲染样式（配置开启且客户端支持时为 Some）；是否实际生效还取决于
     // 选中账号后的最终 thinking 状态
     thinking_as_text_allowed: Option<crate::anthropic::stream::ThinkingTextStyle>,
+    // 客户端 User-Agent（随 usage 记录入库）
+    user_agent: Option<String>,
 ) -> Response {
     // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
@@ -92,7 +94,13 @@ pub(crate) async fn handle_stream_request(
 
     // 创建流处理上下文
     let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
-        .with_usage_tracking(usage_tracker, api_key_id, Some(credential_id), client_ip)
+        .with_usage_tracking(
+            usage_tracker,
+            api_key_id,
+            Some(credential_id),
+            client_ip,
+            user_agent,
+        )
         .with_prompt_cache_usage(prompt_cache_usage)
         .with_prefix_estimated_tokens(prefix_estimated_tokens)
         .with_effort(effort)

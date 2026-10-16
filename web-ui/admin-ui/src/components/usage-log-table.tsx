@@ -32,6 +32,11 @@ export function formatCost(cost: number): string {
   return `$${cost.toFixed(4)}`
 }
 
+/** UA 短标识：取首个空格前段（如 claude-cli/2.1.5），完整原文走 title 悬停展示 */
+function uaShort(ua: string): string {
+  return ua.split(/\s+/)[0] || ua
+}
+
 /**
  * 上游未回传 `creditsUsed` 时的降级估算（USD → Kiro credits）。
  *
@@ -207,6 +212,14 @@ export function UsageLogTable({
                   title={record.credentialLabel}
                 >
                   {record.credentialLabel ?? <span className="text-ink-3">—</span>}
+                  {record.userAgent && (
+                    <span
+                      className="mt-px block truncate font-mono text-[10px] text-ink-3"
+                      title={record.userAgent}
+                    >
+                      {uaShort(record.userAgent)}
+                    </span>
+                  )}
                 </td>
                 <td className={`${CELL} text-[11.5px]`}>
                   <div className="flex flex-col items-start gap-px">
@@ -248,9 +261,9 @@ export function UsageLogTable({
                         <span className="font-mono tabular-nums">{formatTokenCount(record.outputTokens)}</span>
                       </span>
                       {record.thinkingTokenCount != null && record.thinkingTokenCount > 0 && (
-                        <span className="text-warn" title={t('common.thinkingBadge')}>
+                        <span className="inline-flex items-center gap-0.5 text-warn" title={t('common.thinkingBadge')}>
                           <span className="sr-only">{t('common.thinkingLabel')}</span>
-                          <Brain className="inline size-3" aria-hidden="true" />
+                          <Brain className="size-3" aria-hidden="true" />
                           <span className="font-mono tabular-nums">{formatTokenCount(record.thinkingTokenCount)}</span>
                         </span>
                       )}

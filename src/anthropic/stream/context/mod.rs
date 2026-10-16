@@ -75,6 +75,8 @@ pub struct StreamContext {
     credential_id: Option<u64>,
     /// 客户端 IP（用于用量记录）
     client_ip: Option<String>,
+    /// 客户端 User-Agent（用于用量记录）
+    user_agent: Option<String>,
     /// 模拟出的 prompt cache usage
     prompt_cache_usage: PromptCacheUsage,
     /// 从 meteringEvent 获取的真实 credits 消耗
@@ -136,6 +138,7 @@ impl StreamContext {
             api_key_id: None,
             credential_id: None,
             client_ip: None,
+            user_agent: None,
             prompt_cache_usage: PromptCacheUsage::uncached(input_tokens),
             metering_usage: None,
             metering_cache_read_tokens: None,
@@ -206,11 +209,13 @@ impl StreamContext {
         api_key_id: Option<u32>,
         credential_id: Option<u64>,
         client_ip: Option<String>,
+        user_agent: Option<String>,
     ) -> Self {
         self.usage_tracker = tracker;
         self.api_key_id = api_key_id;
         self.credential_id = credential_id;
         self.client_ip = client_ip;
+        self.user_agent = user_agent;
         self
     }
 
@@ -964,6 +969,7 @@ impl StreamContext {
                     duration_ms,
                     thinking_token_count: (thinking_tokens > 0).then_some(thinking_tokens),
                     is_stream: Some(true),
+                    user_agent: self.user_agent.clone(),
                 },
             );
         }

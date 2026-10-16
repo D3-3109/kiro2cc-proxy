@@ -203,6 +203,7 @@ mod tests {
             duration_ms: Some(5678),
             thinking_token_count: None,
             is_stream: None,
+            user_agent: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["firstTokenMs"], 1234);
@@ -251,9 +252,11 @@ mod tests {
             duration_ms: None,
             thinking_token_count: Some(1034),
             is_stream: Some(true),
+            user_agent: Some("claude-cli/2.1.5 (external, cli)".to_string()),
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["thinkingTokenCount"], 1034);
+        assert_eq!(json["userAgent"], "claude-cli/2.1.5 (external, cli)");
         assert_eq!(json["isStream"], true);
 
         // 旧数据（无该字段）反序列化为 None
@@ -270,6 +273,45 @@ mod tests {
         let parsed: crate::model::usage::UsageRecord = serde_json::from_value(old_json).unwrap();
         assert_eq!(parsed.thinking_token_count, None);
         assert_eq!(parsed.is_stream, None);
+        assert_eq!(parsed.user_agent, None);
+    }
+
+    /// user_agent 落库与分页透传：UA 值应完整传递到分页 DTO
+    #[tokio::test]
+    async fn test_record_user_agent_persisted_and_paged() {
+        let path = temp_usage_path("user_agent_field");
+        let tracker = UsageTracker::load(&path).unwrap();
+        tracker.record(
+            1,
+            "claude-opus-4.6".to_string(),
+            100,
+            10,
+            RecordOptions {
+                user_agent: Some("claude-cli/2.1.5 (external, cli)".to_string()),
+                ..Default::default()
+            },
+        );
+        let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(
+            page.records[0].user_agent.as_deref(),
+            Some("claude-cli/2.1.5 (external, cli)")
+        );
+        // daily 路径透传：同一条记录经 get_records_paged_by_date 查询 UA 同样在
+        let cst_today = {
+            let cst = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+            chrono::Utc::now()
+                .with_timezone(&cst)
+                .format("%Y-%m-%d")
+                .to_string()
+        };
+        let daily = tracker.get_records_paged_by_date(&cst_today, 1, 10, &HashMap::new());
+        assert_eq!(daily.records.len(), 1);
+        assert_eq!(
+            daily.records[0].user_agent.as_deref(),
+            Some("claude-cli/2.1.5 (external, cli)")
+        );
+        cleanup_usage_path(&path);
     }
 
     #[test]

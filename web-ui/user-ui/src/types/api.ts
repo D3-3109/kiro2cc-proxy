@@ -53,6 +53,7 @@ export interface UsageRecordItem {
   credentialLabel?: string
   thinkingTokenCount?: number
   isStream?: boolean
+  userAgent?: string
 }
 
 export interface UsageRecordsPage {

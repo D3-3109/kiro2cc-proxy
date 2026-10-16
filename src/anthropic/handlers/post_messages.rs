@@ -20,8 +20,8 @@ use bytes::Bytes;
 use super::bridge::build_bridge_context;
 use super::error::parse_messages_request;
 use super::helpers::{
-    extract_client_ip, is_suggestion_mode_request, override_thinking_from_model_name,
-    resolve_thinking_enabled, suggestion_mode_response,
+    extract_client_ip, extract_user_agent, is_suggestion_mode_request,
+    override_thinking_from_model_name, resolve_thinking_enabled, suggestion_mode_response,
 };
 use super::nonstream::handle_non_stream_request;
 use super::stream::handle_stream_request;
@@ -259,6 +259,7 @@ pub async fn post_messages(
     let api_key_id = identity.map(|ext| ext.0.id);
     let usage_tracker = state.usage_tracker.clone();
     let client_ip = extract_client_ip(&headers, Some(&addr));
+    let user_agent = extract_user_agent(&headers);
 
     // 计算 prompt cache 模拟 usage（message_start 早期值；终值会被降级链覆盖）
     let prompt_cache_usage = crate::cache::PromptCacheUsage::from_ratio_config(
@@ -302,6 +303,7 @@ pub async fn post_messages(
             bridge_ctx,
             effort,
             thinking_as_text,
+            user_agent,
         )
         .await
     } else {
@@ -325,6 +327,7 @@ pub async fn post_messages(
             bridge_ctx,
             effort,
             thinking_enabled,
+            user_agent,
         )
         .await
     }

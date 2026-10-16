@@ -184,7 +184,13 @@ mod tests {
         let path = dir.join("api_key_usage.json");
         let tracker = std::sync::Arc::new(crate::model::usage::UsageTracker::load(&path).unwrap());
         let mut ctx = StreamContext::new_with_thinking("test-model", 10, false)
-            .with_usage_tracking(Some(std::sync::Arc::clone(&tracker)), Some(1), None, None);
+            .with_usage_tracking(
+                Some(std::sync::Arc::clone(&tracker)),
+                Some(1),
+                None,
+                None,
+                None,
+            );
         ctx.mark_first_token();
         let _ = ctx.generate_final_events();
         let page = tracker.get_records_paged(1, 1, 10, &std::collections::HashMap::new());

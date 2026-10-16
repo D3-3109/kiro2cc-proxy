@@ -224,6 +224,7 @@ impl UsageTracker {
                     duration_ms: r.duration_ms,
                     thinking_token_count: r.thinking_token_count,
                     is_stream: r.is_stream,
+                    user_agent: r.user_agent,
                 }
             })
             .collect();

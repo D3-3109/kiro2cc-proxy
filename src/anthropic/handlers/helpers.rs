@@ -64,6 +64,24 @@ pub(crate) fn extract_client_ip(
     connect_info.map(|addr| addr.ip().to_string())
 }
 
+/// 提取客户端 User-Agent（截断至 256 字符）
+///
+/// UA 由客户端可控输入，超长值会撑爆落库 JSON 与明细文件，统一截断；
+/// 常见 UA（claude-cli/codex 等）远短于该上限，截断不影响正常展示。
+/// 非 UTF-8 字节经 lossy 替换（U+FFFD）降级保留可读部分，避免含非 ASCII
+/// 的 UA 被整体丢弃、与"未携带"不可区分；chars 截断最坏 4 字节/char
+/// （256 char ≤ 1024B），落库体积仍可控。
+pub(crate) fn extract_user_agent(headers: &axum::http::HeaderMap) -> Option<String> {
+    const MAX_UA_CHARS: usize = 256;
+    let value = headers.get(axum::http::header::USER_AGENT)?;
+    let ua = String::from_utf8_lossy(value.as_bytes());
+    let ua = ua.trim();
+    if ua.is_empty() {
+        return None;
+    }
+    Some(ua.chars().take(MAX_UA_CHARS).collect())
+}
+
 /// 检测模型名是否包含 "thinking" 后缀，若包含则覆写 thinking 配置
 ///
 /// - Opus 4.6/4.7/4.8/5：覆写为 adaptive 类型
@@ -464,5 +482,71 @@ mod tests {
             None
         );
         assert_eq!(resolve_recorded_effort(false, None), None);
+    }
+
+    fn headers_with_ua(ua: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::USER_AGENT,
+            axum::http::HeaderValue::from_str(ua).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn extract_user_agent_normal_value_passthrough() {
+        let headers = headers_with_ua("claude-cli/2.1.5 (external, cli)");
+        assert_eq!(
+            extract_user_agent(&headers).as_deref(),
+            Some("claude-cli/2.1.5 (external, cli)")
+        );
+    }
+
+    #[test]
+    fn extract_user_agent_missing_or_blank_is_none() {
+        // 头缺失 → None
+        assert_eq!(extract_user_agent(&axum::http::HeaderMap::new()), None);
+        // 仅空白字符（trim 后为空）→ None
+        assert_eq!(extract_user_agent(&headers_with_ua("   ")), None);
+    }
+
+    #[test]
+    fn extract_user_agent_truncated_at_256_chars() {
+        let long = "a".repeat(300);
+        let result = extract_user_agent(&headers_with_ua(&long)).unwrap();
+        assert_eq!(result.len(), 256);
+    }
+
+    #[test]
+    fn extract_user_agent_surrounding_whitespace_trimmed() {
+        let headers = headers_with_ua("  claude-cli/2.1.5  ");
+        assert_eq!(
+            extract_user_agent(&headers).as_deref(),
+            Some("claude-cli/2.1.5")
+        );
+    }
+
+    #[test]
+    fn extract_user_agent_non_ascii_lossy_preserved() {
+        // 含非法 UTF-8 字节的 UA：降级保留可读部分（非法字节 → U+FFFD），
+        // 不应整体返回 None 与"未携带"混淆
+        let value =
+            axum::http::HeaderValue::from_bytes(b"claude-cli/2.1.5 (\xFF\xFE, cli)").unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(axum::http::header::USER_AGENT, value);
+        let result = extract_user_agent(&headers).unwrap();
+        assert!(result.starts_with("claude-cli/2.1.5 ("));
+        assert!(result.contains('\u{FFFD}'));
+        assert!(result.ends_with(", cli)"));
+    }
+
+    #[test]
+    fn extract_user_agent_valid_utf8_multibyte_preserved() {
+        // 合法多字节 UTF-8 UA（如中文标注）应原样保留而非被丢弃
+        let headers = headers_with_ua("MyClient/1.0 (中文客户端)");
+        assert_eq!(
+            extract_user_agent(&headers).as_deref(),
+            Some("MyClient/1.0 (中文客户端)")
+        );
     }
 }
