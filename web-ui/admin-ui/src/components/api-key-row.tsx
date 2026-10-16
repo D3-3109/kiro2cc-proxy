@@ -145,8 +145,8 @@ export function ApiKeyRow({
           <button
             type="button"
             className={ICON_BTN}
-            title={t('apiKeys.copyUrlKeyTitle')}
-            aria-label={t('apiKeys.copyUrlKeyTitle')}
+            title={t('apiKeys.copyKeyTitle')}
+            aria-label={t('apiKeys.copyKeyTitle')}
             onClick={onCopy}
           >
             {copied ? (
