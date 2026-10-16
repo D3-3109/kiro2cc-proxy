@@ -156,7 +156,7 @@ pub struct UsageRecordItem {
     /// 请求类型（true = 流式 SSE，false = 非流式；None 表示旧数据）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_stream: Option<bool>,
-    /// 客户端 User-Agent（截断至 256 字节；None 表示旧数据或客户端未携带）
+    /// 客户端 User-Agent（截断至 256 字符、最坏 1024 字节；None 表示旧数据或客户端未携带）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
 }

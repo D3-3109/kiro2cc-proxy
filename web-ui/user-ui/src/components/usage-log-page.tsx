@@ -217,7 +217,9 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
                                   <span title={r.clientIp} className="flex flex-col items-start">
                                     <span className="font-mono">{geo?.displayIp ?? r.clientIp}</span>
                                     {geo && geo.country && (
-                                      <span className="text-ink-3">{geo.country}·{geo.city}</span>
+                                      <span className="text-ink-3">
+                                        {geo.city ? `${geo.country}·${geo.city}` : geo.country}
+                                      </span>
                                     )}
                                   </span>
                                 ) : (
