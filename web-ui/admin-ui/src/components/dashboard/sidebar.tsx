@@ -64,11 +64,11 @@ export function Sidebar({
   const hasUpdate = !!serverInfo?.version && !!latestVersion && isNewerVersion(latestVersion, serverInfo.version)
 
   return (
-      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-[232px]'} bg-sidebar bg-grid-dot border-r border-hairline fixed top-0 left-0 bottom-0 flex flex-col z-10 transition-all duration-200`}>
+      <aside className={`${sidebarCollapsed ? 'w-16' : 'w-[232px]'} bg-sidebar bg-grid-dot border-r-[0.5px] border-hairline fixed top-0 left-0 bottom-0 flex flex-col z-10 transition-all duration-200`}>
         {/* 内容区整体做一次透明度过渡：把 header/nav/footer 所有跟随收起态瞬时切换的布局
             （flex 方向、文字显隐、ml-auto）都藏在这次淡出淡入的不可见瞬间，避免逐处单独处理时互相错位 */}
         <div className={`flex h-full flex-col transition-opacity duration-100 ${sidebarContentFading ? 'opacity-0' : 'opacity-100'}`}>
-        <div className={`flex items-center border-b border-hairline ${sidebarContentCollapsed ? 'flex-col gap-2 px-2 py-3' : 'gap-2.5 px-4 pt-4 pb-3.5'}`}>
+        <div className={`flex items-center border-b-[0.5px] border-hairline ${sidebarContentCollapsed ? 'flex-col gap-2 px-2 py-3' : 'gap-2.5 px-4 pt-4 pb-3.5'}`}>
           <a
             href="https://github.com/TsinHzl/kiro2cc-proxy"
             target="_blank"
@@ -114,7 +114,7 @@ export function Sidebar({
                 {sidebarContentCollapsed ? (
                   /* 设计稿 .shell.is-collapsed .nav-group：标题降级为 1px 分隔线，首组不渲染 */
                   groupIndex > 0 && (
-                    <div role="separator" aria-label={group.title} className="mx-[14px] my-[9px] h-px bg-hairline-2" />
+                    <div role="separator" aria-label={group.title} className="mx-[14px] my-[9px] h-[0.5px] bg-hairline-2" />
                   )
                 ) : (
                   <div className={`px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[.09em] text-ink-3 ${groupIndex === 0 ? 'pt-0.5' : 'pt-3'}`}>
@@ -130,13 +130,8 @@ export function Sidebar({
                       onClick={onClick}
                       aria-label={fullLabel}
                       aria-current={active ? 'true' : undefined}
-                      className={`relative mb-0.5 flex h-[33px] w-full items-center rounded-[7px] text-[12.5px] transition-colors ${sidebarContentCollapsed ? 'justify-center' : 'gap-[9px] px-2.5'} ${active ? 'bg-brand-soft font-semibold text-brand' : 'font-[450] text-ink-2 hover:bg-surface-3 hover:text-ink'}`}
+                      className={`mb-0.5 flex h-[33px] w-full items-center rounded-[7px] text-[12.5px] transition-colors ${sidebarContentCollapsed ? 'justify-center' : 'gap-[9px] px-2.5'} ${active ? 'bg-brand-soft font-semibold text-brand' : 'font-[450] text-ink-2 hover:bg-surface-3 hover:text-ink'}`}
                     >
-                      {active && (
-                        /* -left-2 与 <nav> 的 px-2 数值耦合：竖条要贴在侧栏左边缘（padding-box x=0），
-                           两处必须同步；展开态与 64px 收起态共用此几何，对齐设计稿 .nav-item::before{left:-8px} */
-                        <span className="absolute -left-2 top-2 bottom-2 w-[2.5px] rounded-r-[3px] bg-brand" aria-hidden="true" />
-                      )}
                       <Icon className="w-4 h-4 shrink-0" />
                       {!sidebarContentCollapsed && (
                         <>
@@ -162,7 +157,7 @@ export function Sidebar({
           </TooltipProvider>
         </nav>
         {/* 语言区：替换身份信息，主题切换仍独立保留 */}
-        <div className={`flex items-center border-t border-hairline ${sidebarContentCollapsed ? 'flex-col gap-[9px] py-2.5' : 'gap-[9px] px-3 py-2.5'}`}>
+        <div className={`flex items-center border-t-[0.5px] border-hairline ${sidebarContentCollapsed ? 'flex-col gap-[9px] py-2.5' : 'gap-[9px] px-3 py-2.5'}`}>
           <Button
             variant="ghost"
             className={`h-8 shrink-0 text-ink-2 hover:bg-brand-soft hover:text-brand ${sidebarContentCollapsed ? 'w-8 px-0' : 'gap-2 px-2'}`}
@@ -189,7 +184,7 @@ export function Sidebar({
           </Button>
         </div>
         {/* 页脚（设计稿 .side-foot）：运行状态点 + 版本号 + 退出登录 */}
-        <div className={`flex items-center border-t border-hairline ${sidebarContentCollapsed ? 'flex-col gap-[9px] py-2.5' : 'gap-2 px-[14px] py-2.5'}`}>
+        <div className={`flex items-center border-t-[0.5px] border-hairline ${sidebarContentCollapsed ? 'flex-col gap-[9px] py-2.5' : 'gap-2 px-[14px] py-2.5'}`}>
           <span
             role="img"
             aria-label={serverStatusLabel}

@@ -19,8 +19,8 @@ use crate::anthropic::types::ErrorResponse;
 
 use super::error::parse_messages_request;
 use super::helpers::{
-    extract_client_ip, is_suggestion_mode_request, override_thinking_from_model_name,
-    resolve_thinking_enabled, suggestion_mode_response,
+    extract_client_ip, extract_user_agent, is_suggestion_mode_request,
+    override_thinking_from_model_name, resolve_thinking_enabled, suggestion_mode_response,
 };
 use super::nonstream::handle_non_stream_request;
 use super::stream::handle_stream_request;
@@ -219,6 +219,7 @@ pub async fn post_messages_cc(
     let api_key_id = identity.map(|ext| ext.0.id);
     let usage_tracker = state.usage_tracker.clone();
     let client_ip = extract_client_ip(&headers, Some(&addr));
+    let user_agent = extract_user_agent(&headers);
 
     // 计算 prompt cache 模拟 usage
     let prompt_cache_usage = crate::cache::PromptCacheUsage::from_ratio_config(
@@ -239,7 +240,8 @@ pub async fn post_messages_cc(
 
     // 思考文本化仅对 Claude Code 客户端生效
     let thinking_as_text = crate::anthropic::stream::thinking_as_text_enabled()
-        && crate::anthropic::stream::is_claude_code_client(&headers);
+        .then(|| crate::anthropic::stream::thinking_text_style(&headers))
+        .flatten();
 
     if payload.stream {
         // 流式响应：与 /v1 相同的实时转发，额外带 300s 全局 deadline
@@ -262,6 +264,7 @@ pub async fn post_messages_cc(
             bridge_ctx,
             effort,
             thinking_as_text,
+            user_agent,
         )
         .await
     } else {
@@ -285,6 +288,7 @@ pub async fn post_messages_cc(
             bridge_ctx,
             effort,
             thinking_enabled,
+            user_agent,
         )
         .await
     }

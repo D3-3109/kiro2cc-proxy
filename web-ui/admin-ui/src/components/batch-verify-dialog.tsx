@@ -74,7 +74,7 @@ export function BatchVerifyDialog({
 
           {/* 结果列表 */}
           {results.size > 0 && (
-            <div className="max-h-[400px] space-y-1 overflow-y-auto rounded-[8px] border border-hairline p-2">
+            <div className="max-h-[400px] space-y-1 overflow-y-auto rounded-[8px] border border-transparent p-2">
               {resultsArray.map((result) => (
                 <div
                   key={result.id}

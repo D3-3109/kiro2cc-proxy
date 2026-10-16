@@ -73,7 +73,7 @@ export function SearchBox({
 
   return (
     <label
-      className={`flex h-[31px] ${widthClass} shrink-0 items-center gap-[7px] rounded-[7px] border border-hairline-2 bg-surface px-2.5 text-ink-3 shadow-hair focus-within:border-brand`}
+      className={`flex h-[31px] ${widthClass} shrink-0 items-center gap-[7px] rounded-[7px] border border-transparent bg-surface px-2.5 text-ink-3 shadow-hair focus-within:border-brand`}
     >
       <Search className="size-[15px] shrink-0" />
       <input
@@ -97,7 +97,7 @@ export function SearchBox({
         shortcut && (
           <span
             aria-hidden="true"
-            className="shrink-0 rounded-[4px] border border-hairline px-1 py-px font-mono text-[10px] text-ink-3"
+            className="shrink-0 rounded-[4px] border border-transparent px-1 py-px font-mono text-[10px] text-ink-3"
           >
             {SHORTCUT_HINT}
           </span>

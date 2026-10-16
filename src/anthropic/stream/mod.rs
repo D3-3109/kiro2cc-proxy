@@ -22,7 +22,8 @@ pub(crate) use helpers::generate_fake_signature;
 pub use state::SseEvent;
 pub(crate) use thinking::split_thinking_and_visible;
 pub use thinking_text::{
-    ThinkingTextRewriter, is_claude_code_client, set_thinking_as_text, thinking_as_text_enabled,
+    ThinkingTextRewriter, ThinkingTextStyle, set_thinking_as_text, thinking_as_text_enabled,
+    thinking_text_style,
 };
 pub(crate) use thinking_text::{strip_dim_markers, strip_rendered_thinking};
 

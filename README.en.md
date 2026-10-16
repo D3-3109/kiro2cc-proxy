@@ -10,11 +10,11 @@
 
 ![Admin Panel](docs/assets/admin-panel.png)
 
-> **✅ Supported Models: Claude Sonnet 5.5 / Claude Sonnet 5 / Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 5.5 / Claude Opus 5 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Opus 4.8 / Claude Haiku 5.5 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.1 / MiniMax M2.5 / Qwen3-Coder / GPT-5.6 Sol / GPT-5.6 Terra / GPT-5.6 Luna**
+> **✅ Supported Models: Claude Sonnet 5.5 / Claude Sonnet 5 / Claude Sonnet 4.5 / Claude Sonnet 4.6 / Claude Opus 5.5 / Claude Opus 5 / Claude Opus 4.5 / Claude Opus 4.6 / Claude Opus 4.7 / Claude Opus 4.8 / Claude Haiku 5.5 / Claude Haiku 4.5 / DeepSeek 3.2 / GLM-5 / MiniMax M2.1 / MiniMax M2.5 / Qwen3-Coder / Kimi K3 / GPT-5.6 Sol / GPT-5.6 Terra / GPT-5.6 Luna**
 
 ### 📖 Quick Navigation
 
-[🚀 Quick Start](#-quick-start-new-users) ・ [🍎 macOS Deployment](#-local-deployment-macos) ・ [🪟 Windows Deployment](#-local-deployment-windows) ・ [🐧 Linux Deployment](#-server-deployment-linux) ・ [🔑 Get Accounts](#-getting-kiro-accounts) ・ [⚙️ Configuration](#-configuration-reference) ・ [🤖 Claude Code Integration](#-claude-code-integration) ・ [🧬 Codex CLI / OpenAI SDK](#-codex-cli--openai-sdk-integration) ・ [🔌 API Endpoints](#-api-endpoints) ・ [🗺️ Model Mapping](#-model-mapping) ・ [🛡️ Admin Panel](#-admin-panel) ・ [❓ FAQ](#-faq) ・ [⚠️ Notes](#-notes)
+[🚀 Quick Start](#-quick-start-new-users) ・ [🍎 macOS Deployment](#-local-deployment-macos) ・ [🪟 Windows Deployment](#-local-deployment-windows) ・ [🐧 Linux Deployment](#-server-deployment-linux) ・ [🔑 Get Accounts](#-getting-kiro-accounts) ・ [⚙️ Configuration](#️-configuration-reference) ・ [🤖 Claude Code Integration](#-claude-code-integration) ・ [🧬 Codex CLI / OpenAI SDK](#-codex-cli--openai-sdk-integration) ・ [🔌 API Endpoints](#-api-endpoints) ・ [🗺️ Model Mapping](#️-model-mapping) ・ [🛡️ Admin Panel](#️-admin-panel) ・ [❓ FAQ](#-faq) ・ [⚠️ Notes](#️-notes)
 
 ---
 
@@ -761,6 +761,7 @@ Any model name containing the following keywords is automatically mapped to the 
 | `*minimax*` (including 2.5/2-5) | `minimax-m2.5` |
 | `*minimax*` (others) | `minimax-m2.1` |
 | `*qwen*` | `qwen3-coder-next` |
+| `*kimi*` | `kimi-k3` |
 | `*gpt*` (including terra) | `gpt-5.6-terra` |
 | `*gpt*` (including luna) | `gpt-5.6-luna` |
 | `*gpt*` (including sol, or 5.6/5-6 without a variant name, defaults to the flagship tier) | `gpt-5.6-sol` |
@@ -919,11 +920,12 @@ MIT
 
 This project is based on [kiro.rs](https://github.com/hank9999/kiro.rs). Thanks to the original author for the open-source contribution.
 
-Thanks to all the contributors of this project:
+Thanks to all the contributors of this project (in no particular order):
 
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
+- [zbjincheng](https://github.com/zbjincheng)
 
 **Special thanks** — the following issues directly drove critical fixes:
 

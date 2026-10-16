@@ -197,6 +197,8 @@ export interface ModelItem {
   type: string
   max_tokens: number
   rate_multiplier?: number | null
+  /** 模型发布日期（YYYY-MM-DD）；未登记为 null，前端据此实时计算「最近新增」标记 */
+  released_at?: string | null
 }
 
 export interface ModelsResponse {
@@ -249,6 +251,11 @@ export interface UsageRecord {
   credentialLabel?: string
   clientIp?: string
   effort?: string
+  firstTokenMs?: number
+  durationMs?: number
+  thinkingTokenCount?: number
+  isStream?: boolean
+  userAgent?: string
 }
 
 // 分页原始记录响应
@@ -267,6 +274,8 @@ export interface DailySummary {
   totalCost: number
   totalCredits: number
   totalCreditsSaved?: number
+  totalInputTokens: number      // 累计输入 tokens（含 cache 命中部分）
+  totalCacheReadTokens: number  // 累计 cache 命中的输入 tokens
 }
 
 // 单账号在某 CST 日期的用量汇总（后端 /credentials/:id/usage/today）

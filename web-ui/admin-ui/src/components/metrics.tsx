@@ -15,7 +15,7 @@ export function MetricsBar({ cols = 4, children }: { cols?: 3 | 4 | 5; children:
   const template = cols === 5 ? BAR_COLS_5 : cols === 3 ? BAR_COLS_3 : BAR_COLS_4
   return (
     <section
-      className="grid shrink-0 overflow-hidden rounded-[16px] border border-hairline bg-surface shadow-hair [&>*:last-child_.metric-divider]:hidden"
+      className="grid shrink-0 overflow-hidden rounded-[16px] border border-transparent bg-surface shadow-hair [&>*:last-child_.metric-divider]:hidden"
       style={{ gridTemplateColumns: template }}
     >
       {children}
@@ -49,7 +49,7 @@ export function Metric({
       {/* cell ::after divider 等价：右侧 1px 竖线，top/bottom 18px；末列由 MetricsBar 的 last:hidden 自动隐藏 */}
       <span
         aria-hidden="true"
-        className="metric-divider absolute bottom-[14px] right-0 top-[14px] w-px bg-hairline"
+        className="metric-divider absolute bottom-[14px] right-0 top-[14px] w-[0.5px] bg-hairline"
       />
     </>
   )
@@ -110,7 +110,7 @@ export function MetricFoot({ className = '', children }: { className?: string; c
 
 /** 脚注分隔 */
 export function FootSep() {
-  return <span aria-hidden="true" className="h-[9px] w-px shrink-0 bg-hairline-2" />
+  return <span aria-hidden="true" className="h-[9px] w-[0.5px] shrink-0 bg-hairline-2" />
 }
 
 /** 状态点（方案1 .status-dot）：6px 圆点，ok/muted 二态 */

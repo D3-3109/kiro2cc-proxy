@@ -61,7 +61,7 @@ export function AccountTable({
   const { t } = useTranslation()
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[11px] border border-hairline bg-surface shadow-panel">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel">
       {/* .tscroll：sticky 表头依赖这里的滚动容器。整页撑满的 flex 外壳不在本轮范围，
           先用视口比例给出滚动上限（每页 50 行时必然触发内滚） */}
       <div className="max-h-[70vh] min-h-0 flex-1 overflow-y-auto">
@@ -130,7 +130,7 @@ export function AccountTable({
                       <button
                         type="button"
                         onClick={onClearFilters}
-                        className="rounded-[6px] border border-hairline-2 bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-2 shadow-hair transition-colors hover:text-ink"
+                        className="rounded-[6px] border border-transparent bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-2 shadow-hair transition-colors hover:bg-surface-2 hover:text-ink"
                       >
                         {t('credentials.clearFilters')}
                       </button>

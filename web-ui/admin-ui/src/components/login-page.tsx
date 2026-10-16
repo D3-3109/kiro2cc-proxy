@@ -35,7 +35,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   return (
     // 登录页无设计稿，按已建立的令牌与原语推导：`bg` 页面底 + `.panel` 卡片 + `.field` + `.btn-primary`
     <div className="grid min-h-screen place-items-center bg-background p-4">
-      <div className="w-full max-w-[352px] rounded-[11px] border border-hairline bg-surface p-[26px] shadow-pop">
+      <div className="w-full max-w-[352px] rounded-[11px] border border-transparent bg-surface p-[26px] shadow-pop">
         {/* 品牌区：徽标与文案沿用侧栏同一套渐变与字号比例，放大一档 */}
         <div className="flex items-center gap-3">
           <span

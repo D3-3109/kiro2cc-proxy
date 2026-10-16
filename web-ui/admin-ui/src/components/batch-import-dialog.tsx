@@ -436,7 +436,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2.5">
             {t('credentials.batchImportDialogTitle')}
-            <span className="rounded-[8px] border border-sky-100 bg-sky-100 px-3 py-2 text-[11px] font-medium tracking-[0.2px] text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-400">
+            <span className="rounded-[8px] border border-transparent bg-brand-soft px-3 py-2 text-[11px] font-medium tracking-[0.2px] text-brand">
               {t('credentials.importBadge')}
             </span>
           </DialogTitle>
@@ -493,7 +493,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={`relative rounded-[8px] border bg-surface-2 transition-colors focus-within:border-brand ${
+              className={`relative rounded-[8px] border-[0.5px] bg-surface-2 transition-colors focus-within:border-brand ${
                 dragActive ? 'border-brand' : 'border-hairline-2'
               }`}
             >
@@ -529,9 +529,9 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
             </div>
 
             {/* 琥珀色验活规则提示卡片 */}
-            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/40">
-              <Lightbulb className="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400" />
-              <p className="text-[11px] font-medium leading-[1.55] text-amber-600 dark:text-amber-500/80">
+            <div className="flex items-center gap-2 rounded-md border border-transparent bg-warn-soft px-3 py-2">
+              <Lightbulb className="h-3.5 w-3.5 shrink-0 text-warn" />
+              <p className="text-[11px] font-medium leading-[1.55] text-warn">
                 {t('credentials.batchImportHint')}
               </p>
             </div>
@@ -578,7 +578,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               </div>
 
               {/* 结果列表 */}
-              <div className="max-h-[300px] divide-y divide-hairline overflow-y-auto rounded-[8px] border border-hairline">
+              <div className="max-h-[300px] divide-y-[0.5px] divide-hairline overflow-y-auto rounded-[8px] border border-transparent">
                 {results.map((result) => (
                   <div key={result.index} className="p-3">
                     <div className="flex items-start gap-3">

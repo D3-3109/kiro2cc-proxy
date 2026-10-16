@@ -51,7 +51,7 @@ export function ApiKeyTable({
 }) {
   const { t } = useTranslation()
   return (
-    <section className="mt-[13px] flex min-h-0 flex-1 flex-col overflow-hidden rounded-[11px] border border-hairline bg-surface shadow-panel">
+    <section className="mt-[13px] flex min-h-0 flex-1 flex-col overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel">
       {/* .tscroll：sticky 表头依赖这里的滚动容器 */}
       <div className="max-h-[70vh] min-h-0 flex-1 overflow-y-auto">
         <table className="w-full border-separate border-spacing-0">
@@ -94,7 +94,7 @@ export function ApiKeyTable({
                       <button
                         type="button"
                         onClick={onClearFilters}
-                        className="rounded-[6px] border border-hairline-2 bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-2 shadow-hair transition-colors hover:text-ink"
+                        className="rounded-[6px] border border-transparent bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-2 shadow-hair transition-colors hover:bg-surface-2 hover:text-ink"
                       >
                         {t('credentials.clearFilters')}
                       </button>

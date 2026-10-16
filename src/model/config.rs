@@ -191,6 +191,25 @@ pub struct Config {
     #[serde(default = "default_write_chunking_max_lines")]
     pub write_chunking_max_lines: u32,
 
+    /// Kiro 请求体落盘取证开关（临时调试用）
+    ///
+    /// true 时每个发往 Kiro 的请求体都会写入 `app/config/kiro-body-dump/`
+    /// （0600 权限，文件名含毫秒时间戳），用于排查协议转换问题。
+    /// 仍兼容环境变量 `KIRO_DUMP_BODY=1`（两者任一满足即生效）。
+    /// 默认 false：不落盘。定位问题后应及时关闭。
+    #[serde(default)]
+    pub dump_kiro_body: bool,
+
+    /// 日志文件路径（可选）
+    ///
+    /// 配置后日志除控制台外同步以 append 模式写入该文件，便于持久化排查。
+    /// 文件打开失败时仅告警降级（只输出控制台），不影响启动。
+    /// 未配置时行为与现状完全一致（仅控制台）。
+    /// 注意：文件持续追加写入，无自动轮转，长期运行请配合外部 logrotate 或定期清理。
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_file: Option<String>,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -273,6 +292,8 @@ impl Default for Config {
             forward_suggestion_mode: false,
             thinking_as_text: true,
             write_chunking_max_lines: default_write_chunking_max_lines(),
+            dump_kiro_body: false,
+            log_file: None,
             config_path: None,
         }
     }
@@ -332,7 +353,9 @@ impl Config {
     /// - `LOAD_BALANCING_MODE`: 负载均衡模式
     /// - `MODEL_CACHE_TTL_SECS`: /v1/models 动态列表缓存 TTL（秒）
     /// - `CLIENT_TOKEN_PASSTHROUGH`: 客户端 token 直通开关
-    /// - `FORWARD_SUGGESTION_MODE`: Suggestion Mode 输入建议请求放行开关
+    /// - `WRITE_CHUNKING_MAX_LINES`: 分块写入约束行数上限
+    /// - `DUMP_KIRO_BODY`: Kiro 请求体落盘取证开关
+    /// - `LOG_FILE`: 日志文件路径
     pub fn apply_env_overrides(&mut self) {
         if let Ok(v) = env::var("HOST") {
             self.host = v;
@@ -382,6 +405,16 @@ impl Config {
             && let Ok(b) = v.parse::<bool>()
         {
             self.forward_suggestion_mode = b;
+        }
+        if let Ok(v) = env::var("DUMP_KIRO_BODY")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.dump_kiro_body = b;
+        }
+        if let Ok(v) = env::var("LOG_FILE")
+            && !v.trim().is_empty()
+        {
+            self.log_file = Some(v);
         }
         if let Ok(v) = env::var("THINKING_AS_TEXT")
             && let Ok(b) = v.parse::<bool>()
@@ -495,6 +528,81 @@ mod tests {
     fn test_forward_suggestion_mode_deserialize_explicit() {
         let config: Config = serde_json::from_str(r#"{"forwardSuggestionMode": true}"#).unwrap();
         assert!(config.forward_suggestion_mode);
+    }
+
+    #[test]
+    fn test_dump_kiro_body_default_false() {
+        // 缺省该字段时必须为 false（默认不落盘请求体）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(!config.dump_kiro_body);
+    }
+
+    #[test]
+    fn test_dump_kiro_body_deserialize_explicit() {
+        let config: Config = serde_json::from_str(r#"{"dumpKiroBody": true}"#).unwrap();
+        assert!(config.dump_kiro_body);
+    }
+
+    #[test]
+    fn test_log_file_default_none() {
+        // 缺省该字段时必须为 None（仅控制台输出，行为与现状一致）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(config.log_file.is_none());
+    }
+
+    #[test]
+    fn test_log_file_deserialize_explicit() {
+        let config: Config =
+            serde_json::from_str(r#"{"logFile": "app/config/proxy.log"}"#).unwrap();
+        assert_eq!(config.log_file.as_deref(), Some("app/config/proxy.log"));
+    }
+
+    #[test]
+    fn test_log_file_env_override() {
+        // 环境变量覆盖 config.json（容器化部署场景），子进程隔离规避 set_var UB
+        const CHILD_MARKER: &str = "KIRO_CONFIG_ENV_TEST_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.apply_env_overrides();
+            assert_eq!(config.log_file.as_deref(), Some("/tmp/proxy-test.log"));
+            return;
+        }
+
+        let status = std::process::Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model::config::tests::test_log_file_env_override",
+                "--test-threads=1",
+            ])
+            .env(CHILD_MARKER, "1")
+            .env("LOG_FILE", "/tmp/proxy-test.log")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_dump_kiro_body_env_override() {
+        // 环境变量覆盖 config.json（容器化部署场景），子进程隔离规避 set_var UB
+        const CHILD_MARKER: &str = "KIRO_CONFIG_ENV_TEST_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.apply_env_overrides();
+            assert!(config.dump_kiro_body);
+            return;
+        }
+
+        let status = std::process::Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model::config::tests::test_dump_kiro_body_env_override",
+                "--test-threads=1",
+            ])
+            .env(CHILD_MARKER, "1")
+            .env("DUMP_KIRO_BODY", "true")
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[test]

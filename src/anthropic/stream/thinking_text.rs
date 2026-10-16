@@ -7,7 +7,9 @@
 //! 像 Kiro CLI 一样实时可见。
 //!
 //! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
-//! 是否生效取决于客户端是否放行转义字符。首行为「💭 Thinking」标记，
+//! 是否生效取决于客户端是否放行转义字符，故 ANSI 样式仅用于终端入口（UA 入口为 `cli`）；
+//! Claude Desktop 等图形界面改用无转义的纯文本样式，入口未知的客户端回退到原生 thinking
+//! （见 [`thinking_text_style`]）。首行为「💭 Thinking」标记，
 //! 块收尾追加「💭 Thought for Ns (N tokens)」时长行（贴近 Claude Code 原生样式，
 //! token 数为该思考块正文的 cl100k_base 计数），
 //! 不带 markdown 引用前缀（客户端不显示竖线）。
@@ -68,6 +70,55 @@ pub fn is_claude_code_client(headers: &axum::http::HeaderMap) -> bool {
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|ua| ua.starts_with("claude-cli") || ua.starts_with("claude-code"))
+}
+
+/// 思考文本化的渲染样式
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThinkingTextStyle {
+    /// 每行用 ANSI dim 转义包裹（终端客户端：显示为灰色）
+    #[default]
+    Ansi,
+    /// 无转义的纯文本（图形界面客户端，如 Claude Desktop：不解析 ANSI，且按 Markdown 渲染）
+    Plain,
+}
+
+/// 按请求的客户端决定思考文本化的渲染样式；`None` 表示不启用（走原生 thinking）。
+///
+/// 渲染默认用 ANSI dim 转义，只有终端会把它当样式；Claude Desktop 等图形界面不解析，
+/// 会把 `ESC` 显示成方块、`[2m` / `[0m` 显示成明文（issue #48）。而 Desktop 的原生 thinking
+/// 默认不展示思考内容，所以对它改用无转义的 [`ThinkingTextStyle::Plain`]。
+///
+/// 判定依据是 UA 括号内的入口字段，如 `claude-cli/2.1.231 (external, cli)` 的 `cli`、
+/// `claude-cli/2.1.295 (external, claude-desktop-3p, agent-sdk/0.3.295)` 的 `claude-desktop-3p`：
+/// - 入口为 `cli` → [`ThinkingTextStyle::Ansi`]；
+/// - 入口以 `claude-desktop` 开头 → [`ThinkingTextStyle::Plain`]；
+/// - 入口为其他值（VS Code 扩展、SDK 等，渲染能力未知）→ `None`，宁可回退原生 thinking，
+///   也不输出可能无法渲染的转义码；
+/// - 解析不出入口（无括号 / 字段不足）→ 保持原有行为，按终端处理（Ansi）。
+pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTextStyle> {
+    if !is_claude_code_client(headers) {
+        return None;
+    }
+    let entrypoint = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .and_then(client_entrypoint)
+        .map(str::to_ascii_lowercase);
+    match entrypoint.as_deref() {
+        None | Some("cli") => Some(ThinkingTextStyle::Ansi),
+        Some(e) if e.starts_with("claude-desktop") => Some(ThinkingTextStyle::Plain),
+        Some(_) => None,
+    }
+}
+
+/// 取 UA 括号内的入口字段（第二项）：`claude-cli/x (external, <entrypoint>, ...)`。
+fn client_entrypoint(user_agent: &str) -> Option<&str> {
+    let inner = user_agent.split_once('(')?.1.split_once(')')?.0;
+    inner
+        .split(',')
+        .nth(1)
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
 }
 
 /// 剥离历史 text 块中由本模块渲染的整个思考块（标记行 + 思考正文 + 时长行），
@@ -272,6 +323,8 @@ fn format_token_count(n: u64) -> String {
 /// 把 thinking 块事件改写为 text 块事件的有状态转换器
 #[derive(Debug, Default)]
 pub struct ThinkingTextRewriter {
+    /// 渲染样式
+    style: ThinkingTextStyle,
     /// 已被改写为 text 的块索引
     indices: HashSet<i32>,
     /// 已输出首行标记的块
@@ -285,8 +338,56 @@ pub struct ThinkingTextRewriter {
 }
 
 impl ThinkingTextRewriter {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_style(style: ThinkingTextStyle) -> Self {
+        Self {
+            style,
+            ..Self::default()
+        }
+    }
+
+    /// 样式起始 / 复位转义；Plain 样式下均为空串
+    fn dim_on(&self) -> &'static str {
+        match self.style {
+            ThinkingTextStyle::Ansi => DIM_ON,
+            ThinkingTextStyle::Plain => "",
+        }
+    }
+
+    fn dim_off(&self) -> &'static str {
+        match self.style {
+            ThinkingTextStyle::Ansi => DIM_OFF,
+            ThinkingTextStyle::Plain => "",
+        }
+    }
+
+    /// 标记行结尾：Plain 样式（Markdown 渲染）下空一行，使标记行与正文分成两段
+    fn header_terminator(&self) -> &'static str {
+        match self.style {
+            ThinkingTextStyle::Ansi => "\n",
+            ThinkingTextStyle::Plain => "\n\n",
+        }
+    }
+
+    /// 思考正文内的换行：Plain 样式下用 Markdown 硬换行（行尾两个空格），否则相邻行会被
+    /// 渲染成同一段。仅影响正文展示，历史回传时整块思考正文都会被剥离。
+    fn body_line_break(&self) -> &'static str {
+        match self.style {
+            ThinkingTextStyle::Ansi => "\n",
+            ThinkingTextStyle::Plain => "  \n",
+        }
+    }
+
+    /// 时长行前的分隔：Plain 样式下空一行，避免时长行并入思考正文最后一段
+    fn duration_leader(&self) -> &'static str {
+        match self.style {
+            ThinkingTextStyle::Ansi => "\n",
+            ThinkingTextStyle::Plain => "\n\n",
+        }
     }
 
     /// 改写一批事件；非 thinking 块事件原样透传
@@ -336,21 +437,23 @@ impl ThinkingTextRewriter {
                     let mut rendered = String::new();
                     if self.header_sent.insert(i) {
                         // 首行：dim(💭 Thinking)，即 THOUGHT_HEADER + 换行
-                        rendered.push_str(DIM_ON);
+                        rendered.push_str(self.dim_on());
                         rendered.push_str(THOUGHT_HEADER);
-                        rendered.push_str(DIM_OFF);
-                        rendered.push('\n');
+                        rendered.push_str(self.dim_off());
+                        rendered.push_str(self.header_terminator());
                     }
+                    let (dim_on, dim_off, line_break) =
+                        (self.dim_on(), self.dim_off(), self.body_line_break());
                     let at_start = self.at_line_start.entry(i).or_insert(true);
                     for ch in text.chars() {
                         if *at_start {
-                            rendered.push_str(DIM_ON);
+                            rendered.push_str(dim_on);
                             *at_start = false;
                         }
                         if ch == '\n' {
                             // 换行前复位，样式不跨行
-                            rendered.push_str(DIM_OFF);
-                            rendered.push('\n');
+                            rendered.push_str(dim_off);
+                            rendered.push_str(line_break);
                             *at_start = true;
                         } else {
                             rendered.push(ch);
@@ -371,7 +474,9 @@ impl ThinkingTextRewriter {
                     // 无论是否追加时长行都要取出并清理累计正文，避免空块残留占用内存
                     let thinking_text = self.thinking_text.remove(&i).unwrap_or_default();
                     // 块在行中间结束时补一个复位，避免 dim 样式泄漏到后续正文
-                    if self.at_line_start.remove(&i) == Some(false) {
+                    if self.at_line_start.remove(&i) == Some(false)
+                        && self.style == ThinkingTextStyle::Ansi
+                    {
                         out.push(SseEvent::new(
                             "content_block_delta",
                             json!({
@@ -407,8 +512,13 @@ impl ThinkingTextRewriter {
                                 "type": "content_block_delta",
                                 "index": i,
                                 "delta": {"type": "text_delta", "text": format!(
-                                    "\n{}{}{}{}{}\n",
-                                    DIM_ON, THOUGHT_DURATION_PREFIX, duration, token_suffix, DIM_OFF
+                                    "{}{}{}{}{}{}\n",
+                                    self.duration_leader(),
+                                    self.dim_on(),
+                                    THOUGHT_DURATION_PREFIX,
+                                    duration,
+                                    token_suffix,
+                                    self.dim_off()
                                 )}
                             }),
                         ));
@@ -677,7 +787,7 @@ mod tests {
 
         for enabled in [false, true] {
             let mut ctx = StreamContext::new_with_thinking("claude-sonnet-4-6", 100, true)
-                .with_thinking_as_text(enabled);
+                .with_thinking_as_text(enabled.then_some(ThinkingTextStyle::Ansi));
             let mut events = ctx.generate_initial_events();
             events.extend(ctx.process_kiro_event(&reasoning("第一行\n第二", "")));
             events.extend(ctx.process_kiro_event(&reasoning("行", "SIG")));
@@ -754,5 +864,112 @@ mod tests {
         assert!(is_claude_code_client(&h));
         h.insert(axum::http::header::USER_AGENT, "codex/1.0".parse().unwrap());
         assert!(!is_claude_code_client(&h));
+    }
+
+    fn headers_with_ua(ua: &str) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert(axum::http::header::USER_AGENT, ua.parse().unwrap());
+        h
+    }
+
+    fn style_of(ua: &str) -> Option<ThinkingTextStyle> {
+        thinking_text_style(&headers_with_ua(ua))
+    }
+
+    #[test]
+    fn style_is_ansi_for_terminal_cli() {
+        assert_eq!(
+            style_of("claude-cli/2.1.231 (external, cli)"),
+            Some(ThinkingTextStyle::Ansi)
+        );
+        // 入口大小写不敏感
+        assert_eq!(
+            style_of("claude-cli/2.1.231 (external, CLI)"),
+            Some(ThinkingTextStyle::Ansi)
+        );
+    }
+
+    #[test]
+    fn style_is_plain_for_claude_desktop() {
+        // issue #48：Claude Desktop 不解析 ANSI，且原生 thinking 默认不展示
+        assert_eq!(
+            style_of("claude-cli/2.1.295 (external, claude-desktop-3p, agent-sdk/0.3.295)"),
+            Some(ThinkingTextStyle::Plain)
+        );
+        assert_eq!(
+            style_of("claude-cli/2.1.295 (external, claude-desktop, agent-sdk/0.3.295)"),
+            Some(ThinkingTextStyle::Plain)
+        );
+    }
+
+    #[test]
+    fn style_is_none_for_unknown_entrypoints() {
+        // 渲染能力未知的入口：回退原生 thinking
+        for ua in [
+            "claude-cli/2.1.295 (external, claude-vscode, agent-sdk/0.3.295)",
+            "claude-cli/2.1.295 (external, sdk-ts)",
+        ] {
+            assert_eq!(style_of(ua), None, "{ua}");
+        }
+    }
+
+    #[test]
+    fn style_keeps_legacy_behavior_when_entrypoint_unparseable() {
+        // 无括号 / 字段不足：沿用原有“Claude Code 前缀即放行”（Ansi）
+        for ua in [
+            "claude-code/1.0",
+            "claude-cli/2.1.231",
+            "claude-cli/2.1.231 (external)",
+            "claude-cli/2.1.231 (external, )",
+        ] {
+            assert_eq!(style_of(ua), Some(ThinkingTextStyle::Ansi), "{ua}");
+        }
+    }
+
+    #[test]
+    fn style_is_none_for_non_claude_code_or_missing_ua() {
+        assert_eq!(thinking_text_style(&axum::http::HeaderMap::new()), None);
+        assert_eq!(style_of("codex/1.0 (external, cli)"), None);
+    }
+
+    #[test]
+    fn plain_style_has_no_escapes_and_roundtrips_through_history_strip() {
+        let mut r = ThinkingTextRewriter::with_style(ThinkingTextStyle::Plain);
+        let mut out = r.rewrite(vec![start(0, "thinking")]);
+        out.extend(r.rewrite(vec![
+            delta(0, "thinking_delta", "thinking", "第一行\n第二"),
+            delta(0, "thinking_delta", "thinking", "行\n\n第三段"),
+            stop(0),
+        ]));
+        let rendered = text_of(&out);
+
+        // 无任何转义字符
+        assert!(!rendered.contains('\x1b'), "{rendered:?}");
+        // 标记行与正文分段；正文换行使用 Markdown 硬换行；时长行独立成段
+        assert!(rendered.starts_with(&format!(
+            "{THOUGHT_HEADER}\n\n第一行  \n第二行  \n  \n第三段"
+        )));
+        assert!(rendered.contains(&format!("\n\n{THOUGHT_DURATION_PREFIX}")));
+        assert!(rendered.ends_with(" tokens)\n"));
+
+        // 客户端把思考块与随后的答案拼成一个 assistant 文本回传：整块思考被剥离，只剩答案
+        let history_text = format!("{rendered}最终答案");
+        assert_eq!(strip_rendered_thinking(&history_text), "最终答案");
+    }
+
+    #[test]
+    fn plain_style_emits_no_extra_reset_delta_for_unterminated_line() {
+        // Ansi 样式下块在行中间结束需补一个复位；Plain 没有转义，不应多出空/无意义的 delta
+        let mut r = ThinkingTextRewriter::with_style(ThinkingTextStyle::Plain);
+        let mut out = r.rewrite(vec![start(0, "thinking")]);
+        out.extend(r.rewrite(vec![
+            delta(0, "thinking_delta", "thinking", "没有换行结尾"),
+            stop(0),
+        ]));
+        let deltas: Vec<&str> = out
+            .iter()
+            .filter_map(|e| e.data["delta"]["text"].as_str())
+            .collect();
+        assert!(deltas.iter().all(|t| !t.is_empty() && !t.contains('\x1b')));
     }
 }

@@ -774,7 +774,6 @@ impl MultiTokenManager {
         if !exists {
             anyhow::bail!("账号不存在: {}", id);
         }
-
         // 如果 refreshToken 变更，需要重新验证
         let needs_revalidation = update.refresh_token.is_some();
 
@@ -840,6 +839,9 @@ impl MultiTokenManager {
                 Self::apply_update_fields(&mut entry.credentials, &update);
             }
         }
+
+        // 账号配置（如 profileArn、refreshToken）可能改变其模型权限，旧探测结果作废
+        self.invalidate_model_support(id);
 
         self.persist_credentials()?;
         tracing::info!("成功更新账号 #{}", id);
@@ -982,6 +984,8 @@ impl MultiTokenManager {
                     .unwrap_or(0);
             }
         }
+
+        self.invalidate_model_support(id);
 
         // 持久化更改
         self.persist_credentials()?;

@@ -67,6 +67,48 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.27".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![
+                Bilingual::new(
+                    "请求日志新增「用时」列：流式记录展示首字/耗时双徽章（按快慢分档着色），非流式仅耗时；首字埋点按客户端可见产出判定，桥接 web_search 计入、空事件不计",
+                    "Usage log gains a Duration column: streaming records show first-token/duration badges tinted by speed, non-streaming shows duration only; first-token timing is keyed to client-visible output — bridged web_search counts, empty events don't",
+                ),
+                Bilingual::new(
+                    "请求日志新增深度思考 token 统计：🧠 徽章内联在输出 Tokens 旁，BPE 真值口径，与客户端「Thought for Ns (N tokens)」显示一致",
+                    "Usage log gains thinking-token statistics: a 🧠 badge inline next to output tokens, BPE-exact, consistent with the client's \"Thought for Ns (N tokens)\" display",
+                ),
+                Bilingual::new(
+                    "支持上游新增的 kimi-k3 模型：关键词映射、静态模型表条目、支持模型页归入 KIMI 家族；深度思考按第三方模型惯例走文本标签协议",
+                    "Supports the new upstream kimi-k3 model: keyword mapping, static model list entry, KIMI family grouping on the models page; deep thinking follows the third-party text-tag convention",
+                ),
+            ])],
+        },
+        ReleaseNote {
+            version: "3.4.26".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "admin-ui 新增主题设置页：37 套色彩主题（经典网站/浅色/深色/编辑器分组）× 明暗双模式自由组合，带实时预览色板与 View Transition 圆形扩散切换动画，选择持久化到 localStorage；侧栏顶栏新增主题入口，支持一键恢复默认外观",
+                "admin-ui gains a Theme Settings page: 37 color themes (website/light/dark/editor groups) freely combined with light/dark modes, featuring live preview swatches and a View Transition circular reveal animation, with the selection persisted to localStorage; a theme entry is added to the sidebar and top bar, with one-click reset to the default appearance",
+            )])],
+        },
+        ReleaseNote {
+            version: "3.4.25".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![Bilingual::new(
+                "混合账号池按账号实际可用模型路由：调度前用各账号 ListAvailableModels 探测结果前置过滤，请求不再被分发到不支持目标模型的账号（此前上游直接拒绝且不触发故障转移）。探测结果缓存 30 分钟、失败 2 分钟后重试，稳态零网络开销；探测失败/空列表视为未知不过滤，候选全部明确不支持时回退为不过滤（issue #49）",
+                "Model-aware routing for mixed account pools: account availability is probed via ListAvailableModels and requests are no longer dispatched to accounts that do not support the target model (previously rejected upstream without failover). Probe results are cached for 30 minutes with a 2-minute retry after failure, at zero steady-state network cost; failures/empty lists are treated as unknown (no filtering), and when all candidates are known-unsupported the filter is skipped (issue #49)",
+            )])],
+        },
+        ReleaseNote {
+            version: "3.4.24".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "修复 Claude Desktop 客户端开启 thinkingAsText 时思考内容出现 ANSI 转义乱码（[2m / [0m 与方块字符）：终端能渲染 ANSI，但 Desktop 是图形界面不解析，ESC 直接显示为乱码。现按 User-Agent 括号内的入口字段选择渲染样式——cli 或解析不出入口仍用 ANSI（行为不变），claude-desktop* 改用无转义的纯文本（标记行与正文、时长行间留空行，正文换行用 Markdown 硬换行以适配渲染），其余入口（claude-vscode、sdk-ts 等渲染能力未知）不启用该功能、回退原生 thinking（issue #48）",
+                "Fixed ANSI escape garbage ([2m / [0m and box characters) in thinking output when thinkingAsText is enabled on Claude Desktop: terminals render ANSI but Desktop is a GUI that does not parse it, so the ESC byte shows as garbage. The render style is now chosen by the entrypoint field in the User-Agent — cli or unparseable entrypoints keep ANSI (unchanged), claude-desktop* switches to escape-free plain text (blank lines around the marker and duration lines, Markdown hard breaks for body newlines), and other entrypoints (claude-vscode, sdk-ts, etc., whose rendering capability is unknown) leave the feature off and fall back to native thinking (issue #48)",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.22".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![

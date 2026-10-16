@@ -1,6 +1,7 @@
 //! StreamContext 主结构：聚合单次流式请求的全部状态（事件缓冲、块状态、usage 统计），是 SSE 状态机的上下文载体。
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::json;
 use uuid::Uuid;
@@ -41,6 +42,9 @@ pub struct StreamContext {
     pub visible_chars_cn: i64,
     /// 上报口径的输出字符累计（不含 thinking），非中文桶
     pub visible_chars_other: i64,
+    /// 客户端实际收到的 thinking 全文缓存（BPE 真值统计口径，
+    /// 落库时一次性 count_tokens）。见 `thinking_token_count()`
+    pub thinking_full_text: String,
     /// 工具块索引映射 (tool_id -> block_index)
     pub tool_block_indices: HashMap<String, i32>,
     /// thinking 是否启用
@@ -71,6 +75,8 @@ pub struct StreamContext {
     credential_id: Option<u64>,
     /// 客户端 IP（用于用量记录）
     client_ip: Option<String>,
+    /// 客户端 User-Agent（用于用量记录）
+    user_agent: Option<String>,
     /// 模拟出的 prompt cache usage
     prompt_cache_usage: PromptCacheUsage,
     /// 从 meteringEvent 获取的真实 credits 消耗
@@ -92,6 +98,10 @@ pub struct StreamContext {
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
     /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
     echo_guard: super::echo_guard::ResponseEchoGuard,
+    /// 请求计时起点（进入 handler 时注入；None = 未注入，落库时不计耗时）
+    pub(crate) request_started_at: Option<Instant>,
+    /// 首个上游业务事件时刻（keepalive 不计；None = 尚未收到或未注入起点）
+    pub(crate) first_token_at: Option<Instant>,
 }
 
 impl StreamContext {
@@ -112,6 +122,7 @@ impl StreamContext {
             output_chars_other: 0,
             visible_chars_cn: 0,
             visible_chars_other: 0,
+            thinking_full_text: String::new(),
             tool_block_indices: HashMap::new(),
             thinking_enabled,
             thinking_buffer: String::new(),
@@ -127,6 +138,7 @@ impl StreamContext {
             api_key_id: None,
             credential_id: None,
             client_ip: None,
+            user_agent: None,
             prompt_cache_usage: PromptCacheUsage::uncached(input_tokens),
             metering_usage: None,
             metering_cache_read_tokens: None,
@@ -135,6 +147,22 @@ impl StreamContext {
             prefix_estimated_tokens: None,
             effort: None,
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
+            request_started_at: None,
+            first_token_at: None,
+        }
+    }
+
+    /// 注入请求计时起点（进入 handler 时调用；首个客户端可见 SSE 产出时计算首字延迟）
+    pub fn with_request_started_at(mut self, started_at: Instant) -> Self {
+        self.request_started_at = Some(started_at);
+        self
+    }
+
+    /// 标记首个客户端可见 SSE 产出的时刻（幂等：仅首次调用生效；空输出帧与
+    /// keepalive 不经过此路径，调用侧按「本帧是否产出非空 SSE 事件」判定）
+    pub fn mark_first_token(&mut self) {
+        if self.first_token_at.is_none() {
+            self.first_token_at = Some(Instant::now());
         }
     }
 
@@ -152,8 +180,11 @@ impl StreamContext {
     }
 
     /// 开启思考文本化：出站 SSE 的 thinking 块改写为 text 块（见 `thinking_text` 模块）
-    pub fn with_thinking_as_text(mut self, enabled: bool) -> Self {
-        self.thinking_text = enabled.then(crate::anthropic::stream::ThinkingTextRewriter::new);
+    pub fn with_thinking_as_text(
+        mut self,
+        style: Option<crate::anthropic::stream::ThinkingTextStyle>,
+    ) -> Self {
+        self.thinking_text = style.map(crate::anthropic::stream::ThinkingTextRewriter::with_style);
         self
     }
 
@@ -178,11 +209,13 @@ impl StreamContext {
         api_key_id: Option<u32>,
         credential_id: Option<u64>,
         client_ip: Option<String>,
+        user_agent: Option<String>,
     ) -> Self {
         self.usage_tracker = tracker;
         self.api_key_id = api_key_id;
         self.credential_id = credential_id;
         self.client_ip = client_ip;
+        self.user_agent = user_agent;
         self
     }
 
@@ -612,8 +645,22 @@ impl StreamContext {
         events
     }
 
+    /// 客户端可见 thinking 文案入缓存（落库 thinking_token_count 统计口径）；
+    /// 空串跳过（content_block_stop 前的收尾空事件不计数）。
+    /// 流式两条发射路径（标签解析 / native reasoning）统一经此收敛，防第三发射点遗漏。
+    pub(super) fn accumulate_thinking(&mut self, text: &str) {
+        if !text.is_empty() {
+            self.thinking_full_text.push_str(text);
+        }
+    }
+
     /// 创建 thinking_delta 事件
-    fn create_thinking_delta_event(&self, index: i32, thinking: &str) -> SseEvent {
+    ///
+    /// 非空内容同时写入 thinking 全文缓存（落库为 thinking_token_count 的统计口径：
+    /// 客户端实际收到的 thinking 文案 BPE 真值，与 visible_chars 同语义）；空串事件（
+    /// content_block_stop 前的收尾）不计数。
+    fn create_thinking_delta_event(&mut self, index: i32, thinking: &str) -> SseEvent {
+        self.accumulate_thinking(thinking);
         SseEvent::new(
             "content_block_delta",
             json!({
@@ -800,10 +847,11 @@ impl StreamContext {
                     }
                 } else {
                     // 如果还在 thinking 块内，发送剩余内容作为 thinking_delta
+                    // （mem::take 解借用冲突：参数与 &mut self 同源；该分支块末
+                    // self.thinking_buffer.clear() 无条件清空，take 后无需还回）
                     if let Some(thinking_index) = self.thinking_block_index {
-                        events.push(
-                            self.create_thinking_delta_event(thinking_index, &self.thinking_buffer),
-                        );
+                        let buffer = std::mem::take(&mut self.thinking_buffer);
+                        events.push(self.create_thinking_delta_event(thinking_index, &buffer));
                     }
                     // 关闭 thinking 块：先发送空的 thinking_delta，再发送 content_block_stop
                     if let Some(thinking_index) = self.thinking_block_index {
@@ -892,17 +940,37 @@ impl StreamContext {
                 key_id,
                 self.credential_id
             );
+            // 计时口径：first_token_ms = 起点 → 首个客户端可见 SSE 产出（空输出帧
+            // 与 keepalive 不计）；duration_ms = 起点 → 落库前。
+            // 起点未注入（None）时二者均不计（等价旧数据）
+            let (first_token_ms, duration_ms) = match self.request_started_at {
+                Some(started) => (
+                    self.first_token_at
+                        .map(|t| (t - started).as_millis() as u64),
+                    Some((Instant::now() - started).as_millis() as u64),
+                ),
+                None => (None, None),
+            };
+            // 无 thinking 时落 None，与「None = 未产生思考」语义统一（非流式同口径）
+            let thinking_tokens = self.thinking_token_count();
             tracker.record(
                 key_id,
-                self.credential_id,
                 self.model.clone(),
                 final_input_tokens,
                 billed_output_tokens,
-                self.client_ip.clone(),
-                self.metering_usage,
-                report_cache_read,
-                report_cache_creation,
-                self.effort.clone(),
+                crate::model::usage::RecordOptions {
+                    credential_id: self.credential_id,
+                    client_ip: self.client_ip.clone(),
+                    credits_used: self.metering_usage,
+                    cache_read_input_tokens: report_cache_read,
+                    cache_creation_input_tokens: report_cache_creation,
+                    effort: self.effort.clone(),
+                    first_token_ms,
+                    duration_ms,
+                    thinking_token_count: (thinking_tokens > 0).then_some(thinking_tokens),
+                    is_stream: Some(true),
+                    user_agent: self.user_agent.clone(),
+                },
             );
         }
         // 流式 SSE 路径暂未接入 fingerprint，cache_creation 不区分 5m/1h tier，

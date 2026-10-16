@@ -9,16 +9,16 @@ const badgeVariants = cva(
     variants: {
       variant: {
         /** .tag.new */
-        default: 'border-brand-line bg-brand-soft text-brand',
+        default: 'bg-brand-soft text-brand',
         /** .tag.off */
-        secondary: 'border-hairline-2 bg-surface-3 text-ink-3',
+        secondary: 'bg-surface-3 text-ink-3',
         /** .tag.rate */
-        destructive: 'border-danger-line bg-danger-soft text-danger',
-        outline: 'border-hairline-2 text-ink-2',
+        destructive: 'bg-danger-soft text-danger',
+        outline: 'text-ink-2',
         /** .tag.ok */
-        success: 'border-ok-line bg-ok-soft text-ok',
+        success: 'bg-ok-soft text-ok',
         /** .tag.warn */
-        warning: 'border-warn-line bg-warn-soft text-warn',
+        warning: 'bg-warn-soft text-warn',
       },
     },
     defaultVariants: {

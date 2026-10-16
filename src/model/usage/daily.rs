@@ -15,6 +15,10 @@ pub struct DailySummary {
     pub total_credits: f64,
     /// 节省的 credits 总量（仅含有 credits_used 的记录）
     pub total_credits_saved: f64,
+    /// 累计输入 tokens（含 cache 命中部分）
+    pub total_input_tokens: u64,
+    /// 累计 cache 命中的输入 tokens（None 按 0 计入）
+    pub total_cache_read_tokens: u64,
 }
 
 /// 指定账号在指定 CST 日期的用量汇总
@@ -30,6 +34,8 @@ pub struct CredentialDaySummary {
     pub total_credits: f64,
     /// 节省的 credits 总量（仅含有 credits_used 的记录）
     pub total_credits_saved: f64,
+    /// 累计 cache 命中的输入 tokens（None 按 0 计入）
+    pub total_cache_read_tokens: u64,
 }
 
 impl UsageTracker {
@@ -47,6 +53,7 @@ impl UsageTracker {
         let mut requests: u64 = 0;
         let mut input_tokens: u64 = 0;
         let mut output_tokens: u64 = 0;
+        let mut cache_read_tokens: u64 = 0;
         let mut cost: f64 = 0.0;
         let mut credits: f64 = 0.0;
         let mut credits_saved: f64 = 0.0;
@@ -67,6 +74,8 @@ impl UsageTracker {
             requests += 1;
             input_tokens = input_tokens.saturating_add(r.input_tokens.max(0) as u64);
             output_tokens = output_tokens.saturating_add(r.output_tokens.max(0) as u64);
+            cache_read_tokens = cache_read_tokens
+                .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
             cost += r.estimated_cost;
             let k_ref = get_k_ref(&r.model);
             credits += r.credits_used.unwrap_or(r.estimated_cost * k_ref);
@@ -81,6 +90,7 @@ impl UsageTracker {
             total_requests: requests,
             total_input_tokens: input_tokens,
             total_output_tokens: output_tokens,
+            total_cache_read_tokens: cache_read_tokens,
             total_cost: cost,
             total_credits: credits,
             total_credits_saved: credits_saved,
@@ -92,7 +102,17 @@ impl UsageTracker {
         use std::collections::BTreeMap;
         let cst = FixedOffset::east_opt(8 * 3600).unwrap();
         let records = self.records.read();
-        let mut map: BTreeMap<String, (u64, f64, f64, f64)> = BTreeMap::new();
+        // 命名字段聚合器：避免 6 元组按位置索引在新增字段时错位
+        #[derive(Default)]
+        struct DayAgg {
+            requests: u64,
+            cost: f64,
+            credits: f64,
+            saved: f64,
+            inputs: u64,
+            cache_reads: u64,
+        }
+        let mut map: BTreeMap<String, DayAgg> = BTreeMap::new();
         for r in records.iter() {
             let date = r
                 .created_at
@@ -100,23 +120,29 @@ impl UsageTracker {
                 .format("%Y-%m-%d")
                 .to_string();
             let entry = map.entry(date).or_default();
-            entry.0 += 1;
-            entry.1 += r.estimated_cost;
-            entry.2 += r
+            entry.requests += 1;
+            entry.cost += r.estimated_cost;
+            entry.credits += r
                 .credits_used
                 .unwrap_or(r.estimated_cost * get_k_ref(&r.model));
             if let Some(cu) = r.credits_used {
-                entry.3 += r.estimated_cost * get_k_ref(&r.model) - cu;
+                entry.saved += r.estimated_cost * get_k_ref(&r.model) - cu;
             }
+            entry.inputs = entry.inputs.saturating_add(r.input_tokens.max(0) as u64);
+            entry.cache_reads = entry
+                .cache_reads
+                .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
         }
         let mut result: Vec<DailySummary> = map
             .into_iter()
-            .map(|(date, (reqs, cost, credits, saved))| DailySummary {
+            .map(|(date, agg)| DailySummary {
                 date,
-                total_requests: reqs,
-                total_cost: cost,
-                total_credits: credits,
-                total_credits_saved: saved,
+                total_requests: agg.requests,
+                total_cost: agg.cost,
+                total_credits: agg.credits,
+                total_credits_saved: agg.saved,
+                total_input_tokens: agg.inputs,
+                total_cache_read_tokens: agg.cache_reads,
             })
             .collect();
         result.sort_by(|a, b| b.date.cmp(&a.date));
@@ -194,6 +220,11 @@ impl UsageTracker {
                     credential_label,
                     client_ip: r.client_ip,
                     effort: r.effort,
+                    first_token_ms: r.first_token_ms,
+                    duration_ms: r.duration_ms,
+                    thinking_token_count: r.thinking_token_count,
+                    is_stream: r.is_stream,
+                    user_agent: r.user_agent,
                 }
             })
             .collect();

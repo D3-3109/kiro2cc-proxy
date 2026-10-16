@@ -37,8 +37,8 @@ interface EventLogRecord {
 
 /** 色调白名单：动态拼接类名会被 Tailwind purge，故用静态 Record */
 const TONE = {
-  warn: { value: 'text-warn', tag: 'text-warn bg-warn-soft border-warn-line' },
-  danger: { value: 'text-danger', tag: 'text-danger bg-danger-soft border-danger-line' },
+  warn: { value: 'text-warn', tag: 'text-warn bg-warn-soft border-transparent' },
+  danger: { value: 'text-danger', tag: 'text-danger bg-danger-soft border-transparent' },
 } as const
 
 /** 标签（设计稿 .tag） */
@@ -182,7 +182,7 @@ export function EventLogPage({
                         {formatDateTime(record.createdAt)}
                       </td>
                       <td className={CELL}>
-                        <span className={`${TAG} border-hairline-2 bg-surface-3 text-ink-2`}>
+                        <span className={`${TAG} border-transparent bg-surface-3 text-ink-2`}>
                           {record.requestType.toUpperCase()}
                         </span>
                       </td>
@@ -232,7 +232,7 @@ export function EventLogPage({
           <DialogHeader>
             <DialogTitle>{t('logs.fullResponseTitle')}</DialogTitle>
           </DialogHeader>
-          <pre className="flex-1 overflow-y-auto whitespace-pre-wrap break-all rounded-[8px] border border-hairline bg-surface-2 p-3 font-mono text-[11.5px] leading-[1.55] text-ink-2">
+          <pre className="flex-1 overflow-y-auto whitespace-pre-wrap break-all rounded-[8px] border border-transparent bg-surface-2 p-3 font-mono text-[11.5px] leading-[1.55] text-ink-2">
             {selectedBody}
           </pre>
         </DialogContent>

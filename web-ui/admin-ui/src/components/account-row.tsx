@@ -200,7 +200,7 @@ export function AccountRow({
               <span className="truncate">{displayName}</span>
               <span
                 title={t('credentials.priorityLabel') + credential.priority}
-                className="flex-none rounded-[4px] border border-hairline-2 px-[3px] text-[9.5px] font-semibold tracking-[0.02em] text-ink-3"
+                className="flex-none rounded-[4px] border border-transparent px-[3px] text-[9.5px] font-semibold tracking-[0.02em] text-ink-3"
               >
                 P{credential.priority}
               </span>
@@ -215,7 +215,7 @@ export function AccountRow({
               {credential.hasProxy && credential.proxyUrl && (
                 <span
                   title={t('credentials.proxyLabel', { url: credential.proxyUrl })}
-                  className="flex-none rounded-[4px] border border-brand-line bg-brand-soft px-[3px] text-[9px] font-semibold tracking-[0.04em] text-brand"
+                  className="flex-none rounded-[4px] border border-transparent bg-brand-soft px-[3px] text-[9px] font-semibold tracking-[0.04em] text-brand"
                 >
                   PROXY
                 </span>
@@ -223,7 +223,7 @@ export function AccountRow({
               {credential.hasProfileArn && (
                 <span
                   title={t('credentials.profileArnBadge')}
-                  className="flex-none rounded-[4px] border border-hairline-2 px-[3px] text-[9px] font-semibold tracking-[0.04em] text-ink-3"
+                  className="flex-none rounded-[4px] border border-transparent px-[3px] text-[9px] font-semibold tracking-[0.04em] text-ink-3"
                 >
                   ARN
                 </span>
@@ -245,7 +245,7 @@ export function AccountRow({
       <td className={CELL}>
         {balance?.subscriptionTitle ? (
           <span
-            className={`inline-block whitespace-nowrap rounded-[5px] border border-hairline bg-surface-3 px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.03em] ${getSubscriptionColor(balance.subscriptionTitle)}`}
+            className={`inline-block whitespace-nowrap rounded-[5px] border border-transparent bg-surface-3 px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.03em] ${getSubscriptionColor(balance.subscriptionTitle)}`}
           >
             {balance.subscriptionTitle}
           </span>
@@ -382,7 +382,7 @@ export function AccountRow({
             <Power className="size-[13px]" strokeWidth={1.7} />
             {credential.disabled ? t('credentials.stateActionEnable') : t('credentials.stateActionDisable')}
           </button>
-          <span aria-hidden="true" className="mx-[5px] h-4 w-px flex-none bg-hairline" />
+          <span aria-hidden="true" className="mx-[5px] h-4 w-[0.5px] flex-none bg-hairline" />
           {/* 账号级 thinking adaptive 注入：点击直接切换，图标与颜色显示当前状态 */}
           <button
             type="button"

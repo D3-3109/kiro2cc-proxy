@@ -388,6 +388,22 @@ pub struct SetThinkingAsTextRequest {
     pub enabled: bool,
 }
 
+/// Kiro 请求体落盘取证开关查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DumpKiroBodyResponse {
+    /// 是否把发往 Kiro 的请求体落盘到 app/config/kiro-body-dump/
+    pub enabled: bool,
+}
+
+/// 设置 Kiro 请求体落盘取证开关请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDumpKiroBodyRequest {
+    /// 是否把发往 Kiro 的请求体落盘到 app/config/kiro-body-dump/
+    pub enabled: bool,
+}
+
 /// 运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）查询响应
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -590,6 +606,8 @@ pub struct AdminModelItem {
     pub model: crate::anthropic::types::Model,
     /// 官方费率倍率（实时查询，无法匹配或上游调用失败时为 None）
     pub rate_multiplier: Option<f64>,
+    /// 模型发布日期（`YYYY-MM-DD`）；未登记为 None，前端据此实时计算「最近新增」标记
+    pub released_at: Option<String>,
 }
 
 /// 支持模型列表响应

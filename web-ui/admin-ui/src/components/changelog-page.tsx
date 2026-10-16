@@ -38,7 +38,7 @@ const SECTION_ICON: Readonly<Record<SectionKind, LucideIcon>> = {
   chg: RefreshCw,
   other: Dot,
 }
-const TAG_CURRENT = `${TAG_BASE} border-brand-line bg-brand-soft text-brand`
+const TAG_CURRENT = `${TAG_BASE} border-transparent bg-brand-soft text-brand`
 const TL_IDX_LAB = 'px-0.5 pb-2 text-[10px] font-semibold uppercase tracking-[.08em] text-ink-3'
 const TL_LINK =
   'flex h-[27px] w-full items-center gap-[7px] rounded-[6px] px-2 font-mono text-[11.5px] text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand'
@@ -70,7 +70,7 @@ function renderInline(text: string): ReactNode {
     i % 2 === 1 ? (
       <code
         key={i}
-        className="rounded-[4px] border border-hairline bg-surface-3 px-1 font-mono text-[11.5px] text-ink"
+        className="rounded-[4px] border border-transparent bg-surface-3 px-1 font-mono text-[11.5px] text-ink"
       >
         {part}
       </code>
@@ -271,12 +271,12 @@ export function ChangelogPage({ onBack }: ChangelogPageProps) {
                   </div>
 
                   {note.groups.length > 0 && (
-                    <div className="mt-[9px] overflow-hidden rounded-[10px] border border-hairline bg-surface shadow-hair">
+                    <div className="mt-[9px] overflow-hidden rounded-[10px] border border-transparent bg-surface shadow-hair">
                       {note.groups.map((group, groupIdx) => {
                         const kind = kindOf(group)
                         const Icon = SECTION_ICON[kind]
                         return (
-                          <div key={groupIdx} className="border-b border-hairline px-[14px] py-[11px] last:border-b-0">
+                          <div key={groupIdx} className="border-b-[0.5px] border-hairline px-[14px] py-[11px] last:border-b-0">
                             <div
                               className={`mb-[7px] flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.07em] ${SECTION_STYLE[kind]}`}
                             >

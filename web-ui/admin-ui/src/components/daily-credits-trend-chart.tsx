@@ -79,7 +79,7 @@ export function DailyCreditsTrendChart({ points }: { points: TrendPoint[] }) {
   )
 
   return (
-    <section className="shrink-0 overflow-hidden rounded-[11px] border border-hairline bg-surface shadow-panel">
+    <section className="shrink-0 overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel">
       {/* 设计稿 .chart-head */}
       <div className="flex flex-wrap items-center gap-2.5 px-4 pt-[13px]">
         <div>
@@ -92,7 +92,7 @@ export function DailyCreditsTrendChart({ points }: { points: TrendPoint[] }) {
             {t('dailyStats.legendDaily')}
           </span>
           <span className="flex items-center gap-[5px]">
-            <i aria-hidden="true" className="block size-[9px] rounded-[2px] border border-hairline-2 bg-surface-3" />
+            <i aria-hidden="true" className="block size-[9px] rounded-[2px] border border-transparent bg-surface-3" />
             {t('dailyStats.legendZeroBand')}
           </span>
         </div>

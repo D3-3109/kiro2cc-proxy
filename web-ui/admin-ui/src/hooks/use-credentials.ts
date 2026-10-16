@@ -16,6 +16,8 @@ import {
   setClientTokenPassthrough,
   getThinkingAsText,
   setThinkingAsText,
+  getDumpKiroBody,
+  setDumpKiroBody,
   getRuntimeConfig,
   setRuntimeConfig,
   setLoadBalancingMode,
@@ -241,6 +243,25 @@ export function useSetThinkingAsText() {
     mutationFn: setThinkingAsText,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['thinkingAsText'] })
+    },
+  })
+}
+
+// 获取 Kiro 请求体落盘取证开关
+export function useDumpKiroBody() {
+  return useQuery({
+    queryKey: ['dumpKiroBody'],
+    queryFn: getDumpKiroBody,
+  })
+}
+
+// 设置 Kiro 请求体落盘取证开关
+export function useSetDumpKiroBody() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: setDumpKiroBody,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dumpKiroBody'] })
     },
   })
 }

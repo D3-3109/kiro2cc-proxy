@@ -37,7 +37,7 @@ export function AccountPanelFoot({
   const { t } = useTranslation()
 
   return (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t border-hairline bg-surface-2 px-[13px] py-[9px] text-[11.5px] text-ink-3">
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t-[0.5px] border-hairline bg-surface-2 px-[13px] py-[9px] text-[11.5px] text-ink-3">
       {selectedCount > 0 && (
         <>
           <span className="flex-none">{t('dashboard.selectedCount', { count: selectedCount })}</span>

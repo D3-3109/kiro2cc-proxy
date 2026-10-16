@@ -68,6 +68,23 @@ fn drop_thinking_blocks(content: &mut Vec<serde_json::Value>) {
     content.retain(|b| b["type"] != "thinking");
 }
 
+/// 统计剔除后仍存留的 thinking 块 token（BPE 真值口径，与 estimate_output_tokens 同族）。
+/// 须在 `drop_thinking_blocks` 之后调用：被剔除内容客户端不可见，不计——
+/// 与流式「客户端实际收到」口径对齐。无 thinking 块或仅有 0 token 空块
+/// （signature-only）时返回 None（未产生有效思考，与流式落库语义一致）。
+fn count_thinking_tokens(content: &[serde_json::Value]) -> Option<i32> {
+    let mut total = 0i32;
+    for block in content {
+        if block["type"] == "thinking"
+            && let Some(text) = block["thinking"].as_str()
+        {
+            total += token::count_tokens(text) as i32;
+        }
+    }
+    // 与流式 `(tokens > 0).then_some(tokens)` 对齐：signature-only 空块（0 token）落 None
+    (total > 0).then_some(total)
+}
+
 fn flush_native_reasoning(
     pending: &mut ReasoningContentEvent,
     blocks: &mut Vec<serde_json::Value>,
@@ -209,7 +226,11 @@ pub(crate) async fn handle_non_stream_request(
     // 客户端侧 thinking 请求状态（resolve_thinking_enabled 的结果，与流式分支同源）；
     // 与账号开关在下方合成最终裁决，供 effort 入库口径与流式路径保持一致
     thinking_client_enabled: bool,
+    // 客户端 User-Agent（随 usage 记录入库）
+    user_agent: Option<String>,
 ) -> Response {
+    // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
+    let request_started_at = std::time::Instant::now();
     // 调用 Kiro API（支持多账号故障转移）
     let (response, credential_id) = match provider
         .call_api(
@@ -550,6 +571,9 @@ pub(crate) async fn handle_non_stream_request(
         drop_thinking_blocks(&mut content);
     }
 
+    // 统计剔除后仍存留的 thinking 块 token（落库观测字段，见 count_thinking_tokens）
+    let thinking_token_count = count_thinking_tokens(&content);
+
     // 估算输出 tokens——必须先于可见性块拼接（H2）：server_tool_use /
     // web_search_tool_result 是桥接可见性元数据，不代表模型真实输出量。
     // 截获的 web_search input 单独叠加（S2，对齐流式 output_chars_other 口径）：
@@ -643,15 +667,22 @@ pub(crate) async fn handle_non_stream_request(
         );
         tracker.record(
             key_id,
-            Some(credential_id),
             model.to_string(),
             final_input_tokens,
             output_tokens,
-            client_ip,
-            metering_usage,
-            Some(report_cache_read),
-            Some(report_cache_creation),
-            effort.clone(),
+            crate::model::usage::RecordOptions {
+                credential_id: Some(credential_id),
+                client_ip,
+                credits_used: metering_usage,
+                cache_read_input_tokens: Some(report_cache_read),
+                cache_creation_input_tokens: Some(report_cache_creation),
+                effort: effort.clone(),
+                first_token_ms: None,
+                duration_ms: Some(request_started_at.elapsed().as_millis() as u64),
+                thinking_token_count,
+                is_stream: Some(false),
+                user_agent,
+            },
         );
     }
 
@@ -776,5 +807,46 @@ mod native_tests {
             build_non_stream_content_with_native(vec![native], "", "答案", vec![tool.clone()]);
         drop_thinking_blocks(&mut content);
         assert_eq!(content, vec![json!({"type": "text", "text": "答案"}), tool]);
+    }
+
+    /// 任务 2：非流式 thinking token 统计（剔除后存留块才计入；无 thinking 返回 None）
+    #[test]
+    fn test_nonstream_thinking_token_stats() {
+        // 含 thinking 块 → Some(>0)
+        let native = json!({"type": "thinking", "thinking": "Let me think about this problem carefully.", "signature": "sig"});
+        let (content, _) =
+            build_non_stream_content_with_native(vec![native], "", "答案", Vec::new());
+        let count = count_thinking_tokens(&content);
+        assert!(
+            count.unwrap_or(0) > 0,
+            "存留 thinking 块应统计出 >0 的 token 数"
+        );
+
+        // 剔除后（账号关闭 thinking）→ None（被剔除内容不计）
+        let native = json!({"type": "thinking", "thinking": "推理内容", "signature": "sig"});
+        let (mut content, _) =
+            build_non_stream_content_with_native(vec![native], "", "答案", Vec::new());
+        drop_thinking_blocks(&mut content);
+        assert_eq!(
+            count_thinking_tokens(&content),
+            None,
+            "剔除后无存留 thinking 块应返回 None"
+        );
+
+        // 无 thinking 的普通响应 → None
+        let (content, _) =
+            build_non_stream_content_with_native(Vec::new(), "", "普通回复", Vec::new());
+        assert_eq!(count_thinking_tokens(&content), None);
+
+        // signature-only 空块（text 空、signature 非空，flush_native_reasoning 会 push）
+        // → None（0 token 不落 Some(0)，与流式「未产生有效思考 → None」对齐）
+        let signature_only = json!({"type": "thinking", "thinking": "", "signature": "sig-only"});
+        let (content, _) =
+            build_non_stream_content_with_native(vec![signature_only], "", "答案", Vec::new());
+        assert_eq!(
+            count_thinking_tokens(&content),
+            None,
+            "signature-only 空块应落 None 而非 Some(0)"
+        );
     }
 }

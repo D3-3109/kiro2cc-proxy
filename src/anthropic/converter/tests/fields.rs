@@ -426,6 +426,9 @@ fn test_additional_fields_skipped_for_unsupported_third_party_models() {
         "deepseek-3.2",
         "deepseek-v3.2", // 别名 → deepseek-3.2
         "minimax-m2.5",
+        // kimi-k3（2026-10-16 新增）：按第三方惯例并入跳过名单
+        "kimi-k3",
+        "kimi-k3-thinking", // -thinking 后缀 → kimi-k3
     ] {
         let mapped = map_model(model).unwrap_or_else(|| model.to_string());
         assert!(

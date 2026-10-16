@@ -51,6 +51,9 @@ export interface UsageRecordItem {
   createdAt: string
   clientIp?: string
   credentialLabel?: string
+  thinkingTokenCount?: number
+  isStream?: boolean
+  userAgent?: string
 }
 
 export interface UsageRecordsPage {
