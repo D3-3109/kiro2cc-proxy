@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useTranslation } from 'react-i18next'
 import {
-  BarChart3,
   Check,
   Copy,
+  FileText,
   Globe,
   KeyRound,
   Link2,
@@ -325,7 +325,7 @@ export function ApiKeyRow({
             aria-label={t('apiKeys.viewLogsTitle')}
             onClick={onViewDetail}
           >
-            <BarChart3 className="size-[15px]" strokeWidth={1.7} />
+            <FileText className="size-[15px]" strokeWidth={1.7} />
           </button>
           <button
             type="button"
