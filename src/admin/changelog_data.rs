@@ -67,6 +67,24 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.27".to_string(),
+            is_latest: false,
+            groups: vec![feat_group(vec![
+                Bilingual::new(
+                    "请求日志新增「用时」列：流式记录展示首字/耗时双徽章（按快慢分档着色），非流式仅耗时；首字埋点按客户端可见产出判定，桥接 web_search 计入、空事件不计",
+                    "Usage log gains a Duration column: streaming records show first-token/duration badges tinted by speed, non-streaming shows duration only; first-token timing is keyed to client-visible output — bridged web_search counts, empty events don't",
+                ),
+                Bilingual::new(
+                    "请求日志新增深度思考 token 统计：🧠 徽章内联在输出 Tokens 旁，BPE 真值口径，与客户端「Thought for Ns (N tokens)」显示一致",
+                    "Usage log gains thinking-token statistics: a 🧠 badge inline next to output tokens, BPE-exact, consistent with the client's \"Thought for Ns (N tokens)\" display",
+                ),
+                Bilingual::new(
+                    "支持上游新增的 kimi-k3 模型：关键词映射、静态模型表条目、支持模型页归入 KIMI 家族；深度思考按第三方模型惯例走文本标签协议",
+                    "Supports the new upstream kimi-k3 model: keyword mapping, static model list entry, KIMI family grouping on the models page; deep thinking follows the third-party text-tag convention",
+                ),
+            ])],
+        },
+        ReleaseNote {
             version: "3.4.26".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![Bilingual::new(
