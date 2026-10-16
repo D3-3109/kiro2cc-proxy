@@ -226,6 +226,8 @@ pub(crate) async fn handle_non_stream_request(
     // 客户端侧 thinking 请求状态（resolve_thinking_enabled 的结果，与流式分支同源）；
     // 与账号开关在下方合成最终裁决，供 effort 入库口径与流式路径保持一致
     thinking_client_enabled: bool,
+    // 客户端 User-Agent（随 usage 记录入库）
+    user_agent: Option<String>,
 ) -> Response {
     // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
     let request_started_at = std::time::Instant::now();
@@ -665,18 +667,22 @@ pub(crate) async fn handle_non_stream_request(
         );
         tracker.record(
             key_id,
-            Some(credential_id),
             model.to_string(),
             final_input_tokens,
             output_tokens,
-            client_ip,
-            metering_usage,
-            Some(report_cache_read),
-            Some(report_cache_creation),
-            effort.clone(),
-            None,
-            Some(request_started_at.elapsed().as_millis() as u64),
-            thinking_token_count,
+            crate::model::usage::RecordOptions {
+                credential_id: Some(credential_id),
+                client_ip,
+                credits_used: metering_usage,
+                cache_read_input_tokens: Some(report_cache_read),
+                cache_creation_input_tokens: Some(report_cache_creation),
+                effort: effort.clone(),
+                first_token_ms: None,
+                duration_ms: Some(request_started_at.elapsed().as_millis() as u64),
+                thinking_token_count,
+                is_stream: Some(false),
+                user_agent,
+            },
         );
     }
 

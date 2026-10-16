@@ -32,6 +32,14 @@ function formatCost(n: number) {
   return `$${n.toFixed(4)}`
 }
 
+/** 流式/非流徽章基类：与 admin-ui BADGE_CLS 同构（user-ui 独立 app，不跨仓共享） */
+const BADGE_CLS = 'rounded-[4px] px-1 py-px text-[9.5px] font-semibold leading-tight'
+
+/** UA 短标识：取首个空格前段（如 claude-cli/2.1.5），完整原文走 title 悬停展示 */
+function uaShort(ua: string): string {
+  return ua.split(/\s+/)[0] || ua
+}
+
 function formatTokens(n: number) {
   return n.toLocaleString('zh-CN')
 }
@@ -206,16 +214,39 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
                               </td>
                               <td className={`${CELL} whitespace-nowrap text-[11.5px] text-ink-2`}>
                                 {r.clientIp ? (
-                                  <span title={r.clientIp}>
+                                  <span title={r.clientIp} className="flex flex-col items-start">
                                     <span className="font-mono">{geo?.displayIp ?? r.clientIp}</span>
                                     {geo && geo.country && (
-                                      <span className="ml-1 text-ink-3">{geo.country}·{geo.city}</span>
+                                      <span className="text-ink-3">{geo.country}·{geo.city}</span>
                                     )}
                                   </span>
-                                ) : '—'}
+                                ) : (
+                                  <span className="text-ink-3">—</span>
+                                )}
+                                {r.userAgent && (
+                                  <span
+                                    className="mt-px block truncate font-mono text-[10px] text-ink-3"
+                                    title={r.userAgent}
+                                  >
+                                    {uaShort(r.userAgent)}
+                                  </span>
+                                )}
                               </td>
-                              <td className={`${CELL} font-mono text-[11.5px] max-w-[200px] truncate ${getModelTone(r.model)}`} title={r.model}>
-                                {r.model}
+                              <td className={`${CELL} text-[11.5px] max-w-[200px]`}>
+                                <div className="flex flex-col items-start gap-px">
+                                  <span className={`max-w-full truncate font-mono ${getModelTone(r.model)}`} title={r.model}>
+                                    {r.model}
+                                  </span>
+                                  {r.isStream != null && (
+                                    <span
+                                      className={`${BADGE_CLS} ${
+                                        r.isStream ? 'bg-brand-soft text-brand' : 'bg-surface-3 text-ink-2'
+                                      }`}
+                                    >
+                                      {r.isStream ? '流式' : '非流'}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className={CELL}>
                                 <div className="space-y-0.5 text-left text-[11.5px]">
@@ -223,9 +254,9 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
                                   <div className={(r.thinkingTokenCount ?? 0) > 0 ? 'flex items-center gap-2' : undefined}>
                                     <div>输出 Tokens：<span className="tabular-nums">{formatTokens(r.outputTokens)}</span></div>
                                     {r.thinkingTokenCount != null && r.thinkingTokenCount > 0 && (
-                                      <div className="text-warn" title="深度思考 Tokens">
+                                      <div className="inline-flex items-center gap-0.5 text-warn" title="深度思考 Tokens">
                                         <span className="sr-only">深度思考 Tokens：</span>
-                                        <Brain className="inline size-3" aria-hidden="true" />
+                                        <Brain className="size-3" aria-hidden="true" />
                                         <span className="tabular-nums">{formatTokens(r.thinkingTokenCount)}</span>
                                       </div>
                                     )}

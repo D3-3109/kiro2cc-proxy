@@ -752,17 +752,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             onToggleSelect={() => toggleSelect(apiKey.id)}
             copied={copiedId === apiKey.id}
             createdTitle={t('apiKeys.createdLabel', { date: formatDate(apiKey.createdAt) })}
-            onCopy={() =>
-              copyToClipboard(
-                t('apiKeys.copyContent', {
-                  name: apiKey.name,
-                  ccUrl: window.location.origin,
-                  codexUrl: `${window.location.origin}/v1`,
-                  key: apiKey.key,
-                }),
-                apiKey.id
-              )
-            }
+            onCopy={() => copyToClipboard(apiKey.key, apiKey.id)}
             onImportClaude={() => handleImportToCcSwitch('claude', apiKey)}
             onImportCodex={() => handleImportToCcSwitch('codex', apiKey)}
             onViewDetail={() => onViewDetail(apiKey)}

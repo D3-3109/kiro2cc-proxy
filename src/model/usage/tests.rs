@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
 
-    use crate::model::usage::{UsageTracker, calculate_cost, get_k_ref};
+    use crate::model::usage::{RecordOptions, UsageTracker, calculate_cost, get_k_ref};
     use std::collections::HashMap;
 
     /// 每个测试使用独立目录隔离明细文件与累计基数文件（api_key_lifetime.json
@@ -32,33 +32,23 @@ mod tests {
         // credits_used 显式提供时，应直接累加该值而非回退估算
         tracker.record(
             1,
-            None,
             "claude-opus-4.6".to_string(),
             1000,
             100,
-            None,
-            Some(3.43),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                credits_used: Some(3.43),
+                ..Default::default()
+            },
         );
         tracker.record(
             1,
-            None,
             "claude-opus-4.6".to_string(),
             1000,
             100,
-            None,
-            Some(1.0),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                credits_used: Some(1.0),
+                ..Default::default()
+            },
         );
         assert!((tracker.get_total_credits(1) - 4.43).abs() < 1e-9);
         cleanup_usage_path(&path);
@@ -71,18 +61,10 @@ mod tests {
         // 旧记录无 credits_used 时按 estimated_cost * k_ref 回退估算
         tracker.record(
             1,
-            None,
             "claude-sonnet-4.5".to_string(),
             1_000_000,
             0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions::default(),
         );
         let expected_cost = calculate_cost("claude-sonnet-4.5", 1_000_000, 0);
         let expected_credits = expected_cost * get_k_ref("claude-sonnet-4.5");
@@ -96,33 +78,23 @@ mod tests {
         let tracker = UsageTracker::load(&path).unwrap();
         tracker.record(
             1,
-            None,
             "claude-opus-4.6".to_string(),
             100,
             10,
-            None,
-            Some(5.0),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                credits_used: Some(5.0),
+                ..Default::default()
+            },
         );
         tracker.record(
             2,
-            None,
             "claude-opus-4.6".to_string(),
             100,
             10,
-            None,
-            Some(99.0),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                credits_used: Some(99.0),
+                ..Default::default()
+            },
         );
         assert!((tracker.get_total_credits(1) - 5.0).abs() < 1e-9);
         assert!((tracker.get_total_credits(2) - 99.0).abs() < 1e-9);
@@ -136,18 +108,13 @@ mod tests {
         let tracker = UsageTracker::load(&path).unwrap();
         tracker.record(
             1,
-            None,
             "claude-opus-4.8".to_string(),
             500,
             50,
-            None,
-            Some(2.5),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                credits_used: Some(2.5),
+                ..Default::default()
+            },
         );
         let summary = tracker.get_summary(1);
         assert!((summary.total_credits - tracker.get_total_credits(1)).abs() < 1e-9);
@@ -160,48 +127,32 @@ mod tests {
         let tracker = UsageTracker::load(&path).unwrap();
         tracker.record(
             1,
-            None,
             "claude-opus-4.8".to_string(),
             100,
             10,
-            None,
-            None,
-            None,
-            None,
-            Some("xhigh".to_string()),
-            None,
-            None,
-            None,
+            RecordOptions {
+                effort: Some("xhigh".to_string()),
+                ..Default::default()
+            },
         );
         tracker.record(
             1,
-            None,
             "claude-sonnet-4.5".to_string(),
             100,
             10,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions::default(),
         );
         tracker.record(
             1,
-            Some(7),
             "claude-opus-4.6".to_string(),
             100,
             10,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(1234),
-            Some(5678),
-            None,
+            RecordOptions {
+                credential_id: Some(7),
+                first_token_ms: Some(1234),
+                duration_ms: Some(5678),
+                ..Default::default()
+            },
         );
         let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
         assert_eq!(page.records.len(), 3);
@@ -251,12 +202,15 @@ mod tests {
             first_token_ms: Some(1234),
             duration_ms: Some(5678),
             thinking_token_count: None,
+            is_stream: None,
+            user_agent: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["firstTokenMs"], 1234);
         assert_eq!(json["durationMs"], 5678);
         // None 时省略（与既有 Option 字段同构）
         assert!(json.get("thinkingTokenCount").is_none());
+        assert!(json.get("isStream").is_none());
 
         // 旧数据（无新字段）反序列化兼容
         let old_json = serde_json::json!({
@@ -273,6 +227,7 @@ mod tests {
         assert_eq!(parsed.first_token_ms, None);
         assert_eq!(parsed.duration_ms, None);
         assert_eq!(parsed.thinking_token_count, None);
+        assert_eq!(parsed.is_stream, None);
     }
 
     #[test]
@@ -296,9 +251,13 @@ mod tests {
             first_token_ms: None,
             duration_ms: None,
             thinking_token_count: Some(1034),
+            is_stream: Some(true),
+            user_agent: Some("claude-cli/2.1.5 (external, cli)".to_string()),
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["thinkingTokenCount"], 1034);
+        assert_eq!(json["userAgent"], "claude-cli/2.1.5 (external, cli)");
+        assert_eq!(json["isStream"], true);
 
         // 旧数据（无该字段）反序列化为 None
         let old_json = serde_json::json!({
@@ -313,6 +272,46 @@ mod tests {
         });
         let parsed: crate::model::usage::UsageRecord = serde_json::from_value(old_json).unwrap();
         assert_eq!(parsed.thinking_token_count, None);
+        assert_eq!(parsed.is_stream, None);
+        assert_eq!(parsed.user_agent, None);
+    }
+
+    /// user_agent 落库与分页透传：UA 值应完整传递到分页 DTO
+    #[tokio::test]
+    async fn test_record_user_agent_persisted_and_paged() {
+        let path = temp_usage_path("user_agent_field");
+        let tracker = UsageTracker::load(&path).unwrap();
+        tracker.record(
+            1,
+            "claude-opus-4.6".to_string(),
+            100,
+            10,
+            RecordOptions {
+                user_agent: Some("claude-cli/2.1.5 (external, cli)".to_string()),
+                ..Default::default()
+            },
+        );
+        let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(
+            page.records[0].user_agent.as_deref(),
+            Some("claude-cli/2.1.5 (external, cli)")
+        );
+        // daily 路径透传：同一条记录经 get_records_paged_by_date 查询 UA 同样在
+        let cst_today = {
+            let cst = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+            chrono::Utc::now()
+                .with_timezone(&cst)
+                .format("%Y-%m-%d")
+                .to_string()
+        };
+        let daily = tracker.get_records_paged_by_date(&cst_today, 1, 10, &HashMap::new());
+        assert_eq!(daily.records.len(), 1);
+        assert_eq!(
+            daily.records[0].user_agent.as_deref(),
+            Some("claude-cli/2.1.5 (external, cli)")
+        );
+        cleanup_usage_path(&path);
     }
 
     #[test]
@@ -386,6 +385,39 @@ mod tests {
         assert!((calculate_cost("claude-haiku-4.5", 1_000_000, 0) - 1.0).abs() < 1e-9);
     }
 
+    /// is_stream 落库与分页透传：流式/非流式两种取值均应完整传递到分页 DTO
+    #[tokio::test]
+    async fn test_record_is_stream_persisted_and_paged() {
+        let path = temp_usage_path("is_stream_field");
+        let tracker = UsageTracker::load(&path).unwrap();
+        tracker.record(
+            1,
+            "claude-opus-4.6".to_string(),
+            100,
+            10,
+            RecordOptions {
+                is_stream: Some(true),
+                ..Default::default()
+            },
+        );
+        tracker.record(
+            1,
+            "claude-opus-4.6".to_string(),
+            100,
+            10,
+            RecordOptions {
+                is_stream: Some(false),
+                ..Default::default()
+            },
+        );
+        let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
+        assert_eq!(page.records.len(), 2);
+        // 两种取值均透传到 UsageRecordItem（按值断言，不依赖排序）
+        assert!(page.records.iter().any(|r| r.is_stream == Some(true)));
+        assert!(page.records.iter().any(|r| r.is_stream == Some(false)));
+        cleanup_usage_path(&path);
+    }
+
     /// 回归：明细超过 MAX_RECORDS_PER_KEY 被裁剪后，total_requests 仍持续增长
     /// （历史缺陷：直接数现存记录条数导致请求数封顶 10,000）
     #[tokio::test]
@@ -397,18 +429,10 @@ mod tests {
         for _ in 0..total {
             tracker.record(
                 9,
-                None,
                 "claude-opus-4.6".to_string(),
                 10,
                 10,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                RecordOptions::default(),
             );
         }
         let summary = tracker.get_summary(9);
@@ -425,18 +449,10 @@ mod tests {
         for _ in 0..(crate::model::usage::MAX_RECORDS_PER_KEY_FOR_TEST + 3) {
             tracker.record(
                 8,
-                None,
                 "claude-opus-4.6".to_string(),
                 10,
                 10,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                RecordOptions::default(),
             );
         }
         assert!(tracker.get_summary(8).total_requests > 0);
@@ -454,18 +470,10 @@ mod tests {
             for _ in 0..(crate::model::usage::MAX_RECORDS_PER_KEY_FOR_TEST + 7) {
                 tracker.record(
                     7,
-                    None,
                     "claude-opus-4.6".to_string(),
                     10,
                     10,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
+                    RecordOptions::default(),
                 );
             }
             // 等待后台任务把脏数据落盘（周期 5s 太长，直接触发 shutdown 刷盘：
@@ -512,33 +520,21 @@ mod tests {
         // 两条记录：(input=1000, cacheRead=800) 与 (input=500, cacheRead=None)
         tracker.record(
             1,
-            None,
             "claude-opus-4.6".to_string(),
             1000,
             100,
-            None,
-            None,
-            Some(800),
-            Some(100),
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                cache_read_input_tokens: Some(800),
+                cache_creation_input_tokens: Some(100),
+                ..Default::default()
+            },
         );
         tracker.record(
             1,
-            None,
             "claude-opus-4.6".to_string(),
             500,
             50,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions::default(),
         );
 
         let summaries = tracker.get_daily_summaries();
@@ -551,18 +547,13 @@ mod tests {
         // 凭证维度：cacheRead None 按 0 计入
         tracker.record(
             1,
-            Some(42),
             "claude-opus-4.6".to_string(),
             200,
             20,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            RecordOptions {
+                credential_id: Some(42),
+                ..Default::default()
+            },
         );
         let cred = tracker.get_today_summary_for_credential(42);
         assert_eq!(cred.total_requests, 1);
