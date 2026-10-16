@@ -27,7 +27,7 @@ function getKeyStatus(key: ApiKeyItem): KeyStatus {
   return 'active'
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 100
 
 const MODEL_COLS: { labelKey: string; num?: boolean }[] = [
   { labelKey: 'common.colModel' },

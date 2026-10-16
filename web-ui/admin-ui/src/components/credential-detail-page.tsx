@@ -19,7 +19,7 @@ interface CredentialDetailPageProps {
   onBack: () => void
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 100
 
 /** 状态标签（设计稿 .tag）：20px 高 + 5px pip，配色取自账号管理页同一套派生状态 */
 const TAG =

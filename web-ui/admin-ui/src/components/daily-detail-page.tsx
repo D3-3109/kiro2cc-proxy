@@ -18,7 +18,7 @@ interface DailyDetailPageProps {
   onBack: () => void
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 100
 
 /** 按 UTC 解析 + 按 UTC 格式化，避免浏览器本地时区把 CST 日历日挪一天 */
 function formatDateLabel(date: string): string {

@@ -53,7 +53,7 @@ function formatDate(iso: string) {
 
 export function UsageLogPage({ onBack }: UsageLogPageProps) {
   const [page, setPage] = useState(1)
-  const pageSize = 50
+  const pageSize = 100
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['usageRecords', page, pageSize],
