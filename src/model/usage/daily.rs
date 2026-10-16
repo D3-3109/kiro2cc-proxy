@@ -5,6 +5,12 @@ use serde::Serialize;
 use super::pagination::{UsageRecordItem, UsageRecordsPage};
 use super::{UsageRecord, UsageTracker, get_k_ref};
 
+/// 单日明细查询的截断上限（既有行为，保持不变）
+const MAX_DAILY_TOTAL: usize = 2000;
+/// 区间明细查询的截断上限：降序保留最新 10000 条（与单 Key 存量上限
+/// MAX_RECORDS_PER_KEY 同量级；OpenSpec T6 用户裁决值）
+const MAX_RANGE_TOTAL: usize = 10_000;
+
 /// 按日期汇总的用量
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +156,7 @@ impl UsageTracker {
     }
 
     /// 分页查询指定 CST（UTC+8）日期的原始记录，硬限总量 2000 条
+    ///（from == to == date 的薄包装，与区间版共用管线）
     pub fn get_records_paged_by_date(
         &self,
         date: &str,
@@ -157,7 +164,47 @@ impl UsageTracker {
         page_size: usize,
         credential_labels: &std::collections::HashMap<u64, String>,
     ) -> UsageRecordsPage {
-        const MAX_TOTAL: usize = 2000;
+        self.paginate_records_in_range(
+            date,
+            date,
+            page,
+            page_size,
+            credential_labels,
+            MAX_DAILY_TOTAL,
+        )
+    }
+
+    /// 分页查询 CST（UTC+8）闭区间 [from, to]（含两端）的原始记录，
+    /// 按时间降序保留最新 10000 条后再分页
+    pub fn get_records_paged_by_date_range(
+        &self,
+        from: &str,
+        to: &str,
+        page: usize,
+        page_size: usize,
+        credential_labels: &std::collections::HashMap<u64, String>,
+    ) -> UsageRecordsPage {
+        self.paginate_records_in_range(
+            from,
+            to,
+            page,
+            page_size,
+            credential_labels,
+            MAX_RANGE_TOTAL,
+        )
+    }
+
+    /// 单日/区间明细共用管线：CST 日期闭区间过滤（YYYY-MM-DD 字典序即时间序）
+    /// → 降序排序 → 按上限截断 → 分页 → DTO 映射
+    fn paginate_records_in_range(
+        &self,
+        from: &str,
+        to: &str,
+        page: usize,
+        page_size: usize,
+        credential_labels: &std::collections::HashMap<u64, String>,
+        max_total: usize,
+    ) -> UsageRecordsPage {
         let page_size = page_size.clamp(1, 500);
         let cst = FixedOffset::east_opt(8 * 3600).unwrap();
 
@@ -166,11 +213,12 @@ impl UsageTracker {
             records
                 .iter()
                 .filter(|r| {
-                    r.created_at
+                    let d = r
+                        .created_at
                         .with_timezone(&cst)
                         .format("%Y-%m-%d")
-                        .to_string()
-                        == date
+                        .to_string();
+                    from <= d.as_str() && d.as_str() <= to
                 })
                 .cloned()
                 .collect()
@@ -178,7 +226,7 @@ impl UsageTracker {
 
         let mut sorted = owned;
         sorted.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-        sorted.truncate(MAX_TOTAL);
+        sorted.truncate(max_total);
 
         let total = sorted.len();
         if total == 0 {

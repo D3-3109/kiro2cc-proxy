@@ -314,6 +314,230 @@ mod tests {
         cleanup_usage_path(&path);
     }
 
+    /// 构造指定 UTC 时间戳的记录并直接注入（绕过 record() 的 Utc::now()，
+    /// 供 date_range 系列测试控制记录的 CST 归属日）
+    fn inject_record_at(tracker: &UsageTracker, created_at: chrono::DateTime<chrono::Utc>) {
+        let record = crate::model::usage::UsageRecord {
+            api_key_id: 1,
+            credential_id: None,
+            model: "claude-opus-4.6".to_string(),
+            input_tokens: 100,
+            output_tokens: 10,
+            estimated_cost: 0.0,
+            credits_used: None,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_creation_5m_input_tokens: 0,
+            cache_creation_1h_input_tokens: 0,
+            created_at,
+            client_ip: None,
+            effort: None,
+            first_token_ms: None,
+            duration_ms: None,
+            thinking_token_count: None,
+            is_stream: None,
+            user_agent: None,
+        };
+        tracker.records.write().push(record);
+    }
+
+    /// 解析 RFC3339 UTC 时间戳（比手拼 NaiveDateTime+TimeZone 可读）
+    fn utc_at(s: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    /// date_range：from == to 时区间版与单日版结果等价（单日版已改为区间版薄包装，
+    /// 此测试锁住等价性防回归）。
+    /// 等价性前提：结果未触及截断上限——单日版截断 2000 / 区间版截断 10000，
+    /// 总条数落在 2001~10000 时两者不等价，不在本测试覆盖范围
+    #[tokio::test]
+    async fn test_date_range_from_eq_to_equivalent_to_daily() {
+        let path = temp_usage_path("date_range_equiv");
+        let tracker = UsageTracker::load(&path).unwrap();
+        // 三天（CST）各两条
+        inject_record_at(&tracker, utc_at("2026-10-01T02:00:00Z")); // CST 10-01 10:00
+        inject_record_at(&tracker, utc_at("2026-10-01T10:00:00Z")); // CST 10-01 18:00
+        inject_record_at(&tracker, utc_at("2026-10-02T02:00:00Z"));
+        inject_record_at(&tracker, utc_at("2026-10-02T10:00:00Z"));
+        inject_record_at(&tracker, utc_at("2026-10-03T02:00:00Z"));
+        inject_record_at(&tracker, utc_at("2026-10-03T10:00:00Z"));
+
+        for date in ["2026-10-01", "2026-10-02", "2026-10-03"] {
+            let daily = tracker.get_records_paged_by_date(date, 1, 10, &HashMap::new());
+            let ranged =
+                tracker.get_records_paged_by_date_range(date, date, 1, 10, &HashMap::new());
+            assert_eq!(ranged.total, daily.total);
+            assert_eq!(ranged.total_pages, daily.total_pages);
+            assert_eq!(ranged.page, daily.page);
+            assert_eq!(ranged.page_size, daily.page_size);
+            let ranged_times: Vec<_> = ranged.records.iter().map(|r| r.created_at).collect();
+            let daily_times: Vec<_> = daily.records.iter().map(|r| r.created_at).collect();
+            assert_eq!(ranged_times, daily_times);
+        }
+        cleanup_usage_path(&path);
+    }
+
+    /// date_range：闭区间含两端日，边界日各含记录时全部返回且按时间降序
+    #[tokio::test]
+    async fn test_date_range_inclusive_boundary_days() {
+        let path = temp_usage_path("date_range_boundary");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_record_at(&tracker, utc_at("2026-10-01T16:00:00Z")); // CST 10-02 00:00（区间首日）
+        inject_record_at(&tracker, utc_at("2026-10-01T18:00:00Z")); // CST 10-02 02:00
+        inject_record_at(&tracker, utc_at("2026-10-02T18:00:00Z")); // CST 10-03 02:00（中间日）
+        inject_record_at(&tracker, utc_at("2026-10-03T16:00:00Z")); // CST 10-04 00:00（区间末日）
+        inject_record_at(&tracker, utc_at("2026-10-05T02:00:00Z")); // CST 10-05（区间外）
+
+        let page = tracker.get_records_paged_by_date_range(
+            "2026-10-02",
+            "2026-10-04",
+            1,
+            10,
+            &HashMap::new(),
+        );
+        assert_eq!(page.total, 4);
+        assert_eq!(page.total_pages, 1);
+        let times: Vec<_> = page.records.iter().map(|r| r.created_at).collect();
+        assert!(times.windows(2).all(|w| w[0] >= w[1])); // 降序
+        assert!(times.contains(&utc_at("2026-10-01T16:00:00Z"))); // 首日边界含
+        assert!(times.contains(&utc_at("2026-10-03T16:00:00Z"))); // 末日边界含
+        cleanup_usage_path(&path);
+    }
+
+    /// date_range：跨 CST 午夜记录按 CST 归属日过滤（UTC 15:30/16:30 分归 CST 前后日）
+    #[tokio::test]
+    async fn test_date_range_cross_cst_midnight_attribution() {
+        let path = temp_usage_path("date_range_midnight");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_record_at(&tracker, utc_at("2026-10-01T15:30:00Z")); // CST 10-01 23:30
+        inject_record_at(&tracker, utc_at("2026-10-01T16:30:00Z")); // CST 10-02 00:30
+
+        let day1 = tracker.get_records_paged_by_date_range(
+            "2026-10-01",
+            "2026-10-01",
+            1,
+            10,
+            &HashMap::new(),
+        );
+        assert_eq!(day1.total, 1);
+        assert_eq!(day1.records[0].created_at, utc_at("2026-10-01T15:30:00Z"));
+
+        let day2 = tracker.get_records_paged_by_date_range(
+            "2026-10-02",
+            "2026-10-02",
+            1,
+            10,
+            &HashMap::new(),
+        );
+        assert_eq!(day2.total, 1);
+        assert_eq!(day2.records[0].created_at, utc_at("2026-10-01T16:30:00Z"));
+
+        let both = tracker.get_records_paged_by_date_range(
+            "2026-10-01",
+            "2026-10-02",
+            1,
+            10,
+            &HashMap::new(),
+        );
+        assert_eq!(both.total, 2);
+        assert_eq!(both.records[0].created_at, utc_at("2026-10-01T16:30:00Z")); // 降序：更晚在前
+        assert_eq!(both.records[1].created_at, utc_at("2026-10-01T15:30:00Z"));
+        cleanup_usage_path(&path);
+    }
+
+    /// date_range：无匹配记录返回空页（total=0、total_pages=0）
+    #[tokio::test]
+    async fn test_date_range_empty_result() {
+        let path = temp_usage_path("date_range_empty");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_record_at(&tracker, utc_at("2026-10-05T02:00:00Z"));
+        let page = tracker.get_records_paged_by_date_range(
+            "2026-10-01",
+            "2026-10-03",
+            1,
+            10,
+            &HashMap::new(),
+        );
+        assert!(page.records.is_empty());
+        assert_eq!(page.total, 0);
+        assert_eq!(page.total_pages, 0);
+        assert_eq!(page.page, 1);
+        cleanup_usage_path(&path);
+    }
+
+    /// date_range：page_size 越界钳制到 [1, 500]（与单日端点一致）
+    #[tokio::test]
+    async fn test_date_range_page_size_clamp() {
+        let path = temp_usage_path("date_range_clamp");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_record_at(&tracker, utc_at("2026-10-02T02:00:00Z"));
+        inject_record_at(&tracker, utc_at("2026-10-02T06:00:00Z"));
+        inject_record_at(&tracker, utc_at("2026-10-02T10:00:00Z"));
+
+        let zero = tracker.get_records_paged_by_date_range(
+            "2026-10-02",
+            "2026-10-02",
+            1,
+            0,
+            &HashMap::new(),
+        );
+        assert_eq!(zero.page_size, 1);
+        assert_eq!(zero.records.len(), 1);
+        assert_eq!(zero.total_pages, 3);
+
+        let huge = tracker.get_records_paged_by_date_range(
+            "2026-10-02",
+            "2026-10-02",
+            1,
+            9999,
+            &HashMap::new(),
+        );
+        assert_eq!(huge.page_size, 500);
+        assert_eq!(huge.records.len(), 3);
+        assert_eq!(huge.total_pages, 1);
+        cleanup_usage_path(&path);
+    }
+
+    /// date_range：区间匹配超 10000 条时降序保留最新 10000 条再分页
+    #[tokio::test]
+    async fn test_date_range_truncate_over_limit() {
+        let path = temp_usage_path("date_range_truncate");
+        let tracker = UsageTracker::load(&path).unwrap();
+        // 注入 10005 条（CST 10-02 全天，毫秒递增）：最早的 5 条应被截掉
+        let base = utc_at("2026-10-02T00:00:00Z");
+        for i in 0..10005 {
+            inject_record_at(&tracker, base + chrono::Duration::milliseconds(i));
+        }
+        let first = tracker.get_records_paged_by_date_range(
+            "2026-10-02",
+            "2026-10-02",
+            1,
+            100,
+            &HashMap::new(),
+        );
+        assert_eq!(first.total, 10_000);
+        assert_eq!(first.total_pages, 100);
+        assert_eq!(
+            first.records[0].created_at,
+            base + chrono::Duration::milliseconds(10004)
+        ); // 首页首条 = 全局最新
+        let last = tracker.get_records_paged_by_date_range(
+            "2026-10-02",
+            "2026-10-02",
+            100,
+            100,
+            &HashMap::new(),
+        );
+        assert_eq!(last.records.len(), 100);
+        assert_eq!(
+            last.records[99].created_at,
+            base + chrono::Duration::milliseconds(5)
+        ); // 末页末条 = 截断后最旧（i=5，恰被截掉最早 5 条）
+        cleanup_usage_path(&path);
+    }
+
     #[test]
     fn test_get_k_ref_opus_5() {
         assert_eq!(get_k_ref("claude-opus-5"), 2.36);

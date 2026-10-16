@@ -36,6 +36,7 @@ import {
   getCredentialTodaySummary,
   getDailyUsage,
   getDailyUsageRecords,
+  getUsageRecordsByRange,
   getThrottleLogs,
   getFailureLogs,
   getModels,
@@ -487,6 +488,19 @@ export function useDailyUsageRecords(date: string, page: number, pageSize = 50) 
     queryKey: ['dailyUsageRecords', date, page, pageSize],
     queryFn: () => getDailyUsageRecords(date, page, pageSize),
     enabled: !!date,
+  })
+}
+
+export function useUsageRecordsByRange(
+  from: string,
+  to: string,
+  page: number,
+  pageSize = 50
+) {
+  return useQuery({
+    queryKey: ['usageRecordsByRange', from, to, page, pageSize],
+    queryFn: () => getUsageRecordsByRange(from, to, page, pageSize),
+    enabled: !!from && !!to,
   })
 }
 

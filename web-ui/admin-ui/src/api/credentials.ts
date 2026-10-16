@@ -340,6 +340,19 @@ export async function getDailyUsageRecords(
   return data
 }
 
+// 获取 CST 闭区间 [from, to] 的原始请求记录（降序保留最新 10000 条后分页）
+export async function getUsageRecordsByRange(
+  from: string,
+  to: string,
+  page: number,
+  pageSize: number
+): Promise<UsageRecordsResponse> {
+  const { data } = await api.get<UsageRecordsResponse>('/usage/records', {
+    params: { from, to, page, page_size: pageSize },
+  })
+  return data
+}
+
 // ============ 失败日志 ============
 
 export async function getFailureLogs(
