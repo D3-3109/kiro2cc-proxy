@@ -29,6 +29,7 @@ mod tests {
         assert_eq!(guess_owned_by("minimax-m2.5"), "minimax");
         assert_eq!(guess_owned_by("glm-5"), "glm");
         assert_eq!(guess_owned_by("qwen3-coder-next"), "qwen");
+        assert_eq!(guess_owned_by("kimi-k3"), "kimi");
         assert_eq!(guess_owned_by("foo-model"), "unknown");
     }
 
@@ -198,6 +199,19 @@ mod tests {
         // 回归
         assert_eq!(find_by_id("claude-opus-4-7").unwrap().max_tokens, 128000);
         assert_eq!(find_by_id("claude-opus-4-8").unwrap().max_tokens, 128000);
+    }
+
+    #[test]
+    fn test_build_model_list_includes_kimi_k3() {
+        let list = build_model_list();
+        let kimi = list.iter().find(|m| m.id == "kimi-k3").unwrap();
+        assert_eq!(kimi.owned_by, "kimi");
+        assert_eq!(kimi.display_name, "Kimi K3");
+        assert_eq!(kimi.max_tokens, 32000);
+
+        // 回归：相邻第三方条目不受影响
+        assert!(list.iter().any(|m| m.id == "qwen3-coder-next"));
+        assert!(list.iter().any(|m| m.id == "gpt-5.6-sol"));
     }
 
     #[test]

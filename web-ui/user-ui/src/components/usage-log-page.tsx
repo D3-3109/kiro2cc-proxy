@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { RefreshCw, BarChart3, DollarSign } from 'lucide-react'
+import { Brain, RefreshCw, BarChart3, DollarSign } from 'lucide-react'
 import { getUsageRecords } from '@/api/user'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -220,7 +220,16 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
                               <td className={CELL}>
                                 <div className="space-y-0.5 text-left text-[11.5px]">
                                   <div>输入 Tokens：<span className="tabular-nums">{formatTokens(Math.max(0, r.inputTokens - (r.cacheReadInputTokens ?? 0)))}</span></div>
-                                  <div>输出 Tokens：<span className="tabular-nums">{formatTokens(r.outputTokens)}</span></div>
+                                  <div className={(r.thinkingTokenCount ?? 0) > 0 ? 'flex items-center gap-2' : undefined}>
+                                    <div>输出 Tokens：<span className="tabular-nums">{formatTokens(r.outputTokens)}</span></div>
+                                    {r.thinkingTokenCount != null && r.thinkingTokenCount > 0 && (
+                                      <div className="text-warn" title="深度思考 Tokens">
+                                        <span className="sr-only">深度思考 Tokens：</span>
+                                        <Brain className="inline size-3" aria-hidden="true" />
+                                        <span className="tabular-nums">{formatTokens(r.thinkingTokenCount)}</span>
+                                      </div>
+                                    )}
+                                  </div>
                                   <div className="text-ok">缓存读取：<span className="tabular-nums">{formatTokens(r.cacheReadInputTokens ?? 0)}</span></div>
                                   <div className="font-medium">输入总计：<span className="tabular-nums">{formatTokens(r.inputTokens)}</span></div>
                                 </div>

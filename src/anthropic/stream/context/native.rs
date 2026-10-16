@@ -1,4 +1,5 @@
 //! Kiro 原生推理事件到 Anthropic thinking 块的转换：native reasoning 流的组装与收尾事件生成。
+
 use serde_json::json;
 
 use super::StreamContext;
@@ -69,6 +70,10 @@ impl StreamContext {
                     }),
                 )
             {
+                // 仅统计被状态机接受、客户端实际收到的 thinking 文案
+                if kind == "thinking_delta" {
+                    self.accumulate_thinking(value);
+                }
                 tracing::debug!(
                     model = %self.model,
                     message_id = %self.message_id,
