@@ -640,15 +640,22 @@ impl StreamContext {
         events
     }
 
+    /// 客户端可见 thinking 文案入缓存（落库 thinking_token_count 统计口径）；
+    /// 空串跳过（content_block_stop 前的收尾空事件不计数）。
+    /// 流式两条发射路径（标签解析 / native reasoning）统一经此收敛，防第三发射点遗漏。
+    pub(super) fn accumulate_thinking(&mut self, text: &str) {
+        if !text.is_empty() {
+            self.thinking_full_text.push_str(text);
+        }
+    }
+
     /// 创建 thinking_delta 事件
     ///
     /// 非空内容同时写入 thinking 全文缓存（落库为 thinking_token_count 的统计口径：
     /// 客户端实际收到的 thinking 文案 BPE 真值，与 visible_chars 同语义）；空串事件（
     /// content_block_stop 前的收尾）不计数。
     fn create_thinking_delta_event(&mut self, index: i32, thinking: &str) -> SseEvent {
-        if !thinking.is_empty() {
-            self.thinking_full_text.push_str(thinking);
-        }
+        self.accumulate_thinking(thinking);
         SseEvent::new(
             "content_block_delta",
             json!({

@@ -235,7 +235,7 @@ export function UsageLogTable({
                         <span className="font-mono tabular-nums">{formatTokenCount(record.outputTokens)}</span>
                       </span>
                       {record.thinkingTokenCount != null && record.thinkingTokenCount > 0 && (
-                        <span className="text-warn" title={t('common.thinkingLabel')}>
+                        <span className="text-warn" title={t('common.thinkingBadge')}>
                           <span className="sr-only">{t('common.thinkingLabel')}</span>
                           <Brain className="inline size-3" aria-hidden="true" />
                           <span className="font-mono tabular-nums">{formatTokenCount(record.thinkingTokenCount)}</span>

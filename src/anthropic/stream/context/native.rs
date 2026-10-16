@@ -72,7 +72,7 @@ impl StreamContext {
             {
                 // 仅统计被状态机接受、客户端实际收到的 thinking 文案
                 if kind == "thinking_delta" {
-                    self.thinking_full_text.push_str(value);
+                    self.accumulate_thinking(value);
                 }
                 tracing::debug!(
                     model = %self.model,

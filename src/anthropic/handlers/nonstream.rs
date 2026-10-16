@@ -74,17 +74,15 @@ fn drop_thinking_blocks(content: &mut Vec<serde_json::Value>) {
 /// （signature-only）时返回 None（未产生有效思考，与流式落库语义一致）。
 fn count_thinking_tokens(content: &[serde_json::Value]) -> Option<i32> {
     let mut total = 0i32;
-    let mut found = false;
     for block in content {
         if block["type"] == "thinking"
             && let Some(text) = block["thinking"].as_str()
         {
-            found = true;
             total += token::count_tokens(text) as i32;
         }
     }
     // 与流式 `(tokens > 0).then_some(tokens)` 对齐：signature-only 空块（0 token）落 None
-    (found && total > 0).then_some(total)
+    (total > 0).then_some(total)
 }
 
 fn flush_native_reasoning(

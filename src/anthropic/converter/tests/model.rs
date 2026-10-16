@@ -124,6 +124,14 @@ fn test_map_model_gpt_5_6_variants() {
 }
 
 #[test]
+fn test_map_model_kimi_k3() {
+    // kimi-k3（上游 2026-10-16 新增）：含 -thinking 后缀与空格别名均归一到 kimi-k3
+    assert_eq!(map_model("kimi-k3").unwrap(), "kimi-k3");
+    assert_eq!(map_model("kimi-k3-thinking").unwrap(), "kimi-k3");
+    assert_eq!(map_model("Kimi K3").unwrap(), "kimi-k3");
+}
+
+#[test]
 fn test_map_model_thinking_suffix_sonnet() {
     // thinking 后缀不应影响 sonnet 模型映射
     let result = map_model("claude-sonnet-4-5-20250929-thinking");
