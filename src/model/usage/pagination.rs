@@ -83,6 +83,7 @@ impl UsageTracker {
                     first_token_ms: r.first_token_ms,
                     duration_ms: r.duration_ms,
                     thinking_token_count: r.thinking_token_count,
+                    is_stream: r.is_stream,
                 }
             })
             .collect();
@@ -151,6 +152,9 @@ pub struct UsageRecordItem {
     /// 深度思考文案 token 数（None 表示旧数据）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_token_count: Option<i32>,
+    /// 请求类型（true = 流式 SSE，false = 非流式；None 表示旧数据）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_stream: Option<bool>,
 }
 
 impl UsageTracker {
@@ -227,6 +231,7 @@ impl UsageTracker {
                     first_token_ms: r.first_token_ms,
                     duration_ms: r.duration_ms,
                     thinking_token_count: r.thinking_token_count,
+                    is_stream: r.is_stream,
                 }
             })
             .collect();

@@ -52,6 +52,7 @@ export interface UsageRecordItem {
   clientIp?: string
   credentialLabel?: string
   thinkingTokenCount?: number
+  isStream?: boolean
 }
 
 export interface UsageRecordsPage {

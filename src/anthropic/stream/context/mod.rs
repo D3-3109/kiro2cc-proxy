@@ -950,18 +950,21 @@ impl StreamContext {
             let thinking_tokens = self.thinking_token_count();
             tracker.record(
                 key_id,
-                self.credential_id,
                 self.model.clone(),
                 final_input_tokens,
                 billed_output_tokens,
-                self.client_ip.clone(),
-                self.metering_usage,
-                report_cache_read,
-                report_cache_creation,
-                self.effort.clone(),
-                first_token_ms,
-                duration_ms,
-                (thinking_tokens > 0).then_some(thinking_tokens),
+                crate::model::usage::RecordOptions {
+                    credential_id: self.credential_id,
+                    client_ip: self.client_ip.clone(),
+                    credits_used: self.metering_usage,
+                    cache_read_input_tokens: report_cache_read,
+                    cache_creation_input_tokens: report_cache_creation,
+                    effort: self.effort.clone(),
+                    first_token_ms,
+                    duration_ms,
+                    thinking_token_count: (thinking_tokens > 0).then_some(thinking_tokens),
+                    is_stream: Some(true),
+                },
             );
         }
         // 流式 SSE 路径暂未接入 fingerprint，cache_creation 不区分 5m/1h tier，

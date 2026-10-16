@@ -42,6 +42,8 @@
     "cacheReadLabel": "缓存读取：",
     "thinkingLabel": "思考：",
     "thinkingBadge": "深度思考 Tokens",
+    "streamBadge": "流式",
+    "nonStreamBadge": "非流",
     "totalInputLabel": "输入总计：",
     "pageInfoSimple": "第 {{current}} / {{total}} 页",
     "inboundPrefix": "入 {{value}}",

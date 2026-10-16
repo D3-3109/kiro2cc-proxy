@@ -665,18 +665,21 @@ pub(crate) async fn handle_non_stream_request(
         );
         tracker.record(
             key_id,
-            Some(credential_id),
             model.to_string(),
             final_input_tokens,
             output_tokens,
-            client_ip,
-            metering_usage,
-            Some(report_cache_read),
-            Some(report_cache_creation),
-            effort.clone(),
-            None,
-            Some(request_started_at.elapsed().as_millis() as u64),
-            thinking_token_count,
+            crate::model::usage::RecordOptions {
+                credential_id: Some(credential_id),
+                client_ip,
+                credits_used: metering_usage,
+                cache_read_input_tokens: Some(report_cache_read),
+                cache_creation_input_tokens: Some(report_cache_creation),
+                effort: effort.clone(),
+                first_token_ms: None,
+                duration_ms: Some(request_started_at.elapsed().as_millis() as u64),
+                thinking_token_count,
+                is_stream: Some(false),
+            },
         );
     }
 

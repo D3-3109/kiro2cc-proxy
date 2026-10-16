@@ -223,6 +223,7 @@ impl UsageTracker {
                     first_token_ms: r.first_token_ms,
                     duration_ms: r.duration_ms,
                     thinking_token_count: r.thinking_token_count,
+                    is_stream: r.is_stream,
                 }
             })
             .collect();

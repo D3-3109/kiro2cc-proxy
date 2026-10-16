@@ -42,6 +42,8 @@
     "cacheReadLabel": "Cache Read: ",
     "thinkingLabel": "Thinking: ",
     "thinkingBadge": "Thinking tokens",
+    "streamBadge": "Stream",
+    "nonStreamBadge": "Non-stream",
     "totalInputLabel": "Total Input: ",
     "pageInfoSimple": "Page {{current}} / {{total}}",
     "inboundPrefix": "In {{value}}",

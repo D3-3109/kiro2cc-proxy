@@ -189,11 +189,11 @@ export function UsageLogTable({
                 </td>
                 <td className={`${CELL} whitespace-nowrap text-[11.5px] text-ink-2`}>
                   {record.clientIp ? (
-                    <span title={record.clientIp}>
+                    <span title={record.clientIp} className="flex flex-col items-start">
                       <span className="font-mono">{geo?.displayIp ?? record.clientIp}</span>
                       {/* city 缺失颗粒度的 IP（如 8.8.8.8）返回空串，拼接会留下悬空分隔符 */}
                       {geo?.country && (
-                        <span className="ml-1 text-ink-3">
+                        <span className="text-ink-3">
                           {geo.city ? `${geo.country}·${geo.city}` : geo.country}
                         </span>
                       )}
@@ -211,13 +211,26 @@ export function UsageLogTable({
                 <td className={`${CELL} text-[11.5px]`}>
                   <div className="flex flex-col items-start gap-px">
                     <span className={`font-mono ${getModelColor(record.model)}`}>{record.model}</span>
-                    {record.effort && (
-                      <span
-                        className="rounded bg-orange-500/15 px-1 py-px font-mono text-[10px] leading-tight text-orange-500"
-                        title={`effort: ${record.effort}`}
-                      >
-                        {record.effort}
-                      </span>
+                    {(record.isStream != null || record.effort) && (
+                      <div className="flex items-center gap-1">
+                        {record.isStream != null && (
+                          <span
+                            className={`${BADGE_CLS} py-px leading-tight ${
+                              record.isStream ? 'bg-brand-soft text-brand' : 'bg-surface-3 text-ink-2'
+                            }`}
+                          >
+                            {record.isStream ? t('common.streamBadge') : t('common.nonStreamBadge')}
+                          </span>
+                        )}
+                        {record.effort && (
+                          <span
+                            className="rounded bg-orange-500/15 px-1 py-px font-mono text-[10px] leading-tight text-orange-500"
+                            title={`effort: ${record.effort}`}
+                          >
+                            {record.effort}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </td>
