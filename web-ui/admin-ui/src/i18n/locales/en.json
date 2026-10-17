@@ -556,6 +556,7 @@
     "customFromLabel": "Start date",
     "customToLabel": "End date",
     "customInvalidRange": "Start date must not be after end date, and both dates are required",
+    "customFutureRange": "End date must not be later than today",
     "customApply": "Apply",
     "customTruncated": "Showing the most recent 10,000 records",
     "customSpanTooLong": "Custom range spans at most {{days}} days; please narrow it down",

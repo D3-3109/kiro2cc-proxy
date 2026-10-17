@@ -17,7 +17,9 @@ import { SettingsPanel } from '@/components/settings-panel'
 import { LogViewerPage } from '@/components/log-viewer-page'
 import { useCredentials, useApiKeys, useDeleteCredential, useResetFailure, useRpm, useDailyUsage, useServerInfo } from '@/hooks/use-credentials'
 import { useTheme } from '@/hooks/use-theme'
-import { DailyStatsPage, DailySummaryPage, type CustomRange, type RangeKey, type SummaryRangeKey } from '@/components/daily-stats-page'
+import type { CustomRange } from '@/components/daily-shared'
+import { DailyStatsPage, type RangeKey } from '@/components/daily-stats-page'
+import { DailySummaryPage, type SummaryRangeKey } from '@/components/daily-summary-page'
 import { ModelListPage } from '@/components/model-list-page'
 import { ChangelogPage } from '@/components/changelog-page'
 import { ThemeSettingsPage } from '@/components/theme-settings-page'
@@ -793,7 +795,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           creditsTrend={creditsTrend}
           cumulativeFailures={cumulativeFailures}
           cumulativeFailureRate={cumulativeFailureRate}
-          onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false); setDailyRange('today'); setDailyCustomRange(null) }}
+          onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false); setDailyRange('today'); setDailyCustomRange(null); setDailyDetailFromSummary(false) }}
         />
 
         {/* 凭据列表（自本文件拆出，纯代码搬移） */}

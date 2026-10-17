@@ -556,6 +556,7 @@
     "customFromLabel": "起始日期",
     "customToLabel": "结束日期",
     "customInvalidRange": "起始日期不能晚于结束日期，且两端日期不能为空",
+    "customFutureRange": "结束日期不能晚于今天",
     "customApply": "应用",
     "customTruncated": "仅展示最近 10000 条",
     "customSpanTooLong": "自定义区间最长 {{days}} 天，请缩小范围",
