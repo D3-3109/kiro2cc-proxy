@@ -8,17 +8,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       (function () {
-        var mode = localStorage.getItem('admin-ui-theme-mode');
-        if (mode !== 'light' && mode !== 'dark') {
-          mode = localStorage.getItem('admin-ui-theme');
+        try {
+          var mode = localStorage.getItem('admin-ui-theme-mode');
+          if (mode !== 'light' && mode !== 'dark') {
+            mode = localStorage.getItem('admin-ui-theme');
+          }
+          if (mode === 'dark') {
+            document.documentElement.classList.add('dark');
+          }
+          var color = localStorage.getItem('admin-ui-color-theme');
+          document.documentElement.classList.add(
+            // 兜底值必须与 use-theme.ts 的 DEFAULT_COLOR_THEME 保持一致（当前 'spotify'）
+            'theme-' + (color && /^[a-z0-9-]+$/.test(color) ? color : 'spotify')
+          );
+        } catch (e) {
+          /* localStorage 被禁用，走默认浅色 + spotify，由 use-theme.ts 正常接管 */
         }
-        if (mode === 'dark') {
-          document.documentElement.classList.add('dark');
-        }
-        var color = localStorage.getItem('admin-ui-color-theme');
-        document.documentElement.classList.add(
-          'theme-' + (color && /^[a-z0-9-]+$/.test(color) ? color : 'spotify')
-        );
       })();
     </script>
     <title>Kiro2CCProxy Admin</title>

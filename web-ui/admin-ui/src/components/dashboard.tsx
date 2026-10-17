@@ -456,8 +456,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
     deselectAll()
   }
 
-  // 查询所有凭据信息（逐个查询，避免瞬时并发）
+  // 刷新（逐个查询余额，避免瞬时并发）；兼具原独立刷新按钮的职责：
+  // 重拉账号运行时快照（失败计数/健康状态/自动禁用等）
   const handleQueryCurrentPageInfo = async () => {
+    refetch()
     const allCredentials = data?.credentials || []
 
     if (allCredentials.length === 0) {
