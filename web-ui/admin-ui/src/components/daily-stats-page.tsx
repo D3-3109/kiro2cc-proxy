@@ -178,26 +178,20 @@ export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStat
                 { key: '30', label: t('dailyStats.rangeDays', { days: 30 }) },
               ]}
             />
-            {/* 「自定义」独立按钮（非 tab）：点击弹日期对话框，应用成功才切到 custom 视图 */}
+            {/* 日期范围按钮：点击弹出自定义日期对话框（应用成功才切到 custom 视图） */}
             <Button
-              variant={range === 'custom' ? 'default' : 'outline'}
+              variant="outline"
+              className="gap-[7px] px-2.5 font-mono text-[11.5px] tabular-nums"
+              title={t('dailyStats.rangeSpanLabel')}
               onClick={() => setDialogOpen(true)}
             >
-              <CalendarDays aria-hidden="true" />
-              {t('dailyStats.rangeCustom')}
-            </Button>
-            {/* 设计稿此处为日历按钮；无日期选择器需求支撑，降级为非交互的区间信息 */}
-            <span
-              className="inline-flex h-[31px] flex-none items-center gap-[7px] rounded-[7px] border border-transparent bg-surface px-2.5 font-mono text-[11.5px] tabular-nums text-ink-2 shadow-hair"
-              title={t('dailyStats.rangeSpanLabel')}
-            >
-              <CalendarDays className="size-[15px] flex-none text-ink-3" strokeWidth={1.7} aria-hidden="true" />
+              <CalendarDays strokeWidth={1.7} aria-hidden="true" />
               {range === 'custom' && customRange
                 ? `${customRange.from.slice(5)} — ${customRange.to.slice(5)}`
                 : isSummary
                   ? `${from.slice(5)} — ${to.slice(5)}`
                   : cstDateString(0)}
-            </span>
+            </Button>
             <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
               <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
               {t('common.refresh')}
