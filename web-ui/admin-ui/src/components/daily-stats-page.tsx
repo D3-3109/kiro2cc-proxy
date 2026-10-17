@@ -128,6 +128,7 @@ export function DailyStatsPage({
   const [query, setQuery] = useState('')
 
   const isSummary = range !== 'today' && range !== 'custom'
+  const todayCst = cstDateString(0)
   const days = isSummary ? RANGE_DAYS[range] : undefined
   const rows = days !== undefined ? buildWindow(data, days, 0) : []
   const prevRows = days !== undefined ? buildWindow(data, days, days) : []
@@ -200,7 +201,7 @@ export function DailyStatsPage({
                 ? `${customRange.from.slice(5)} — ${customRange.to.slice(5)}`
                 : isSummary
                   ? `${from.slice(5)} — ${to.slice(5)}`
-                  : cstDateString(0)}
+                  : `${todayCst.slice(5)} — ${todayCst.slice(5)}`}
             </Button>
             <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
               <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />

@@ -191,6 +191,15 @@
   ::-webkit-scrollbar-thumb:hover {
     background: var(--ink-3);
   }
+
+  /* 原生控件（date input 日历图标等）跟随主题明暗：未声明时浏览器按浅色
+     UA 渲染，暗黑模式下黑图标在深底上不可见 */
+  :root {
+    color-scheme: light;
+  }
+  :root.dark {
+    color-scheme: dark;
+  }
 }
 
 @layer utilities {
