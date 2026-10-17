@@ -7,8 +7,8 @@
 //! 像 Kiro CLI 一样实时可见。
 //!
 //! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
-//! 是否生效取决于客户端是否放行转义字符，故 ANSI 样式仅用于终端入口（UA 入口为 `cli`）；
-//! Claude Desktop 等图形界面改用无转义的纯文本样式，入口未知的客户端回退到原生 thinking
+//! 是否生效取决于客户端是否放行转义字符：已确认不解析 ANSI 的图形界面（UA 入口以
+//! `claude-desktop` 开头）改用无转义的纯文本样式，其余 Claude Code 入口一律用 ANSI
 //! （见 [`thinking_text_style`]）。首行为「💭 Thinking」标记，
 //! 块收尾追加「💭 Thought for Ns (N tokens)」时长行（贴近 Claude Code 原生样式，
 //! token 数为该思考块正文的 cl100k_base 计数），
@@ -90,11 +90,15 @@ pub enum ThinkingTextStyle {
 ///
 /// 判定依据是 UA 括号内的入口字段，如 `claude-cli/2.1.231 (external, cli)` 的 `cli`、
 /// `claude-cli/2.1.295 (external, claude-desktop-3p, agent-sdk/0.3.295)` 的 `claude-desktop-3p`：
-/// - 入口为 `cli` → [`ThinkingTextStyle::Ansi`]；
-/// - 入口以 `claude-desktop` 开头 → [`ThinkingTextStyle::Plain`]；
-/// - 入口为其他值（VS Code 扩展、SDK 等，渲染能力未知）→ `None`，宁可回退原生 thinking，
-///   也不输出可能无法渲染的转义码；
-/// - 解析不出入口（无括号 / 字段不足）→ 保持原有行为，按终端处理（Ansi）。
+/// - 入口以 `claude-desktop` 开头 → [`ThinkingTextStyle::Plain`]（唯一已确认渲染不了 ANSI 的入口）；
+/// - 其余 Claude Code 入口（`cli`、`local-agent`、`claude-vscode`、`sdk-ts`，或解析不出入口）
+///   → [`ThinkingTextStyle::Ansi`]，保持引入入口判定之前的行为；
+/// - 非 Claude Code 客户端 → `None`，走原生 thinking。
+///
+/// 这里刻意用「已知不支持才切换」的黑名单，而不是「已知支持才启用」的白名单：
+/// 对渲染能力未知的入口回退原生 thinking，会让它们的思考过程静默消失（原生 thinking
+/// 在多数客户端被折叠，长任务期间界面无任何输出，issue #48 后续反馈中 `local-agent`
+/// 即因此回归）。显示成乱码是可见、可自查的；静默丢失则不是。
 pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTextStyle> {
     if !is_claude_code_client(headers) {
         return None;
@@ -105,9 +109,8 @@ pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTe
         .and_then(client_entrypoint)
         .map(str::to_ascii_lowercase);
     match entrypoint.as_deref() {
-        None | Some("cli") => Some(ThinkingTextStyle::Ansi),
         Some(e) if e.starts_with("claude-desktop") => Some(ThinkingTextStyle::Plain),
-        Some(_) => None,
+        _ => Some(ThinkingTextStyle::Ansi),
     }
 }
 
@@ -903,13 +906,17 @@ mod tests {
     }
 
     #[test]
-    fn style_is_none_for_unknown_entrypoints() {
-        // 渲染能力未知的入口：回退原生 thinking
+    fn style_is_ansi_for_every_non_desktop_claude_code_entrypoint() {
+        // 只有 Desktop 被确认渲染不了 ANSI；其余入口保持原有行为，不能静默回退原生 thinking
+        // （issue #48 后续反馈：local-agent 因此看不到思考过程）
         for ua in [
+            "claude-cli/2.1.295 (external, local-agent, agent-sdk/0.3.295)",
             "claude-cli/2.1.295 (external, claude-vscode, agent-sdk/0.3.295)",
             "claude-cli/2.1.295 (external, sdk-ts)",
+            "claude-cli/2.1.295 (external, sdk-cli)",
+            "claude-cli/2.1.295 (external, some-future-entrypoint)",
         ] {
-            assert_eq!(style_of(ua), None, "{ua}");
+            assert_eq!(style_of(ua), Some(ThinkingTextStyle::Ansi), "{ua}");
         }
     }
 
