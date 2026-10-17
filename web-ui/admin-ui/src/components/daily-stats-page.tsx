@@ -169,24 +169,23 @@ export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStat
           <>
             <Segmented
               value={range}
-              onChange={(key) => {
-                // 非自定义态点「自定义」先弹日期对话框；应用成功才切到 custom，
-                // 取消/遮罩/ESC 关闭则 range 不变（即回退前一 tab，主区不变、不发请求）
-                if (key === 'custom' && range !== 'custom') {
-                  setDialogOpen(true)
-                  return
-                }
-                setRange(key)
-              }}
+              onChange={setRange}
               groupLabel={t('dailyStats.rangeGroupLabel')}
               options={[
                 { key: 'today', label: t('dailyStats.rangeToday') },
                 { key: '7', label: t('dailyStats.rangeDays', { days: 7 }) },
                 { key: '14', label: t('dailyStats.rangeDays', { days: 14 }) },
                 { key: '30', label: t('dailyStats.rangeDays', { days: 30 }) },
-                { key: 'custom', label: t('dailyStats.rangeCustom') },
               ]}
             />
+            {/* 「自定义」独立按钮（非 tab）：点击弹日期对话框，应用成功才切到 custom 视图 */}
+            <Button
+              variant={range === 'custom' ? 'default' : 'outline'}
+              onClick={() => setDialogOpen(true)}
+            >
+              <CalendarDays aria-hidden="true" />
+              {t('dailyStats.rangeCustom')}
+            </Button>
             {/* 设计稿此处为日历按钮；无日期选择器需求支撑，降级为非交互的区间信息 */}
             <span
               className="inline-flex h-[31px] flex-none items-center gap-[7px] rounded-[7px] border border-transparent bg-surface px-2.5 font-mono text-[11.5px] tabular-nums text-ink-2 shadow-hair"
@@ -617,8 +616,8 @@ function CustomRangeDialog({
   const [wasOpen, setWasOpen] = useState(false)
   if (open && !wasOpen) {
     setWasOpen(true)
-    setFrom(initial?.from ?? '')
-    setTo(initial?.to ?? '')
+    setFrom(initial?.from ?? cstDateString(0))
+    setTo(initial?.to ?? cstDateString(0))
     setTouched(false)
   } else if (!open && wasOpen) {
     setWasOpen(false)
