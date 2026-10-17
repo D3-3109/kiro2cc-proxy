@@ -462,7 +462,7 @@ function TodayRecordsView() {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const todayCst = cstDateString(0)
-  const { data: recordsData, isLoading, isError, refetch } = useDailyUsageRecords(todayCst, page, TODAY_PAGE_SIZE)
+  const { data: recordsData, isLoading, isError } = useDailyUsageRecords(todayCst, page, TODAY_PAGE_SIZE)
 
   // 跨 CST 午夜日期滚动后重置回第一页，避免停留在已越界的旧页码
   const [lastTodayCst, setLastTodayCst] = useState(todayCst)
@@ -486,15 +486,6 @@ function TodayRecordsView() {
   const pageCacheRead = records.reduce((s, r) => s + (r.cacheReadInputTokens ?? 0), 0)
   const cacheShare = pageInput > 0 ? (pageCacheRead / pageInput) * 100 : 0
   const avgCost = records.length > 0 ? pageCost / records.length : 0
-
-  const handleRefresh = async () => {
-    const result = await refetch()
-    if (result.isError) {
-      toast.error(extractErrorMessage(result.error))
-      return
-    }
-    toast.success(t('dailyStats.toastDetailRefreshed'))
-  }
 
   return (
     <div className="flex min-h-[calc(100vh-56px)] flex-col">
@@ -573,14 +564,7 @@ function TodayRecordsView() {
         </section>
       </div>
 
-      {/* 今日视图自带刷新（主刷新按钮驱动的是 useDailyUsage 汇总查询，非明细） */}
-      <div className="mt-3 flex justify-end">
-        <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
-          <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
-          {t('common.refresh')}
-        </Button>
       </div>
-    </div>
   )
 }
 
@@ -689,7 +673,7 @@ const RANGE_PAGE_SIZE = 100
 function CustomRangeRecordsView({ range }: { range: CustomRange }) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
-  const { data: recordsData, isLoading, isError, refetch } = useUsageRecordsByRange(
+  const { data: recordsData, isLoading, isError } = useUsageRecordsByRange(
     range.from,
     range.to,
     page,
@@ -712,15 +696,6 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
   const pageCacheRead = records.reduce((s, r) => s + (r.cacheReadInputTokens ?? 0), 0)
   const cacheShare = pageInput > 0 ? (pageCacheRead / pageInput) * 100 : 0
   const avgCost = records.length > 0 ? pageCost / records.length : 0
-
-  const handleRefresh = async () => {
-    const result = await refetch()
-    if (result.isError) {
-      toast.error(extractErrorMessage(result.error))
-      return
-    }
-    toast.success(t('dailyStats.toastDetailRefreshed'))
-  }
 
   return (
     <div className="flex min-h-[calc(100vh-56px)] flex-col">
@@ -806,13 +781,6 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
             </div>
           </div>
         </section>
-      </div>
-
-      <div className="mt-3 flex justify-end">
-        <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
-          <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
-          {t('common.refresh')}
-        </Button>
       </div>
     </div>
   )
