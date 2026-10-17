@@ -87,6 +87,32 @@ function buildWindow(data: DailySummary[] | undefined, days: number, offset: num
   })
 }
 
+/** 自定义区间的最大跨度（闭区间含两端天数），超长区间折线图与表格不可用 */
+const CUSTOM_RANGE_MAX_DAYS = 366
+
+/**
+ * 绝对日期闭区间的零填充序列（升序），与 buildWindow 同口径但接受固定日期。
+ * custom 区间不随 CST 午夜滚动（用户选定即固定），无需 cstDateString 偏移重算。
+ */
+function buildCustomWindow(data: DailySummary[] | undefined, from: string, to: string): DayRow[] {
+  const byDate = new Map((data ?? []).map((d) => [d.date, d]))
+  const fromMs = Date.parse(`${from}T00:00:00Z`)
+  const toMs = Date.parse(`${to}T00:00:00Z`)
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || fromMs > toMs) return []
+  const spanDays = Math.floor((toMs - fromMs) / DAY_MS) + 1
+  return Array.from({ length: spanDays }, (_, i) => {
+    const date = new Date(fromMs + i * DAY_MS).toISOString().slice(0, 10)
+    const row = byDate.get(date)
+    return {
+      date,
+      credits: row?.totalCredits ?? 0,
+      cost: row?.totalCost ?? 0,
+      requests: row?.totalRequests ?? 0,
+      saved: row?.totalCreditsSaved ?? 0,
+    }
+  })
+}
+
 /** 按 UTC 解析 + 按 UTC 取星期，避免浏览器本地时区把 CST 日历日挪一天 */
 function weekdayLabel(date: string): string {
   return new Date(`${date}T00:00:00Z`).toLocaleDateString(localeTag(), { weekday: 'short', timeZone: 'UTC' })
@@ -570,31 +596,48 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
   )
 }
 
-type SummaryRangeKey = '7' | '14' | '30'
+export type SummaryRangeKey = '7' | '14' | '30' | 'custom'
 
 /**
  * 「每日统计」独立汇总页（3.4.28 版每日统计页形态）：区间指标卡 + 折线图 +
  * 日期汇总表格（点击下钻日明细）。
  *
- * - 区间 Segmented 自持（7/14/30），与使用日志页的 range 完全独立
- * - 数据仍来自 useDailyUsage（60s 轮询），buildWindow 零填充窗口口径不变
+ * - 区间（7/14/30 + 自定义）由父级持有并经 props 传入（下钻日明细返回后保持），
+ *   与使用日志页的 range 完全独立
+ * - 数据仍来自 useDailyUsage（60s 轮询），buildWindow 零填充窗口口径不变；
+ *   custom 态走 buildCustomWindow（绝对日期闭区间，不随午夜滚动）
  */
 export function DailySummaryPage({
   onBack,
   onViewDay,
+  sumRange,
+  onSumRangeChange,
+  customRange,
+  onCustomRangeChange,
 }: {
   onBack: () => void
   onViewDay: (date: string) => void
+  sumRange: SummaryRangeKey
+  onSumRangeChange: (range: SummaryRangeKey) => void
+  customRange: CustomRange | null
+  onCustomRangeChange: (range: CustomRange | null) => void
 }) {
   const { t } = useTranslation()
   const { data, isLoading, refetch, dataUpdatedAt } = useDailyUsage()
-  const [sumRange, setSumRange] = useState<SummaryRangeKey>('7')
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [filter, setFilter] = useState<UsageFilter>('active')
   const [query, setQuery] = useState('')
 
-  const days = RANGE_DAYS[sumRange]
-  const rows = buildWindow(data, days, 0)
-  const prevRows = buildWindow(data, days, days)
+  // custom 态区间为用户选定固定日期；固定档 days 为区间实际天数（指标分母）。
+  // sumRange 为 'custom' 但 customRange 尚未应用（校验失败）时按默认 7 天窗口兜底
+  const isCustom = sumRange === 'custom' && customRange !== null
+  const fixedDays = RANGE_DAYS[sumRange === 'custom' ? '7' : sumRange]
+  const rows = isCustom
+    ? buildCustomWindow(data, customRange.from, customRange.to)
+    : buildWindow(data, fixedDays, 0)
+  // 环比仅固定档有定义（等长上一滚动窗口）；custom 态不渲染环比，恒 0 跳过 Delta
+  const prevRows = isCustom ? [] : buildWindow(data, fixedDays, fixedDays)
+  const days = isCustom ? rows.length : fixedDays
 
   const total = rows.reduce((s, r) => s + r.credits, 0)
   const prevTotal = prevRows.reduce((s, r) => s + r.credits, 0)
@@ -611,7 +654,7 @@ export function DailySummaryPage({
   const zeroStreakSince = zeroStreak > 0 ? rows[rows.length - zeroStreak].date : null
 
   const avgActive = activeRows.length > 0 ? total / activeRows.length : 0
-  const avgAll = total / days
+  const avgAll = days > 0 ? total / days : 0
   const medianActive = median(activeRows.map((r) => r.credits))
   const from = rows.length > 0 ? rows[0].date : ''
   const to = rows.length > 0 ? rows[rows.length - 1].date : ''
@@ -632,6 +675,19 @@ export function DailySummaryPage({
     toast.success(t('dailyStats.toastRefreshed'))
   }
 
+  // 应用自定义区间：跨度超上限仅提示不切态（弹窗保持打开，用户可直接改日期重试）
+  const handleApplyCustom = (r: CustomRange) => {
+    const spanDays =
+      Math.floor((Date.parse(`${r.to}T00:00:00Z`) - Date.parse(`${r.from}T00:00:00Z`)) / DAY_MS) + 1
+    if (spanDays > CUSTOM_RANGE_MAX_DAYS) {
+      toast.error(t('dailyStats.customSpanTooLong', { days: CUSTOM_RANGE_MAX_DAYS }))
+      return
+    }
+    onCustomRangeChange(r)
+    onSumRangeChange('custom')
+    setDialogOpen(false)
+  }
+
   return (
     <div className="flex min-h-0 flex-col">
       <PageHead
@@ -643,7 +699,7 @@ export function DailySummaryPage({
           <>
             <Segmented
               value={sumRange}
-              onChange={setSumRange}
+              onChange={onSumRangeChange}
               groupLabel={t('dailyStats.rangeGroupLabel')}
               options={[
                 { key: '7', label: t('dailyStats.rangeDays', { days: 7 }) },
@@ -651,6 +707,16 @@ export function DailySummaryPage({
                 { key: '30', label: t('dailyStats.rangeDays', { days: 30 }) },
               ]}
             />
+            {/* 日期范围按钮：点击弹出自定义日期对话框（与使用日志页同款交互） */}
+            <Button
+              variant="outline"
+              className="gap-[7px] px-2.5 font-mono text-[11.5px] tabular-nums"
+              title={t('dailyStats.rangeSpanLabel')}
+              onClick={() => setDialogOpen(true)}
+            >
+              <CalendarDays strokeWidth={1.7} aria-hidden="true" />
+              {isCustom ? `${customRange.from} — ${customRange.to}` : `${from} — ${to}`}
+            </Button>
             <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
               <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
               {t('common.refresh')}
@@ -664,16 +730,21 @@ export function DailySummaryPage({
           <MetricValue value={total.toFixed(2)} unit={t('dailyStats.unitCredits')} />
           <MetricFoot className="truncate">
             <span>{t('dailyStats.rangeDays', { days })}</span>
-            <FootSep />
-            <span className="flex items-center gap-1">
-              {t('dailyStats.metricVsPrev')}
-              {/* 上一区间为 0 时百分比无意义（除零），不渲染 */}
-              {prevTotal > 0 && (
-                <span title={t('dailyStats.metricVsPrevHint')}>
-                  <Delta percent={((total - prevTotal) / prevTotal) * 100} />
+            {/* 环比仅固定档有定义（等长上一滚动窗口）；custom 态等长前一区间语义模糊，不渲染 */}
+            {!isCustom && (
+              <>
+                <FootSep />
+                <span className="flex items-center gap-1">
+                  {t('dailyStats.metricVsPrev')}
+                  {/* 上一区间为 0 时百分比无意义（除零），不渲染 */}
+                  {prevTotal > 0 && (
+                    <span title={t('dailyStats.metricVsPrevHint')}>
+                      <Delta percent={((total - prevTotal) / prevTotal) * 100} />
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
+              </>
+            )}
           </MetricFoot>
         </Metric>
 
@@ -716,7 +787,7 @@ export function DailySummaryPage({
             )}
           </MetricFoot>
           <MetricAside>
-            <Ring percent={(activeRows.length / days) * 100} tone="stroke-warn" size={42} />
+            <Ring percent={days > 0 ? (activeRows.length / days) * 100 : 0} tone="stroke-warn" size={42} />
           </MetricAside>
         </Metric>
 
@@ -880,6 +951,13 @@ export function DailySummaryPage({
           </span>
         </div>
       </section>
+
+      <CustomRangeDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onApply={handleApplyCustom}
+        initial={customRange}
+      />
     </div>
   )
 }

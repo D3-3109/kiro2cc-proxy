@@ -17,7 +17,7 @@ import { SettingsPanel } from '@/components/settings-panel'
 import { LogViewerPage } from '@/components/log-viewer-page'
 import { useCredentials, useApiKeys, useDeleteCredential, useResetFailure, useRpm, useDailyUsage, useServerInfo } from '@/hooks/use-credentials'
 import { useTheme } from '@/hooks/use-theme'
-import { DailyStatsPage, DailySummaryPage, type CustomRange, type RangeKey } from '@/components/daily-stats-page'
+import { DailyStatsPage, DailySummaryPage, type CustomRange, type RangeKey, type SummaryRangeKey } from '@/components/daily-stats-page'
 import { ModelListPage } from '@/components/model-list-page'
 import { ChangelogPage } from '@/components/changelog-page'
 import { ThemeSettingsPage } from '@/components/theme-settings-page'
@@ -77,6 +77,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [dailyCustomRange, setDailyCustomRange] = useState<CustomRange | null>(null)
   // 日明细页的返回目标：从「每日统计」汇总页下钻 → 回汇总页；其余路径 → 回使用日志页
   const [dailyDetailFromSummary, setDailyDetailFromSummary] = useState(false)
+  // 每日统计汇总页的区间选择：提升持有，下钻日明细返回后保持
+  const [dailySummaryRange, setDailySummaryRange] = useState<SummaryRangeKey>('7')
+  const [dailySummaryCustomRange, setDailySummaryCustomRange] = useState<CustomRange | null>(null)
   const cancelVerifyRef = useRef(false)
   // 单账号重查余额的防重入标记（见 handleRefetchBalance）
   const refetchingBalanceIds = useRef<Set<number>>(new Set())
@@ -737,6 +740,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
               setDailyDetailFromSummary(true)
               setDailyView(date)
             }}
+            sumRange={dailySummaryRange}
+            onSumRangeChange={setDailySummaryRange}
+            customRange={dailySummaryCustomRange}
+            onCustomRangeChange={setDailySummaryCustomRange}
           />
         ) : dailyView !== null ? (
           <DailyDetailPage
