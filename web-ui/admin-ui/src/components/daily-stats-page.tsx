@@ -198,10 +198,10 @@ export function DailyStatsPage({
             >
               <CalendarDays strokeWidth={1.7} aria-hidden="true" />
               {range === 'custom' && customRange
-                ? `${customRange.from.slice(5)} — ${customRange.to.slice(5)}`
+                ? `${customRange.from} — ${customRange.to}`
                 : isSummary
-                  ? `${from.slice(5)} — ${to.slice(5)}`
-                  : `${todayCst.slice(5)} — ${todayCst.slice(5)}`}
+                  ? `${from} — ${to}`
+                  : `${todayCst} — ${todayCst}`}
             </Button>
             <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
               <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
