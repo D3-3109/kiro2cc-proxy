@@ -460,6 +460,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   // 重拉账号运行时快照（失败计数/健康状态/自动禁用等）
   const handleQueryCurrentPageInfo = async () => {
     refetch()
+    // 与切 tab 刷新口径对齐：同步失效每日统计（今日消耗积分/请求数/缓存命中率等）
+    queryClient.invalidateQueries({ queryKey: ['dailyUsage'] })
     const allCredentials = data?.credentials || []
 
     if (allCredentials.length === 0) {
