@@ -556,8 +556,10 @@
     "customFromLabel": "起始日期",
     "customToLabel": "结束日期",
     "customInvalidRange": "起始日期不能晚于结束日期，且两端日期不能为空",
+    "customFutureRange": "结束日期不能晚于今天",
     "customApply": "应用",
     "customTruncated": "仅展示最近 10000 条",
+    "customSpanTooLong": "自定义区间最长 {{days}} 天，请缩小范围",
     "rangeToday": "今日",
     "rangeDays": "{{days}} 天",
     "rangeSpanLabel": "当前区间",
@@ -598,7 +600,10 @@
     "emptyNoMatch": "无匹配的日期",
     "viewDetailTitle": "查看当日明细",
     "footRange": "区间",
-    "footTotals": "合计 {{credits}} 积分 · {{requests}} 请求"
+    "footTotals": "合计 {{credits}} 积分 · {{requests}} 请求",
+    "navSummaryButton": "每日统计",
+    "summaryPageTitle": "每日统计",
+    "summaryHeadNote": "按自然日聚合的区间用量汇总与趋势"
   },
   "logs": {
     "toastLogRefreshed": "已刷新日志",

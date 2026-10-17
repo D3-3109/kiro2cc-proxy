@@ -10,10 +10,45 @@ export interface TrendPoint {
 
 /** Y 轴 4 条刻度线 = 3 等分（设计稿 top: 0 / 33.33% / 66.67% / 100%） */
 const AXIS_DIVISIONS = 3
-/** 点数超过此值时 X 轴标签抽稀，否则 30 天档标签必然重叠 */
+/** 点数超过此值时抽稀，否则 30 天档标签必然重叠 */
 const XLABEL_DENSE_THRESHOLD = 20
-const XLABEL_STEP = 3
-/** 数值标注给所有有消耗日 */
+/** 最小抽稀步长：≤ 阈值档沿用 3，与设计稿 30 天档密度一致 */
+const XLABEL_MIN_STEP = 3
+/** 抽稀后标签/标注的目标数量上限（步长随点数自适应，366 天档仍 ≈ 10 个） */
+const XLABEL_TARGET = 10
+
+/** 抽稀步长：短区间恒为最小步长，长区间放大到目标数量以内（366 天档 ≈ 10 个） */
+function xlabelStepOf(lastIndex: number): number {
+  return Math.max(XLABEL_MIN_STEP, Math.ceil(lastIndex / XLABEL_TARGET))
+}
+
+/**
+ * 该索引是否保留 x 轴日期标签。
+ *
+ * 末点必保留（读数关键位）；步长整点与峰值日同样保留，但二者都占位，故与末点
+ * 相距不足半个步长时统一让位，避免 42 天档（step=5）出现 i=40 与 i=41 叠字。
+ * 圆点与数值标注不走此判定（见下方 annotated），峰值标识不受让位影响。
+ */
+function isAnnotatedIndex({
+  i,
+  lastIndex,
+  step,
+  dense,
+  date,
+  peakDate,
+}: {
+  i: number
+  lastIndex: number
+  step: number
+  dense: boolean
+  date: string
+  peakDate: string | null
+}): boolean {
+  if (!dense) return true
+  if (i === lastIndex) return true
+  if (i % step !== 0 && date !== peakDate) return false
+  return i <= lastIndex - step / 2
+}
 
 /** 上界取「好数」并保证能被 3 整除；全零区间取 1，避免 credits/axisMax 除零 */
 function niceAxisMax(value: number): number {
@@ -73,9 +108,15 @@ export function DailyCreditsTrendChart({ points }: { points: TrendPoint[] }) {
 
   const gridTops = Array.from({ length: AXIS_DIVISIONS + 1 }, (_, i) => (i / AXIS_DIVISIONS) * 100)
   const dense = points.length > XLABEL_DENSE_THRESHOLD
-  // 抽稀时保证末点与峰值日不被跳过
-  const xLabels = coords.filter(
-    (c, i) => !dense || i % XLABEL_STEP === 0 || i === lastIndex || c.date === peakDate,
+  const xlabelStep = xlabelStepOf(lastIndex)
+  // x 轴日期文本（MM-DD ≈ 30px）在尾部与末点相距不足半个步长时叠字，故整点与峰值日统一让位
+  const xLabels = coords.filter((c, i) =>
+    isAnnotatedIndex({ i, lastIndex, step: xlabelStep, dense, date: c.date, peakDate }),
+  )
+  // 圆点与数值标注另走一套：尾部让位只为避免文本叠字，7px 圆点无需让位，
+  // 故峰值日与末点恒保留（否则「最近一两天即峰值」时圆点、数值、is-peak 光晕整体消失）
+  const annotated = coords.filter(
+    (c, i) => c.credits > 0 && (!dense || i === lastIndex || c.date === peakDate || i % xlabelStep === 0),
   )
 
   return (
@@ -158,7 +199,7 @@ export function DailyCreditsTrendChart({ points }: { points: TrendPoint[] }) {
               </svg>
 
               {/* 设计稿 .plot-dot / .plot-dot.is-peak */}
-              {active.map((c) => (
+              {annotated.map((c) => (
                 <span
                   key={c.date}
                   className={`absolute z-[3] -translate-x-1/2 translate-y-1/2 rounded-full border-brand bg-surface ${
@@ -171,7 +212,7 @@ export function DailyCreditsTrendChart({ points }: { points: TrendPoint[] }) {
               ))}
 
               {/* 设计稿 .plot-val */}
-              {active.map((c) => (
+              {annotated.map((c) => (
                 <span
                   key={c.date}
                   className="absolute z-[3] whitespace-nowrap font-mono text-[10.5px] font-semibold tabular-nums text-brand [transform:translate(-50%,-9px)]"

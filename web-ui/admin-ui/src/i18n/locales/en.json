@@ -556,8 +556,10 @@
     "customFromLabel": "Start date",
     "customToLabel": "End date",
     "customInvalidRange": "Start date must not be after end date, and both dates are required",
+    "customFutureRange": "End date must not be later than today",
     "customApply": "Apply",
     "customTruncated": "Showing the most recent 10,000 records",
+    "customSpanTooLong": "Custom range spans at most {{days}} days; please narrow it down",
     "rangeToday": "Today",
     "rangeDays": "{{days}} days",
     "rangeSpanLabel": "Current range",
@@ -598,7 +600,10 @@
     "emptyNoMatch": "No matching dates",
     "viewDetailTitle": "View day detail",
     "footRange": "Range",
-    "footTotals": "Total {{credits}} cr · {{requests}} requests"
+    "footTotals": "Total {{credits}} cr · {{requests}} requests",
+    "navSummaryButton": "Daily Stats",
+    "summaryPageTitle": "Daily Statistics",
+    "summaryHeadNote": "Daily usage totals and trends aggregated by calendar day"
   },
   "logs": {
     "toastLogRefreshed": "Logs refreshed",
