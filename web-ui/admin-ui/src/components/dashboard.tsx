@@ -284,11 +284,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   }
 
-  const handleRefresh = () => {
-    refetch()
-    toast.success(t('dashboard.toastRefreshed'))
-  }
-
   const handleLogout = () => {
     storage.removeApiKey()
     queryClient.clear()
@@ -801,7 +796,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
         {/* 凭据列表（自本文件拆出，纯代码搬移） */}
         <CredentialList
           allCredentials={allCredentials}
-          handleRefresh={handleRefresh}
           handleQueryCurrentPageInfo={handleQueryCurrentPageInfo}
           queryingInfo={queryingInfo}
           queryInfoProgress={queryInfoProgress}

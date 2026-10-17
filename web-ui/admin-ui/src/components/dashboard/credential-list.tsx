@@ -13,7 +13,6 @@ import type { CredentialStatusItem, BalanceResponse } from '@/types/api'
 interface CredentialListProps {
   allCredentials: CredentialStatusItem[]
   // 操作条
-  handleRefresh: () => void
   handleQueryCurrentPageInfo: () => void
   queryingInfo: boolean
   queryInfoProgress: { current: number; total: number }
@@ -64,7 +63,6 @@ interface CredentialListProps {
 
 export function CredentialList({
   allCredentials,
-  handleRefresh,
   handleQueryCurrentPageInfo,
   queryingInfo,
   queryInfoProgress,
@@ -117,7 +115,6 @@ export function CredentialList({
           {/* 操作条（设计稿 .actionbar） */}
           <CredentialActionBar
             allCredentials={allCredentials}
-            handleRefresh={handleRefresh}
             handleQueryCurrentPageInfo={handleQueryCurrentPageInfo}
             queryingInfo={queryingInfo}
             queryInfoProgress={queryInfoProgress}

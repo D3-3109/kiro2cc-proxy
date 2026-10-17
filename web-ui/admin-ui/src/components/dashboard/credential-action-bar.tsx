@@ -1,12 +1,11 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // Dashboard 凭据操作条区块（自 dashboard.tsx 拆出，纯代码搬移）
 import { useTranslation } from 'react-i18next'
-import { RefreshCw, Info, CheckCircle2, Plus } from 'lucide-react'
+import { RefreshCw, CheckCircle2, Plus } from 'lucide-react'
 import { ACTION_BTN, ACTION_BTN_PRIMARY } from '@/components/dashboard/panel-constants'
 
 interface CredentialActionBarProps {
   allCredentials: unknown[]
-  handleRefresh: () => void
   handleQueryCurrentPageInfo: () => void
   queryingInfo: boolean
   queryInfoProgress: { current: number; total: number }
@@ -30,7 +29,6 @@ function BatchImportIcon() {
 
 export function CredentialActionBar({
   allCredentials,
-  handleRefresh,
   handleQueryCurrentPageInfo,
   queryingInfo,
   queryInfoProgress,
@@ -45,23 +43,19 @@ export function CredentialActionBar({
 
   return (
     <div className="flex flex-wrap items-center gap-[7px]">
-              <button type="button" onClick={handleRefresh} aria-label={t('dashboard.refreshList')} className={ACTION_BTN}>
-                <RefreshCw />
-                <span className="hidden sm:inline">{t('dashboard.refreshList')}</span>
-              </button>
               {allCredentials.length > 0 && (
                 <button
                   type="button"
                   onClick={handleQueryCurrentPageInfo}
                   disabled={queryingInfo}
-                  aria-label={t('dashboard.queryInfo')}
+                  aria-label={t('common.refresh')}
                   className={ACTION_BTN}
                 >
-                  <Info className={queryingInfo ? 'animate-pulse' : ''} />
+                  <RefreshCw className={queryingInfo ? 'animate-spin' : ''} />
                   <span className="hidden sm:inline">
                     {queryingInfo
                       ? t('dashboard.queryingProgress', { current: queryInfoProgress.current, total: queryInfoProgress.total })
-                      : t('dashboard.queryInfo')}
+                      : t('common.refresh')}
                   </span>
                 </button>
               )}
