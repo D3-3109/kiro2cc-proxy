@@ -497,7 +497,7 @@ function TodayRecordsView() {
   }
 
   return (
-    <div>
+    <div className="flex min-h-[calc(100vh-56px)] flex-col">
       <MetricsBar>
         <Metric label={t('common.statTotalRequests')}>
           <MetricValue value={totalRecords.toLocaleString(localeTag())} />
@@ -546,10 +546,10 @@ function TodayRecordsView() {
       </MetricsBar>
 
       {/* 请求日志（.panel + .tscroll + .panel-foot），与单日明细页共用同一张表 */}
-      <div className="mt-[15px]">
+      <div className="mt-[15px] flex min-h-0 flex-1 flex-col">
         <h3 className={PANEL_TITLE}>{t('common.requestLog')}</h3>
-        <section className={PANEL}>
-          <div className="max-h-[70vh] overflow-y-auto">
+        <section className={`${PANEL} flex min-h-0 flex-1 flex-col`}>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {isError ? (
               <div className="px-4 py-12 text-center text-[12.5px] text-ink-3">
                 {t('common.loadFailed')}
@@ -723,7 +723,7 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
   }
 
   return (
-    <div>
+    <div className="flex min-h-[calc(100vh-56px)] flex-col">
       <MetricsBar>
         <Metric label={t('common.statTotalRequests')}>
           <MetricValue value={totalRecords.toLocaleString(localeTag())} />
@@ -772,7 +772,7 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
       </MetricsBar>
 
       {/* 请求日志（.panel + .tscroll + .panel-foot），与今日视图共用同一张表 */}
-      <div className="mt-[15px]">
+      <div className="mt-[15px] flex min-h-0 flex-1 flex-col">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className={PANEL_TITLE}>{t('common.requestLog')}</h3>
           {/* 区间摘要 + 截断提示（匹配超上限时后端已降序截断到最新 10000 条） */}
@@ -783,8 +783,8 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
             {truncated && <span className="text-warn">{t('dailyStats.customTruncated')}</span>}
           </div>
         </div>
-        <section className={PANEL}>
-          <div className="max-h-[70vh] overflow-y-auto">
+        <section className={`${PANEL} flex min-h-0 flex-1 flex-col`}>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {isError ? (
               <div className="px-4 py-12 text-center text-[12.5px] text-ink-3">
                 {t('common.loadFailed')}
