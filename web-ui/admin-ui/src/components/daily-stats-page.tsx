@@ -27,13 +27,17 @@ interface DailyStatsPageProps {
   onBack: () => void
   onViewDay: (date: string) => void
   showBack?: boolean
+  range: RangeKey
+  onRangeChange: (r: RangeKey) => void
+  customRange: CustomRange | null
+  onCustomRangeChange: (r: CustomRange | null) => void
 }
 
-type RangeKey = 'today' | '7' | '14' | '30' | 'custom'
+export type RangeKey = 'today' | '7' | '14' | '30' | 'custom'
 const RANGE_DAYS: Record<'7' | '14' | '30', number> = { '7': 7, '14': 14, '30': 30 }
 
 /** 已应用的自定义区间（CST 日历日，闭区间含两端） */
-interface CustomRange {
+export interface CustomRange {
   from: string
   to: string
 }
@@ -107,12 +111,18 @@ function shareTone(share: number): string {
 
 const COLUMN_WIDTHS: (number | undefined)[] = [130, 78, undefined, 120]
 
-export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStatsPageProps) {
+export function DailyStatsPage({
+  onBack,
+  onViewDay,
+  showBack = true,
+  range,
+  onRangeChange,
+  customRange,
+  onCustomRangeChange,
+}: DailyStatsPageProps) {
   const { t } = useTranslation()
   // 保持无条件挂载：60s 轮询触发重渲染驱动今日视图跨午夜滚动日期（不依赖区间模式被选中）
   const { data, isLoading, refetch, dataUpdatedAt } = useDailyUsage()
-  const [range, setRange] = useState<RangeKey>('today')
-  const [customRange, setCustomRange] = useState<CustomRange | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [filter, setFilter] = useState<UsageFilter>('active')
   const [query, setQuery] = useState('')
@@ -169,7 +179,7 @@ export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStat
           <>
             <Segmented
               value={range}
-              onChange={setRange}
+              onChange={onRangeChange}
               groupLabel={t('dailyStats.rangeGroupLabel')}
               options={[
                 { key: 'today', label: t('dailyStats.rangeToday') },
@@ -435,8 +445,8 @@ export function DailyStatsPage({ onBack, onViewDay, showBack = true }: DailyStat
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onApply={(r) => {
-          setCustomRange(r)
-          setRange('custom')
+          onCustomRangeChange(r)
+          onRangeChange('custom')
           setDialogOpen(false)
         }}
         initial={customRange}
@@ -673,6 +683,15 @@ const RANGE_PAGE_SIZE = 100
 function CustomRangeRecordsView({ range }: { range: CustomRange }) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
+
+  // 重新应用新区间后重置回第一页，避免残留页码越界（与今日视图跨午夜重置同模式）
+  const rangeKey = `${range.from}~${range.to}`
+  const [lastRangeKey, setLastRangeKey] = useState(rangeKey)
+  if (lastRangeKey !== rangeKey) {
+    setLastRangeKey(rangeKey)
+    setPage(1)
+  }
+
   const { data: recordsData, isLoading, isError } = useUsageRecordsByRange(
     range.from,
     range.to,

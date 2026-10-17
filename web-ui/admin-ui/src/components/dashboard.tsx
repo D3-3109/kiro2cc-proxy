@@ -17,7 +17,7 @@ import { SettingsPanel } from '@/components/settings-panel'
 import { LogViewerPage } from '@/components/log-viewer-page'
 import { useCredentials, useApiKeys, useDeleteCredential, useResetFailure, useRpm, useDailyUsage, useServerInfo } from '@/hooks/use-credentials'
 import { useTheme } from '@/hooks/use-theme'
-import { DailyStatsPage } from '@/components/daily-stats-page'
+import { DailyStatsPage, type CustomRange, type RangeKey } from '@/components/daily-stats-page'
 import { ModelListPage } from '@/components/model-list-page'
 import { ChangelogPage } from '@/components/changelog-page'
 import { ThemeSettingsPage } from '@/components/theme-settings-page'
@@ -73,6 +73,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [queryInfoProgress, setQueryInfoProgress] = useState({ current: 0, total: 0 })
   const [dailyView, setDailyView] = useState<string | null>(null)
   const [dailyFromSidebar, setDailyFromSidebar] = useState(false)
+  const [dailyRange, setDailyRange] = useState<RangeKey>('today')
+  const [dailyCustomRange, setDailyCustomRange] = useState<CustomRange | null>(null)
   const cancelVerifyRef = useRef(false)
   // 单账号重查余额的防重入标记（见 handleRefetchBalance）
   const refetchingBalanceIds = useRef<Set<number>>(new Set())
@@ -651,7 +653,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       items: [
         { key: 'credentials', label: t('dashboard.navCredentials'), icon: Server, count: data && data.credentials.length > 0 ? data.credentials.length : undefined, active: activeTab === 'credentials' && dailyView === null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'apikeys', label: 'API Keys', icon: Key, count: apiKeys && apiKeys.length > 0 ? apiKeys.length : undefined, active: activeTab === 'apikeys', onClick: () => { setActiveTab('apikeys'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
-        { key: 'daily', label: t('dashboard.navDailyStats'), icon: BarChart2, count: undefined, active: dailyView !== null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView('list'); setDailyFromSidebar(true) } },
+        { key: 'daily', label: t('dashboard.navDailyStats'), icon: BarChart2, count: undefined, active: dailyView !== null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView('list'); setDailyFromSidebar(true); setDailyRange('today'); setDailyCustomRange(null) } },
         { key: 'models', label: t('dashboard.navModels'), icon: Boxes, count: undefined, active: activeTab === 'models', onClick: () => { setActiveTab('models'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
       ],
     },
@@ -721,6 +723,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
             showBack={!dailyFromSidebar}
             onBack={() => setDailyView(null)}
             onViewDay={(date) => setDailyView(date)}
+            range={dailyRange}
+            onRangeChange={setDailyRange}
+            customRange={dailyCustomRange}
+            onCustomRangeChange={setDailyCustomRange}
           />
         ) : dailyView !== null ? (
           <DailyDetailPage
@@ -767,7 +773,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           creditsTrend={creditsTrend}
           cumulativeFailures={cumulativeFailures}
           cumulativeFailureRate={cumulativeFailureRate}
-          onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false) }}
+          onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false); setDailyRange('today'); setDailyCustomRange(null) }}
         />
 
         {/* 凭据列表（自本文件拆出，纯代码搬移） */}

@@ -559,7 +559,6 @@
     "customApply": "应用",
     "customTruncated": "仅展示最近 10000 条",
     "rangeToday": "今日",
-    "rangeCustom": "自定义",
     "rangeDays": "{{days}} 天",
     "rangeSpanLabel": "当前区间",
     "toastRefreshed": "已刷新使用日志",

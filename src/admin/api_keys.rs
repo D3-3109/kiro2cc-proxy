@@ -470,21 +470,39 @@ mod tests {
 
     // ============ usage_records（区间明细端点）测试 ============
 
+    /// 测试专用临时目录：Drop 时清理，即使中途 assert! panic 也不残留
+    /// （标准库 unwind 会执行 Drop），避免 CI 机器上堆积垂悬目录。
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl TempDirGuard {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "kiro2cc_admin_usage_records_{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     /// 构造带用量追踪器的 AdminState（临时目录隔离明细与累计文件）
     fn admin_state_with_usage_tracker() -> (
         AdminState,
         std::sync::Arc<crate::model::usage::UsageTracker>,
+        TempDirGuard,
     ) {
-        let dir = std::env::temp_dir().join(format!(
-            "kiro2cc_admin_usage_records_{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let guard = TempDirGuard::new();
         let tracker = std::sync::Arc::new(
-            crate::model::usage::UsageTracker::load(dir.join("api_key_usage.json")).unwrap(),
+            crate::model::usage::UsageTracker::load(guard.0.join("api_key_usage.json")).unwrap(),
         );
         let state = empty_admin_state().with_usage_tracker(tracker.clone());
-        (state, tracker)
+        (state, tracker, guard)
     }
 
     /// 直接注入指定时间戳的记录（绕过 record() 的 Utc::now()，控制 CST 归属日）
@@ -552,7 +570,7 @@ mod tests {
     /// usage_records：缺 from / 缺 to / 非法格式 / from > to 均 400，错误信息明确
     #[tokio::test]
     async fn test_usage_records_invalid_params_rejected() {
-        let (state, _tracker) = admin_state_with_usage_tracker();
+        let (state, _tracker, _guard) = admin_state_with_usage_tracker();
         for (query, why) in [
             ("to=2026-10-07", "缺 from"),
             ("from=2026-10-01", "缺 to"),
@@ -570,7 +588,7 @@ mod tests {
     /// credential_label 查表与 user_agent 透传
     #[tokio::test]
     async fn test_usage_records_range_query_and_transparent_fields() {
-        let (state, tracker) = admin_state_with_usage_tracker();
+        let (state, tracker, _guard) = admin_state_with_usage_tracker();
         inject_usage_record(
             &tracker,
             utc_at("2026-10-01T18:00:00Z"), // CST 10-02 02:00（区间首日）
@@ -585,7 +603,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["total"], 2);
         assert_eq!(body["totalPages"], 1);
-        let records = body["records"].as_array().expect("records 应为��组");
+        let records = body["records"].as_array().expect("records 应为数组");
         assert_eq!(records.len(), 2);
         // 降序：CST 10-04 记录在前
         assert_eq!(records[0]["createdAt"], "2026-10-03T18:00:00Z");
@@ -601,7 +619,7 @@ mod tests {
     /// usage_records：page/page_size 缺省默认 1/50；越界 page 钳制到末页
     #[tokio::test]
     async fn test_usage_records_pagination_defaults_and_clamp() {
-        let (state, tracker) = admin_state_with_usage_tracker();
+        let (state, tracker, _guard) = admin_state_with_usage_tracker();
         for i in 0..3 {
             inject_usage_record(
                 &tracker,
