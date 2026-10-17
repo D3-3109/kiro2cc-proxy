@@ -14,7 +14,8 @@ const COLOR_STORAGE_KEY = 'admin-ui-color-theme'
 const LEGACY_STORAGE_KEY = 'admin-ui-theme'
 
 const DEFAULT_MODE: ThemeMode = 'light'
-const DEFAULT_COLOR_THEME: ColorTheme = 'default'
+/** 开箱默认色彩主题：Spotify 律动绿 */
+const DEFAULT_COLOR_THEME: ColorTheme = 'spotify'
 
 function readStoredMode(): ThemeMode {
   try {
@@ -133,7 +134,7 @@ export function useTheme() {
   )
 
   const resetTheme = useCallback(() => {
-    // 恢复为默认亮色翠绿主题（主题功能加入前的初始外观）
+    // 恢复为出厂默认：浅色 + Spotify 律动绿（DEFAULT_MODE / DEFAULT_COLOR_THEME）
     try {
       localStorage.removeItem(MODE_STORAGE_KEY)
       localStorage.removeItem(LEGACY_STORAGE_KEY)

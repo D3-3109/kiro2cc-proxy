@@ -804,7 +804,7 @@
     "filterWebsite": "经典网站",
     "recommendedBadge": "推荐",
     "reset": "恢复默认",
-    "resetDesc": "恢复为默认亮色主题",
+    "resetDesc": "恢复为默认主题（Spotify 律动绿）",
     "emptyFilter": "还没有找到匹配的主题",
     "group": {
       "recommended": "推荐",

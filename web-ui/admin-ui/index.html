@@ -8,10 +8,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       (function () {
-        var stored = localStorage.getItem('admin-ui-theme');
-        if (stored !== 'light') {
+        var mode = localStorage.getItem('admin-ui-theme-mode');
+        if (mode !== 'light' && mode !== 'dark') {
+          mode = localStorage.getItem('admin-ui-theme');
+        }
+        if (mode === 'dark') {
           document.documentElement.classList.add('dark');
         }
+        var color = localStorage.getItem('admin-ui-color-theme');
+        document.documentElement.classList.add(
+          'theme-' + (color && /^[a-z0-9-]+$/.test(color) ? color : 'spotify')
+        );
       })();
     </script>
     <title>Kiro2CCProxy Admin</title>

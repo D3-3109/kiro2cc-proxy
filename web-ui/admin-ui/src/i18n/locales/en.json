@@ -804,7 +804,7 @@
     "filterWebsite": "Web classics",
     "recommendedBadge": "Pick",
     "reset": "Reset",
-    "resetDesc": "Restore the default light theme",
+    "resetDesc": "Restore the default theme (Spotify)",
     "emptyFilter": "No matching themes",
     "group": {
       "recommended": "Recommended",
