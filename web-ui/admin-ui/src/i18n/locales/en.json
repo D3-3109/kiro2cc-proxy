@@ -598,7 +598,10 @@
     "emptyNoMatch": "No matching dates",
     "viewDetailTitle": "View day detail",
     "footRange": "Range",
-    "footTotals": "Total {{credits}} cr · {{requests}} requests"
+    "footTotals": "Total {{credits}} cr · {{requests}} requests",
+    "navSummaryButton": "Daily Stats",
+    "summaryPageTitle": "Daily Statistics",
+    "summaryHeadNote": "Daily usage totals and trends aggregated by calendar day"
   },
   "logs": {
     "toastLogRefreshed": "Logs refreshed",

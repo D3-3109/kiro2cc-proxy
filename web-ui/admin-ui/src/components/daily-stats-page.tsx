@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CalendarDays, Loader2, RotateCw, SearchX } from 'lucide-react'
+import { BarChart3, CalendarDays, Loader2, RotateCw, SearchX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -25,7 +26,7 @@ import type { DailySummary } from '@/types/api'
 
 interface DailyStatsPageProps {
   onBack: () => void
-  onViewDay: (date: string) => void
+  onOpenSummary: () => void
   showBack?: boolean
   range: RangeKey
   onRangeChange: (r: RangeKey) => void
@@ -113,7 +114,7 @@ const COLUMN_WIDTHS: (number | undefined)[] = [130, 78, undefined, 120]
 
 export function DailyStatsPage({
   onBack,
-  onViewDay,
+  onOpenSummary,
   showBack = true,
   range,
   onRangeChange,
@@ -121,49 +122,27 @@ export function DailyStatsPage({
   onCustomRangeChange,
 }: DailyStatsPageProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   // 保持无条件挂载：60s 轮询触发重渲染驱动今日视图跨午夜滚动日期（不依赖区间模式被选中）
-  const { data, isLoading, refetch, dataUpdatedAt } = useDailyUsage()
+  const { isLoading } = useDailyUsage()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [filter, setFilter] = useState<UsageFilter>('active')
-  const [query, setQuery] = useState('')
 
-  const isSummary = range !== 'today' && range !== 'custom'
+  const isFixedRange = range === '7' || range === '14' || range === '30'
   const todayCst = cstDateString(0)
-  const days = isSummary ? RANGE_DAYS[range] : undefined
-  const rows = days !== undefined ? buildWindow(data, days, 0) : []
-  const prevRows = days !== undefined ? buildWindow(data, days, days) : []
+  // 7/14/30 tab 的明细区间：最近 N 天 CST 闭区间（含今天），与自定义区间选最近 N 天同口径
+  const fixedRangeObj = isFixedRange
+    ? { from: cstDateString(RANGE_DAYS[range] - 1), to: todayCst }
+    : null
 
-  const total = rows.reduce((s, r) => s + r.credits, 0)
-  const prevTotal = prevRows.reduce((s, r) => s + r.credits, 0)
-  const totalRequests = rows.reduce((s, r) => s + r.requests, 0)
-  const activeRows = rows.filter((r) => r.credits > 0)
-  const peak = activeRows.reduce<DayRow | null>(
-    (best, r) => (best === null || r.credits > best.credits ? r : best),
-    null,
-  )
-
-  // 从区间末尾往前数的连续零消耗天数
-  let zeroStreak = 0
-  for (let i = rows.length - 1; i >= 0 && rows[i].credits === 0; i--) zeroStreak++
-  const zeroStreakSince = zeroStreak > 0 ? rows[rows.length - zeroStreak].date : null
-
-  const avgActive = activeRows.length > 0 ? total / activeRows.length : 0
-  const avgAll = days !== undefined ? total / days : 0
-  const medianActive = median(activeRows.map((r) => r.credits))
-  const from = rows.length > 0 ? rows[0].date : ''
-  const to = rows.length > 0 ? rows[rows.length - 1].date : ''
-
-  const q = query.trim()
-  const tableRows = (filter === 'active' ? activeRows : rows)
-    .filter((r) => q === '' || r.date.includes(q))
-    // 日期降序（最新在前）：设计稿原为积分降序，但日期乱序不利于按天核对，故改为时间轴倒序
-    .sort((a, b) => b.date.localeCompare(a.date))
-
-  // refetch 默认不抛异常，失败只体现在返回结果上，须显式检查（与其余页刷新同口径）
+  // 使全部用量查询失效：当前 tab 的明细（dailyUsageRecords / usageRecordsByRange）
+  // 与汇总数据（dailyUsage）一并刷新，避免刷新按钮与可见内容脱钩
   const handleRefresh = async () => {
-    const result = await refetch()
-    if (result.isError) {
-      toast.error(extractErrorMessage(result.error))
+    try {
+      await queryClient.invalidateQueries({ queryKey: ['dailyUsage'] })
+      await queryClient.invalidateQueries({ queryKey: ['dailyUsageRecords'] })
+      await queryClient.invalidateQueries({ queryKey: ['usageRecordsByRange'] })
+    } catch (error) {
+      toast.error(extractErrorMessage(error))
       return
     }
     toast.success(t('dailyStats.toastRefreshed'))
@@ -199,9 +178,14 @@ export function DailyStatsPage({
               <CalendarDays strokeWidth={1.7} aria-hidden="true" />
               {range === 'custom' && customRange
                 ? `${customRange.from} — ${customRange.to}`
-                : isSummary
-                  ? `${from} — ${to}`
+                : fixedRangeObj
+                  ? `${fixedRangeObj.from} — ${fixedRangeObj.to}`
                   : `${todayCst} — ${todayCst}`}
+            </Button>
+            {/* 每日统计入口：进入独立汇总页（指标卡 + 趋势图 + 日期汇总表） */}
+            <Button variant="outline" onClick={onOpenSummary}>
+              <BarChart3 aria-hidden="true" />
+              {t('dailyStats.navSummaryButton')}
             </Button>
             <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
               <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
@@ -211,235 +195,15 @@ export function DailyStatsPage({
         }
       />
 
-      {/* 明细视图（今日默认/自定义区间）：请求记录表 + 当页口径指标卡；汇总专属 UI 仅固定区间模式渲染 */}
+      {/* 三态均为明细记录表：今日 / 自定义区间 / 最近 N 天固定区间（与自定义区间呈现一致） */}
       {range === 'today' ? (
         <TodayRecordsView />
       ) : range === 'custom' && customRange ? (
         <CustomRangeRecordsView range={customRange} />
+      ) : fixedRangeObj ? (
+        <CustomRangeRecordsView range={fixedRangeObj} />
       ) : (
-        <>
-      <MetricsBar>
-        <Metric label={t('dailyStats.metricTotalLabel')}>
-          <MetricValue value={total.toFixed(2)} unit={t('dailyStats.unitCredits')} />
-          <MetricFoot className="truncate">
-            <span>{t('dailyStats.rangeDays', { days })}</span>
-            <FootSep />
-            <span className="flex items-center gap-1">
-              {t('dailyStats.metricVsPrev')}
-              {/* 上一区间为 0 时百分比无意义（除零），不渲染 */}
-              {prevTotal > 0 && (
-                <span title={t('dailyStats.metricVsPrevHint')}>
-                  <Delta percent={((total - prevTotal) / prevTotal) * 100} />
-                </span>
-              )}
-            </span>
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('dailyStats.metricPeakLabel')}>
-          <MetricValue value={peak ? peak.credits.toFixed(2) : '—'} unit={peak ? peak.date.slice(5) : undefined} />
-          <MetricFoot className="truncate">
-            {peak && total > 0 ? (
-              <>
-                <span title={t('dailyStats.metricPeakShareHint')}>
-                  {t('dailyStats.metricPeakShare')}{' '}
-                  <b className="font-semibold text-ink-2">{((peak.credits / total) * 100).toFixed(1)}%</b>
-                </span>
-                <FootSep />
-                <span>
-                  {t('dailyStats.metricPeakRequests')}{' '}
-                  <b className="font-semibold text-ink-2">{peak.requests.toLocaleString(localeTag())}</b>
-                </span>
-              </>
-            ) : (
-              <span>{t('dailyStats.metricNoUsage')}</span>
-            )}
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('dailyStats.metricActiveDaysLabel')}>
-          <MetricValue value={String(activeRows.length)} unit={t('dailyStats.metricOfDays', { days })} />
-          {/* pr 给 .m-aside 的 42px 环形图让位 */}
-          <MetricFoot className="truncate pr-[62px]">
-            {zeroStreakSince ? (
-              <>
-                <span>
-                  {t('dailyStats.metricZeroStreak')}{' '}
-                  <b className="font-semibold text-warn">{t('dailyStats.rangeDays', { days: zeroStreak })}</b>
-                </span>
-                <FootSep />
-                <span>{t('dailyStats.metricZeroStreakSince', { date: zeroStreakSince.slice(5) })}</span>
-              </>
-            ) : (
-              <span>{t('dailyStats.metricNoZeroStreak')}</span>
-            )}
-          </MetricFoot>
-          <MetricAside>
-            <Ring percent={days !== undefined ? (activeRows.length / days) * 100 : 0} tone="stroke-warn" size={42} />
-          </MetricAside>
-        </Metric>
-
-        <Metric label={t('dailyStats.metricAvgActiveLabel')}>
-          <MetricValue value={avgActive.toFixed(2)} unit={t('dailyStats.unitCreditsPerDay')} />
-          <MetricFoot className="truncate">
-            <span>
-              {t('dailyStats.metricAvgAll')} <b className="font-semibold text-ink-2">{avgAll.toFixed(2)}</b>
-            </span>
-            <FootSep />
-            <span>
-              {t('dailyStats.metricMedian')} <b className="font-semibold text-ink-2">{medianActive.toFixed(2)}</b>
-            </span>
-          </MetricFoot>
-        </Metric>
-      </MetricsBar>
-
-      <div className="mt-4">
-        <DailyCreditsTrendChart points={rows} />
-      </div>
-
-      <Toolbar>
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder={t('dailyStats.searchPlaceholder')}
-          clearLabel={t('dailyStats.searchClear')}
-        />
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          groupLabel={t('dailyStats.segGroupLabel')}
-          options={[
-            { key: 'active', label: t('dailyStats.segActive'), count: activeRows.length },
-            { key: 'all', label: t('dailyStats.segAll'), count: rows.length },
-          ]}
-        />
-        <div className="ml-auto flex flex-wrap items-center gap-2.5">
-          <span className="text-[11px] text-ink-3">{t('dailyStats.toolNote')}</span>
-          <UpdatedAgo dataUpdatedAt={dataUpdatedAt} />
-        </div>
-      </Toolbar>
-
-      {/* 设计稿 .panel.is-static：不吃剩余高度、不内滚，行数受区间上限 30 约束 */}
-      <section className="flex-none overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel">
-        <table className="w-full border-collapse text-[12.5px]">
-          <colgroup>
-            {COLUMN_WIDTHS.map((w, i) => (
-              <col key={i} style={w ? { width: w } : undefined} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
-              <th className={TH_BASE}>{t('dailyStats.colDate')}</th>
-              <th className={TH_BASE}>{t('dailyStats.colWeekday')}</th>
-              <th className={TH_BASE}>
-                <div className="flex items-baseline gap-1.5">
-                  <span>{t('dailyStats.colCreditsUsage')}</span>
-                  <span className="font-normal normal-case tracking-normal text-ink-3">
-                    {t('dailyStats.colCreditsUsageShare', { days })}
-                  </span>
-                </div>
-              </th>
-              <th className={`${TH_BASE} text-right`}>{t('dailyStats.colRequests')}</th>
-            </tr>
-          </thead>
-          <tbody className="[&_tr:last-child>td]:border-b-0">
-            {tableRows.length === 0 ? (
-              <tr>
-                <td colSpan={COLUMN_WIDTHS.length} className="px-3 py-14">
-                  <div className="flex flex-col items-center gap-2.5 text-ink-3">
-                    {isLoading ? (
-                      <Loader2 className="size-6 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <SearchX className="size-6" aria-hidden="true" />
-                    )}
-                    <span className="text-[12.5px]">
-                      {isLoading
-                        ? t('common.loading')
-                        : q !== '' || filter === 'active'
-                          ? t('dailyStats.emptyNoMatch')
-                          : t('dailyStats.emptyNoRecords')}
-                    </span>
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              tableRows.map((row) => {
-                const share = total > 0 ? (row.credits / total) * 100 : 0
-                // .bar 长度相对峰值日（设计稿 25.14 → 100%、10.57 → 42%）
-                const barWidth = peak && peak.credits > 0 ? (row.credits / peak.credits) * 100 : 0
-                return (
-                  <tr
-                    key={row.date}
-                    tabIndex={0}
-                    onClick={() => onViewDay(row.date)}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter' && e.key !== ' ') return
-                      e.preventDefault()
-                      onViewDay(row.date)
-                    }}
-                    title={t('dailyStats.viewDetailTitle')}
-                    className="cursor-pointer transition-colors hover:bg-surface-2 focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-brand"
-                  >
-                    <td className={CELL}>
-                      <span className="whitespace-nowrap font-mono text-[12px] tabular-nums text-ink">{row.date}</span>
-                    </td>
-                    <td className={CELL}>
-                      <span className="whitespace-nowrap text-[11.5px] text-ink-3">{weekdayLabel(row.date)}</span>
-                    </td>
-                    {/* 设计稿 .quota：绝对值 + 占区间百分比 + .bar；USD 与省额降为副行，保证费用信息不丢 */}
-                    <td className={CELL}>
-                      <div className="flex min-w-[190px] flex-col gap-[5px]">
-                        <div className="flex items-baseline justify-between gap-2 font-mono text-[11.5px] tabular-nums">
-                          <span className="text-ink-2">
-                            <b className="font-semibold text-ink">{row.credits.toFixed(4)}</b>{' '}
-                            <span className="text-ink-3">{t('dailyStats.unitCredits')}</span>
-                          </span>
-                          <span className={shareTone(share)} title={t('dailyStats.colCreditsUsageShareTitle')}>
-                            {share.toFixed(1)}%
-                          </span>
-                        </div>
-                        <span className="block h-1 overflow-hidden rounded-[3px] bg-track">
-                          <span
-                            className="block h-full rounded-[3px] bg-brand"
-                            style={{ width: `${Math.min(100, Math.max(0, barWidth))}%` }}
-                          />
-                        </span>
-                        <span className="font-mono text-[10px] tabular-nums text-ink-3">
-                          ${row.cost.toFixed(4)}
-                          {row.saved > 0 && (
-                            <span className="ml-1.5 text-ok">
-                              {t('common.savedPrefix', { amount: row.saved.toFixed(4) })}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </td>
-                    <td className={`${CELL} text-right`}>
-                      <span className="font-mono text-[12px] tabular-nums text-ink-2">
-                        {row.requests.toLocaleString(localeTag())}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
-
-        <div className={PANEL_FOOT}>
-          <span>
-            {t('dailyStats.footRange')} <b className="font-semibold text-ink-2">{from}</b> —{' '}
-            <b className="font-semibold text-ink-2">{to}</b>
-          </span>
-          <span className="ml-auto">
-            {t('dailyStats.footTotals', {
-              credits: total.toFixed(4),
-              requests: totalRequests.toLocaleString(localeTag()),
-            })}
-          </span>
-        </div>
-      </section>
-        </>
+        <TodayRecordsView />
       )}
 
       <CustomRangeDialog
@@ -802,6 +566,320 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
           </div>
         </section>
       </div>
+    </div>
+  )
+}
+
+type SummaryRangeKey = '7' | '14' | '30'
+
+/**
+ * 「每日统计」独立汇总页（3.4.28 版每日统计页形态）：区间指标卡 + 折线图 +
+ * 日期汇总表格（点击下钻日明细）。
+ *
+ * - 区间 Segmented 自持（7/14/30），与使用日志页的 range 完全独立
+ * - 数据仍来自 useDailyUsage（60s 轮询），buildWindow 零填充窗口口径不变
+ */
+export function DailySummaryPage({
+  onBack,
+  onViewDay,
+}: {
+  onBack: () => void
+  onViewDay: (date: string) => void
+}) {
+  const { t } = useTranslation()
+  const { data, isLoading, refetch, dataUpdatedAt } = useDailyUsage()
+  const [sumRange, setSumRange] = useState<SummaryRangeKey>('7')
+  const [filter, setFilter] = useState<UsageFilter>('active')
+  const [query, setQuery] = useState('')
+
+  const days = RANGE_DAYS[sumRange]
+  const rows = buildWindow(data, days, 0)
+  const prevRows = buildWindow(data, days, days)
+
+  const total = rows.reduce((s, r) => s + r.credits, 0)
+  const prevTotal = prevRows.reduce((s, r) => s + r.credits, 0)
+  const totalRequests = rows.reduce((s, r) => s + r.requests, 0)
+  const activeRows = rows.filter((r) => r.credits > 0)
+  const peak = activeRows.reduce<DayRow | null>(
+    (best, r) => (best === null || r.credits > best.credits ? r : best),
+    null,
+  )
+
+  // 从区间末尾往前数的连续零消耗天数
+  let zeroStreak = 0
+  for (let i = rows.length - 1; i >= 0 && rows[i].credits === 0; i--) zeroStreak++
+  const zeroStreakSince = zeroStreak > 0 ? rows[rows.length - zeroStreak].date : null
+
+  const avgActive = activeRows.length > 0 ? total / activeRows.length : 0
+  const avgAll = total / days
+  const medianActive = median(activeRows.map((r) => r.credits))
+  const from = rows.length > 0 ? rows[0].date : ''
+  const to = rows.length > 0 ? rows[rows.length - 1].date : ''
+
+  const q = query.trim()
+  const tableRows = (filter === 'active' ? activeRows : rows)
+    .filter((r) => q === '' || r.date.includes(q))
+    // 日期降序（最新在前）：设计稿原为积分降序，但日期乱序不利于按天核对，故改为时间轴倒序
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  // refetch 默认不抛异常，失败只体现在返回结果上，须显式检查（与其余页刷新同口径）
+  const handleRefresh = async () => {
+    const result = await refetch()
+    if (result.isError) {
+      toast.error(extractErrorMessage(result.error))
+      return
+    }
+    toast.success(t('dailyStats.toastRefreshed'))
+  }
+
+  return (
+    <div className="flex min-h-0 flex-col">
+      <PageHead
+        crumb={[t('dashboard.navMain'), t('dailyStats.summaryPageTitle')]}
+        title={t('dailyStats.summaryPageTitle')}
+        note={t('dailyStats.summaryHeadNote')}
+        onBack={onBack}
+        actions={
+          <>
+            <Segmented
+              value={sumRange}
+              onChange={setSumRange}
+              groupLabel={t('dailyStats.rangeGroupLabel')}
+              options={[
+                { key: '7', label: t('dailyStats.rangeDays', { days: 7 }) },
+                { key: '14', label: t('dailyStats.rangeDays', { days: 14 }) },
+                { key: '30', label: t('dailyStats.rangeDays', { days: 30 }) },
+              ]}
+            />
+            <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
+              <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
+              {t('common.refresh')}
+            </Button>
+          </>
+        }
+      />
+
+      <MetricsBar>
+        <Metric label={t('dailyStats.metricTotalLabel')}>
+          <MetricValue value={total.toFixed(2)} unit={t('dailyStats.unitCredits')} />
+          <MetricFoot className="truncate">
+            <span>{t('dailyStats.rangeDays', { days })}</span>
+            <FootSep />
+            <span className="flex items-center gap-1">
+              {t('dailyStats.metricVsPrev')}
+              {/* 上一区间为 0 时百分比无意义（除零），不渲染 */}
+              {prevTotal > 0 && (
+                <span title={t('dailyStats.metricVsPrevHint')}>
+                  <Delta percent={((total - prevTotal) / prevTotal) * 100} />
+                </span>
+              )}
+            </span>
+          </MetricFoot>
+        </Metric>
+
+        <Metric label={t('dailyStats.metricPeakLabel')}>
+          <MetricValue value={peak ? peak.credits.toFixed(2) : '—'} unit={peak ? peak.date.slice(5) : undefined} />
+          <MetricFoot className="truncate">
+            {peak && total > 0 ? (
+              <>
+                <span title={t('dailyStats.metricPeakShareHint')}>
+                  {t('dailyStats.metricPeakShare')}{' '}
+                  <b className="font-semibold text-ink-2">{((peak.credits / total) * 100).toFixed(1)}%</b>
+                </span>
+                <FootSep />
+                <span>
+                  {t('dailyStats.metricPeakRequests')}{' '}
+                  <b className="font-semibold text-ink-2">{peak.requests.toLocaleString(localeTag())}</b>
+                </span>
+              </>
+            ) : (
+              <span>{t('dailyStats.metricNoUsage')}</span>
+            )}
+          </MetricFoot>
+        </Metric>
+
+        <Metric label={t('dailyStats.metricActiveDaysLabel')}>
+          <MetricValue value={String(activeRows.length)} unit={t('dailyStats.metricOfDays', { days })} />
+          {/* pr 给 .m-aside 的 42px 环形图让位 */}
+          <MetricFoot className="truncate pr-[62px]">
+            {zeroStreakSince ? (
+              <>
+                <span>
+                  {t('dailyStats.metricZeroStreak')}{' '}
+                  <b className="font-semibold text-warn">{t('dailyStats.rangeDays', { days: zeroStreak })}</b>
+                </span>
+                <FootSep />
+                <span>{t('dailyStats.metricZeroStreakSince', { date: zeroStreakSince.slice(5) })}</span>
+              </>
+            ) : (
+              <span>{t('dailyStats.metricNoZeroStreak')}</span>
+            )}
+          </MetricFoot>
+          <MetricAside>
+            <Ring percent={(activeRows.length / days) * 100} tone="stroke-warn" size={42} />
+          </MetricAside>
+        </Metric>
+
+        <Metric label={t('dailyStats.metricAvgActiveLabel')}>
+          <MetricValue value={avgActive.toFixed(2)} unit={t('dailyStats.unitCreditsPerDay')} />
+          <MetricFoot className="truncate">
+            <span>
+              {t('dailyStats.metricAvgAll')} <b className="font-semibold text-ink-2">{avgAll.toFixed(2)}</b>
+            </span>
+            <FootSep />
+            <span>
+              {t('dailyStats.metricMedian')} <b className="font-semibold text-ink-2">{medianActive.toFixed(2)}</b>
+            </span>
+          </MetricFoot>
+        </Metric>
+      </MetricsBar>
+
+      <div className="mt-4">
+        <DailyCreditsTrendChart points={rows} />
+      </div>
+
+      <Toolbar>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          placeholder={t('dailyStats.searchPlaceholder')}
+          clearLabel={t('dailyStats.searchClear')}
+        />
+        <Segmented
+          value={filter}
+          onChange={setFilter}
+          groupLabel={t('dailyStats.segGroupLabel')}
+          options={[
+            { key: 'active', label: t('dailyStats.segActive'), count: activeRows.length },
+            { key: 'all', label: t('dailyStats.segAll'), count: rows.length },
+          ]}
+        />
+        <div className="ml-auto flex flex-wrap items-center gap-2.5">
+          <span className="text-[11px] text-ink-3">{t('dailyStats.toolNote')}</span>
+          <UpdatedAgo dataUpdatedAt={dataUpdatedAt} />
+        </div>
+      </Toolbar>
+
+      {/* 设计稿 .panel.is-static：不吃剩余高度、不内滚，行数受区间上限 30 约束 */}
+      <section className="flex-none overflow-hidden rounded-[11px] border border-transparent bg-surface shadow-panel">
+        <table className="w-full border-collapse text-[12.5px]">
+          <colgroup>
+            {COLUMN_WIDTHS.map((w, i) => (
+              <col key={i} style={w ? { width: w } : undefined} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              <th className={TH_BASE}>{t('dailyStats.colDate')}</th>
+              <th className={TH_BASE}>{t('dailyStats.colWeekday')}</th>
+              <th className={TH_BASE}>
+                <div className="flex items-baseline gap-1.5">
+                  <span>{t('dailyStats.colCreditsUsage')}</span>
+                  <span className="font-normal normal-case tracking-normal text-ink-3">
+                    {t('dailyStats.colCreditsUsageShare', { days })}
+                  </span>
+                </div>
+              </th>
+              <th className={`${TH_BASE} text-right`}>{t('dailyStats.colRequests')}</th>
+            </tr>
+          </thead>
+          <tbody className="[&_tr:last-child>td]:border-b-0">
+            {tableRows.length === 0 ? (
+              <tr>
+                <td colSpan={COLUMN_WIDTHS.length} className="px-3 py-14">
+                  <div className="flex flex-col items-center gap-2.5 text-ink-3">
+                    {isLoading ? (
+                      <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <SearchX className="size-6" aria-hidden="true" />
+                    )}
+                    <span className="text-[12.5px]">
+                      {isLoading
+                        ? t('common.loading')
+                        : q !== '' || filter === 'active'
+                          ? t('dailyStats.emptyNoMatch')
+                          : t('dailyStats.emptyNoRecords')}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              tableRows.map((row) => {
+                const share = total > 0 ? (row.credits / total) * 100 : 0
+                // .bar 长度相对峰值日（设计稿 25.14 → 100%、10.57 → 42%）
+                const barWidth = peak && peak.credits > 0 ? (row.credits / peak.credits) * 100 : 0
+                return (
+                  <tr
+                    key={row.date}
+                    tabIndex={0}
+                    onClick={() => onViewDay(row.date)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      onViewDay(row.date)
+                    }}
+                    title={t('dailyStats.viewDetailTitle')}
+                    className="cursor-pointer transition-colors hover:bg-surface-2 focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                  >
+                    <td className={CELL}>
+                      <span className="whitespace-nowrap font-mono text-[12px] tabular-nums text-ink">{row.date}</span>
+                    </td>
+                    <td className={CELL}>
+                      <span className="whitespace-nowrap text-[11.5px] text-ink-3">{weekdayLabel(row.date)}</span>
+                    </td>
+                    {/* 设计稿 .quota：绝对值 + 占区间百分比 + .bar；USD 与省额降为副行，保证费用信息不丢 */}
+                    <td className={CELL}>
+                      <div className="flex min-w-[190px] flex-col gap-[5px]">
+                        <div className="flex items-baseline justify-between gap-2 font-mono text-[11.5px] tabular-nums">
+                          <span className="text-ink-2">
+                            <b className="font-semibold text-ink">{row.credits.toFixed(4)}</b>{' '}
+                            <span className="text-ink-3">{t('dailyStats.unitCredits')}</span>
+                          </span>
+                          <span className={shareTone(share)} title={t('dailyStats.colCreditsUsageShareTitle')}>
+                            {share.toFixed(1)}%
+                          </span>
+                        </div>
+                        <span className="block h-1 overflow-hidden rounded-[3px] bg-track">
+                          <span
+                            className="block h-full rounded-[3px] bg-brand"
+                            style={{ width: `${Math.min(100, Math.max(0, barWidth))}%` }}
+                          />
+                        </span>
+                        <span className="font-mono text-[10px] tabular-nums text-ink-3">
+                          ${row.cost.toFixed(4)}
+                          {row.saved > 0 && (
+                            <span className="ml-1.5 text-ok">
+                              {t('common.savedPrefix', { amount: row.saved.toFixed(4) })}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+                    <td className={`${CELL} text-right`}>
+                      <span className="font-mono text-[12px] tabular-nums text-ink-2">
+                        {row.requests.toLocaleString(localeTag())}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+
+        <div className={PANEL_FOOT}>
+          <span>
+            {t('dailyStats.footRange')} <b className="font-semibold text-ink-2">{from}</b> —{' '}
+            <b className="font-semibold text-ink-2">{to}</b>
+          </span>
+          <span className="ml-auto">
+            {t('dailyStats.footTotals', {
+              credits: total.toFixed(4),
+              requests: totalRequests.toLocaleString(localeTag()),
+            })}
+          </span>
+        </div>
+      </section>
     </div>
   )
 }
