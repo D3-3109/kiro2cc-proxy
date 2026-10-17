@@ -65,7 +65,7 @@ export function DailyDetailPage({ date, onBack }: DailyDetailPageProps) {
   }
 
   return (
-    <div>
+    <div className="flex min-h-[calc(100vh-56px)] flex-col">
       <PageHead
         crumb={[t('dashboard.navMain'), t('dailyStats.pageTitle'), label]}
         title={t('dailyStats.detailTitle', { date: label })}
@@ -127,10 +127,10 @@ export function DailyDetailPage({ date, onBack }: DailyDetailPageProps) {
       </MetricsBar>
 
       {/* 请求日志（.panel + .tscroll + .panel-foot），与 API Key 详情页共用同一张表 */}
-      <div className="mt-[15px]">
+      <div className="mt-[15px] flex min-h-0 flex-1 flex-col">
         <h3 className={PANEL_TITLE}>{t('common.requestLog')}</h3>
-        <section className={PANEL}>
-          <div className="max-h-[70vh] overflow-y-auto">
+        <section className={`${PANEL} flex min-h-0 flex-1 flex-col`}>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <UsageLogTable records={records} geoMap={geoMap} isLoading={isLoading} />
           </div>
 
