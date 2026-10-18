@@ -135,7 +135,7 @@ if ($has_admin) {
             } catch {}
             Start-Sleep -Milliseconds 500
         }
-        # 超时仍未就绪则跳过打开（mac 侧会打印提示并以 exit 1 终止脚本；
+        # 超时仍未就绪则跳过打开（mac 侧打印提示后仅退出后台轮询子 shell，服务继续前台运行；
         # 本侧 Job 输出无法实时透传到父控制台，故仅静默跳过、脚本继续运行）
         if ($ready) {
             Start-Process $url
