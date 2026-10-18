@@ -67,6 +67,32 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.30".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "请求明细页全面接入「按模型分组（当前页）」可折叠统计面板：账号详情、API Key 详情、使用日志（今日/自定义区间）、日明细五处同款，聚合当前页请求的请求数/Token/费用/积分，折叠偏好跨页面切换保持",
+                        "Per-model grouping (current page) collapsible panel rolled out across all request-detail views: credential detail, API Key detail, usage log (today/custom range) and daily detail share the same panel aggregating requests/tokens/cost/credits of the current page, with the collapse preference preserved across page switches",
+                    ),
+                    Bilingual::new(
+                        "新增一键构建并启动脚本 build-and-run（mac/Windows）：先构建后启动，任一环节失败即中止，不会用旧二进制启动；Shell 快捷命令同步新增 build_and_run_kiro2cc_proxy",
+                        "New build-and-run one-click scripts (mac/Windows): build then run, aborting on any failure so a stale binary is never started; the build_and_run_kiro2cc_proxy shell alias is added in sync",
+                    ),
+                ]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复 local-agent 等入口思考文本化静默失效（v3.4.23 引入的回归）：入口判定改为黑名单，只有确认渲染不了 ANSI 的 claude-desktop* 用纯文本样式，其余 Claude Code 入口一律 ANSI，恢复思考过程实时可见（issue #48）",
+                        "Fixed silently disabled thinking-as-text for local-agent and other entrypoints (a regression introduced in v3.4.23): entrypoint routing switches to a blacklist — only claude-desktop*, which cannot render ANSI, uses plain text, while every other Claude Code entrypoint gets ANSI, restoring live thinking output (issue #48)",
+                    ),
+                    Bilingual::new(
+                        "修复账号管理「刷新」按钮不更新今日消耗积分等每日统计：补上与切 tab 刷新同款的统计查询失效；本地启动脚本改为轮询服务就绪后再自动打开管理面板，消除页面加载失败需手动 reload 的竞态；Windows 构建脚本补齐退出码检查",
+                        "Fixed the account Refresh button not updating today's credits and other daily stats by invalidating the stats query like tab-switch refresh does; local startup scripts now poll until the service is ready before auto-opening the admin panel, removing the load-failure race that required a manual reload; Windows build scripts now check exit codes",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.27".to_string(),
             is_latest: false,
             groups: vec![feat_group(vec![
