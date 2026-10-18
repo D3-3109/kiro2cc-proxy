@@ -142,9 +142,21 @@ fi
 echo "=================================================="
 echo ""
 
-# 延迟 2 秒后自动打开管理面板（如果有 adminPsw）
+# 等待服务就绪后再自动打开管理面板（如果有 adminPsw）：
+# 轮询 /admin 直到可访问再打开，避免固定 sleep 在服务尚未监听时抢先打开导致页面加载失败
 if grep -q '"adminPsw"' "$CONFIG_FILE" 2>/dev/null; then
-    (sleep 2 && open "http://127.0.0.1:${CONFIGURED_PORT}/admin") &
+    (
+        READY_TRIES=0
+        until curl --noproxy '*' -sf -o /dev/null --connect-timeout 1 --max-time 2 "http://127.0.0.1:${CONFIGURED_PORT}/admin"; do
+            READY_TRIES=$((READY_TRIES + 1))
+            if [ "$READY_TRIES" -ge 60 ]; then
+                echo "[!] 管理面板 30 秒内未就绪，跳过自动打开"
+                exit 1
+            fi
+            sleep 0.5
+        done
+        open "http://127.0.0.1:${CONFIGURED_PORT}/admin"
+    ) &
 fi
 
 # 前台运行，关闭终端窗口即停止
