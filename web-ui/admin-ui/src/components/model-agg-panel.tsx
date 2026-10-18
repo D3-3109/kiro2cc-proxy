@@ -44,12 +44,20 @@ function aggregateByModel(records: UsageRecord[]): Record<string, ModelAgg> {
   }, {})
 }
 
+/** 按模型分组折叠偏好：模块级可变引用，跨实例/跨重挂共享（仅 UI 偏好，非业务数据） */
+const modelAggOpenRef = { current: true }
+
 export function ModelAggPanel({ records }: { records: UsageRecord[] }) {
   const { t } = useTranslation()
-  // 默认展开；两页折叠态各自独立（组件实例级 state）：切换页面卸载重挂后回到展开，
-  // 同页翻页/查询刷新仅更新 records，折叠态保持
-  const [open, setOpen] = useState(true)
+  // 折叠偏好为模块级全局（会话内所有实例共享）：切换侧栏 tab / 切换日期范围导致
+  // 宿主组件卸载重挂后，折叠态不丢失；默认展开
+  const [open, setOpen] = useState(modelAggOpenRef.current)
   const bodyId = useId()
+
+  const toggle = () => {
+    modelAggOpenRef.current = !open
+    setOpen(modelAggOpenRef.current)
+  }
 
   const byModel = useMemo(() => aggregateByModel(records), [records])
   if (Object.keys(byModel).length === 0) return null
@@ -59,7 +67,7 @@ export function ModelAggPanel({ records }: { records: UsageRecord[] }) {
       {/* 标题行整行可点击折叠；保留 panel-title 视觉，chevron 指示折叠方向 */}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-expanded={open}
         aria-controls={bodyId}
         className="mb-[7px] flex w-full items-center gap-[5px] text-left text-[10.5px] font-semibold uppercase tracking-[.07em] text-ink-3 transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"

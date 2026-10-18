@@ -93,7 +93,7 @@ cd kiro2cc-proxy
 
 ### (Optional) Install Shell Aliases
 
-Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any terminal — no need to navigate to the project directory each time:
+Run the one-click installer to make `build_kiro2cc_proxy`, `build_and_run_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any terminal — no need to navigate to the project directory each time:
 
 ```bash
 bash setup_shell_aliases.sh
@@ -103,8 +103,9 @@ source ~/.zshrc   # zsh users; bash users run: source ~/.bashrc
 After installation:
 
 ```bash
-build_kiro2cc_proxy   # equivalent to ./build-mac.sh
-run_kiro2cc_proxy     # equivalent to ./run-local-service-mac.sh
+build_kiro2cc_proxy         # equivalent to ./build-mac.sh
+build_and_run_kiro2cc_proxy # equivalent to ./build-and-run-mac.sh (build, then run)
+run_kiro2cc_proxy           # equivalent to ./run-local-service-mac.sh
 ```
 
 > macOS only. Modifies `~/.zshrc` and `~/.bashrc` (if they exist). Safe to run multiple times (idempotent).
@@ -197,7 +198,7 @@ cd kiro2cc-proxy
 
 ### (Optional) Install PowerShell Aliases
 
-Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any PowerShell window — no need to navigate to the project directory each time:
+Run the one-click installer to make `build_kiro2cc_proxy`, `build_and_run_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any PowerShell window — no need to navigate to the project directory each time:
 
 ```powershell
 .\setup_shell_aliases.ps1
@@ -207,8 +208,9 @@ Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy
 After installation:
 
 ```powershell
-build_kiro2cc_proxy   # equivalent to .\build-windows.ps1
-run_kiro2cc_proxy     # equivalent to .\run-local-service-windows.ps1
+build_kiro2cc_proxy         # equivalent to .\build-windows.ps1
+build_and_run_kiro2cc_proxy # equivalent to .\build-and-run-windows.ps1 (build, then run)
+run_kiro2cc_proxy           # equivalent to .\run-local-service-windows.ps1
 ```
 
 > Updates both Windows PowerShell 5.x and PowerShell 7+ profiles. Safe to run multiple times (idempotent).
@@ -873,8 +875,7 @@ docker compose down && docker compose up -d
 
 ```bash
 git pull
-./build-mac.sh
-./run-local-service-mac.sh
+./build-and-run-mac.sh   # or run separately: ./build-mac.sh && ./run-local-service-mac.sh
 ```
 
 ---
@@ -902,6 +903,8 @@ kiro2cc-proxy/
 ├── Dockerfile              # Docker image build
 ├── build-mac.sh            # One-click build script (macOS)
 ├── build-windows.ps1       # One-click build script (Windows)
+├── build-and-run-mac.sh            # One-click build-and-run script (macOS)
+├── build-and-run-windows.ps1       # One-click build-and-run script (Windows)
 ├── run-local-service-mac.sh         # macOS local startup script
 ├── run-local-service-windows.ps1   # Windows local startup script
 ├── setup_shell_aliases.sh  # macOS shell alias installer

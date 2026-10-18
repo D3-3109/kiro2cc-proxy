@@ -1,6 +1,6 @@
 # setup_shell_aliases.ps1
 # 为 kiro2cc-proxy 安装 PowerShell 快捷命令
-# 运行一次后即可在任意 PowerShell 窗口使用 build_kiro2cc_proxy 和 run_kiro2cc_proxy
+# 运行一次后即可在任意 PowerShell 窗口使用 build_kiro2cc_proxy、build_and_run_kiro2cc_proxy 和 run_kiro2cc_proxy
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
@@ -26,6 +26,7 @@ function Install-ToProfile {
 
 # kiro2cc-proxy aliases
 function build_kiro2cc_proxy { & "$ScriptDir\build-windows.ps1" @args }
+function build_and_run_kiro2cc_proxy { & "$ScriptDir\build-and-run-windows.ps1" @args }
 function run_kiro2cc_proxy { & "$ScriptDir\run-local-service-windows.ps1" @args }
 "@
 
@@ -57,5 +58,6 @@ Write-Host "  . `$PROFILE"
 Write-Host ""
 Write-Host "之后即可在任意 PowerShell 中使用："
 Write-Host "  build_kiro2cc_proxy   # 构建项目（等同于 .\build-windows.ps1）"
+Write-Host "  build_and_run_kiro2cc_proxy   # 一键构建并启动（等同于 .\build-and-run-windows.ps1）"
 Write-Host "  run_kiro2cc_proxy     # 启动服务（等同于 .\run-local-service-windows.ps1）"
 Write-Host "=================================================="

@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FootSep, Metric, MetricAside, MetricFoot, MetricValue, MetricsBar, Ring } from '@/components/metrics'
+import { ModelAggPanel } from '@/components/model-agg-panel'
 import { PageHead } from '@/components/page-head'
 import { PANEL, PANEL_FOOT, PANEL_TITLE, Pager } from '@/components/table-kit'
 import { UsageLogTable, formatCost, recordCredits } from '@/components/usage-log-table'
@@ -125,6 +126,9 @@ export function DailyDetailPage({ date, onBack }: DailyDetailPageProps) {
           </MetricAside>
         </Metric>
       </MetricsBar>
+
+      {/* 按模型分组（当前页）：与详情页同款可折叠面板 */}
+      <ModelAggPanel records={records} />
 
       {/* 请求日志（.panel + .tscroll + .panel-foot），与 API Key 详情页共用同一张表 */}
       <div className="mt-[15px] flex min-h-0 flex-1 flex-col">

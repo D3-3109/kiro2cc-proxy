@@ -7,6 +7,7 @@ import { BarChart3, CalendarDays, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CustomRangeDialog, RANGE_DAYS, cstDateString, type CustomRange } from '@/components/daily-shared'
 import { FootSep, Metric, MetricAside, MetricFoot, MetricValue, MetricsBar, Ring } from '@/components/metrics'
+import { ModelAggPanel } from '@/components/model-agg-panel'
 import { PageHead } from '@/components/page-head'
 import { PANEL, PANEL_FOOT, PANEL_TITLE, Pager } from '@/components/table-kit'
 import { Segmented } from '@/components/toolbar'
@@ -246,6 +247,9 @@ function TodayRecordsView() {
         </Metric>
       </MetricsBar>
 
+      {/* 按模型分组（当前页）：与详情页同款可折叠面板 */}
+      <ModelAggPanel records={records} />
+
       {/* 请求日志（.panel + .tscroll + .panel-foot），与单日明细页共用同一张表 */}
       <div className="mt-[15px] flex min-h-0 flex-1 flex-col">
         <h3 className={PANEL_TITLE}>{t('common.requestLog')}</h3>
@@ -368,6 +372,9 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
           </MetricAside>
         </Metric>
       </MetricsBar>
+
+      {/* 按模型分组（当前页）：与详情页同款可折叠面板 */}
+      <ModelAggPanel records={records} />
 
       {/* 请求日志（.panel + .tscroll + .panel-foot），与今日视图共用同一张表 */}
       <div className="mt-[15px] flex min-h-0 flex-1 flex-col">

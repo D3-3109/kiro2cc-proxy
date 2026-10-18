@@ -93,7 +93,7 @@ cd kiro2cc-proxy
 
 ### （可选）安装 Shell 快捷命令
 
-运行项目自带的一键安装脚本，以后可在任意终端直接使用 `build_kiro2cc_proxy` 和 `run_kiro2cc_proxy` 命令，无需切换到项目目录：
+运行项目自带的一键安装脚本，以后可在任意终端直接使用 `build_kiro2cc_proxy`、`build_and_run_kiro2cc_proxy` 和 `run_kiro2cc_proxy` 命令，无需切换到项目目录：
 
 ```bash
 bash setup_shell_aliases.sh
@@ -103,8 +103,9 @@ source ~/.zshrc   # zsh 用户；bash 用户执行 source ~/.bashrc
 安装后即可使用：
 
 ```bash
-build_kiro2cc_proxy   # 等同于 ./build-mac.sh
-run_kiro2cc_proxy     # 等同于 ./run-local-service-mac.sh
+build_kiro2cc_proxy         # 等同于 ./build-mac.sh
+build_and_run_kiro2cc_proxy # 等同于 ./build-and-run-mac.sh（先构建后启动）
+run_kiro2cc_proxy           # 等同于 ./run-local-service-mac.sh
 ```
 
 > 脚本仅适用于 macOS，自动修改 `~/.zshrc` 和 `~/.bashrc`（如存在），可重复运行（幂等）。
@@ -199,7 +200,7 @@ cd kiro2cc-proxy
 
 ### （可选）安装 PowerShell 快捷命令
 
-运行项目自带的安装脚本，以后可在任意 PowerShell 直接使用 `build_kiro2cc_proxy` 和 `run_kiro2cc_proxy` 命令，无需切换到项目目录：
+运行项目自带的安装脚本，以后可在任意 PowerShell 直接使用 `build_kiro2cc_proxy`、`build_and_run_kiro2cc_proxy` 和 `run_kiro2cc_proxy` 命令，无需切换到项目目录：
 
 ```powershell
 .\setup_shell_aliases.ps1
@@ -209,8 +210,9 @@ cd kiro2cc-proxy
 安装后即可使用：
 
 ```powershell
-build_kiro2cc_proxy   # 等同于 .\build-windows.ps1
-run_kiro2cc_proxy     # 等同于 .\run-local-service-windows.ps1
+build_kiro2cc_proxy         # 等同于 .\build-windows.ps1
+build_and_run_kiro2cc_proxy # 等同于 .\build-and-run-windows.ps1（先构建后启动）
+run_kiro2cc_proxy           # 等同于 .\run-local-service-windows.ps1
 ```
 
 > 脚本同时更新 Windows PowerShell 5.x 和 PowerShell 7+ 的 profile，可重复运行（幂等）。
@@ -894,8 +896,7 @@ docker compose down && docker compose up -d
 
 ```bash
 git pull
-./build-mac.sh
-./run-local-service-mac.sh
+./build-and-run-mac.sh   # 或分开执行：./build-mac.sh && ./run-local-service-mac.sh
 ```
 
 ---
@@ -923,6 +924,8 @@ kiro2cc-proxy/
 ├── Dockerfile              # Docker 镜像构建
 ├── build-mac.sh            # 一键构建脚本（macOS）
 ├── build-windows.ps1       # 一键构建脚本（Windows）
+├── build-and-run-mac.sh            # 一键构建并启动脚本（macOS）
+├── build-and-run-windows.ps1       # 一键构建并启动脚本（Windows）
 ├── run-local-service-mac.sh         # macOS 本地启动脚本
 ├── run-local-service-windows.ps1   # Windows 本地启动脚本
 ├── setup_shell_aliases.sh  # macOS Shell 快捷命令安装脚本
