@@ -64,6 +64,23 @@ pub fn client_token_passthrough_enabled() -> bool {
     CLIENT_TOKEN_PASSTHROUGH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// 对客户端上报的 output_tokens 是否包含 thinking（config `outputTokensIncludeThinking`）。
+///
+/// Anthropic 官方 `usage.output_tokens` 含 thinking 并按输出单价计费；下游按 usage
+/// 计费的网关（如 sub2api）只取上报值，不含 thinking 会系统性少算。默认 false 保持既有行为。
+static OUTPUT_TOKENS_INCLUDE_THINKING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 设置 output_tokens 是否含 thinking（main.rs 启动时按 config 调用）。
+pub fn set_output_tokens_include_thinking(enabled: bool) {
+    OUTPUT_TOKENS_INCLUDE_THINKING.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 读取 output_tokens 是否含 thinking。
+pub fn output_tokens_include_thinking() -> bool {
+    OUTPUT_TOKENS_INCLUDE_THINKING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Claude Code 计算 Ctx% 时假设的上下文窗口（分母）。
 ///
 /// 与 `CLIENT_TOKEN_DISPLAY_SCALE` 同属「客户端展示口径」——客户端对所有模型

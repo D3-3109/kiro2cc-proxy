@@ -228,6 +228,8 @@ pub(crate) async fn handle_non_stream_request(
     thinking_client_enabled: bool,
     // 客户端 User-Agent（随 usage 记录入库）
     user_agent: Option<String>,
+    // 断点缓存记账（promptCacheAccounting 开启时为 Some）
+    cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
 ) -> Response {
     // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
     let request_started_at = std::time::Instant::now();
@@ -583,6 +585,10 @@ pub(crate) async fn handle_non_stream_request(
         // 与流式同口径（非中文桶 `(chars+3)/4`，见 tokens_from_chars）
         output_tokens += ((intercepted_input_chars + 3) / 4) as i32;
     }
+    // 官方口径：output_tokens 含 thinking（outputTokensIncludeThinking 开启时）
+    if super::super::stream::output_tokens_include_thinking() {
+        output_tokens += thinking_token_count.unwrap_or(0);
+    }
 
     // web_search 桥接可见性块前置于 thinking/text/tool_use（D5 非流式顺序：
     // server_tool_use → web_search_tool_result 逐轮交错在前，无裸 tool_use 块）
@@ -632,13 +638,20 @@ pub(crate) async fn handle_non_stream_request(
         }
         _ => None,
     };
-    let final_usage = crate::cache::select_final_usage(
-        final_input_tokens,
-        metering_pair,
-        prefix_estimated,
-        fingerprint_usage,
-        sim_usage,
-    );
+    let final_usage = match (&cache_accounting, metering_pair) {
+        // 断点记账：metering 未透传缓存真值时取代前缀估算，并提交本请求的缓存写入
+        (Some(acc), None) => {
+            acc.commit();
+            acc.usage_for(final_input_tokens)
+        }
+        _ => crate::cache::select_final_usage(
+            final_input_tokens,
+            metering_pair,
+            prefix_estimated,
+            fingerprint_usage,
+            sim_usage,
+        ),
+    };
 
     // 流结束后写入指纹表（仅当 credential_id 确定）
     if let (Some(tracker), Some(profile)) = (fp_tracker.as_ref(), fp_profile.clone()) {

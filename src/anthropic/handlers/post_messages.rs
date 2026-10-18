@@ -188,6 +188,11 @@ pub async fn post_messages(
     }
 
     // 构造 fingerprint profile（在消耗 payload 前 clone system/messages）
+    // 断点缓存记账：按原始 body 的 cache_control 断点 plan（类型化 payload 已丢弃 cache_control）
+    let cache_accounting = state.breakpoint_cache.as_ref().and_then(|cache| {
+        crate::cache::breakpoint::CacheAccounting::from_request(cache, &body, &payload.model)
+    });
+
     let fp_tracker = state.fingerprint_tracker.clone();
     let fp_profile = fp_tracker.as_ref().map(|_| {
         crate::cache::fingerprint::FingerprintTracker::build_profile_with_tools(
@@ -304,6 +309,7 @@ pub async fn post_messages(
             effort,
             thinking_as_text,
             user_agent,
+            cache_accounting,
         )
         .await
     } else {
@@ -328,6 +334,7 @@ pub async fn post_messages(
             effort,
             thinking_enabled,
             user_agent,
+            cache_accounting,
         )
         .await
     }

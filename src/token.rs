@@ -183,7 +183,7 @@ async fn call_remote_count_tokens(
 /// - `tool_result` —— `content` 是字符串则直接计数；是数组则递归取每个 text 子项
 ///
 /// 其它类型（如 `image`）无法字符估算，跳过。
-fn count_content_block(item: &serde_json::Value) -> u64 {
+pub(crate) fn count_content_block(item: &serde_json::Value) -> u64 {
     let block_type = item.get("type").and_then(|v| v.as_str());
 
     match block_type {

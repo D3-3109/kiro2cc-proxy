@@ -55,6 +55,8 @@ pub struct AppState {
     pub rpm_tracker: Option<Arc<RpmTracker>>,
     /// Prompt cache 指纹追踪器（替代末层兜底）
     pub fingerprint_tracker: Option<Arc<crate::cache::fingerprint::FingerprintTracker>>,
+    /// 按 cache_control 断点模拟的缓存记账表（None = 未开启 promptCacheAccounting）
+    pub breakpoint_cache: Option<Arc<crate::cache::breakpoint::BreakpointCache>>,
     /// `/v1/models` 动态列表缓存（TTL 见 `Config::model_cache_ttl_secs`），初始为空
     pub model_cache: Arc<RwLock<Option<CachedModels>>>,
     /// Suggestion Mode 输入建议请求放行开关（初始值来自 Config::forward_suggestion_mode）
@@ -74,6 +76,7 @@ impl AppState {
             usage_tracker: None,
             rpm_tracker: None,
             fingerprint_tracker: None,
+            breakpoint_cache: None,
             model_cache: Arc::new(RwLock::new(None)),
             forward_suggestion_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
@@ -131,6 +134,15 @@ impl AppState {
         tracker: Arc<crate::cache::fingerprint::FingerprintTracker>,
     ) -> Self {
         self.fingerprint_tracker = Some(tracker);
+        self
+    }
+
+    /// 设置断点缓存记账表
+    pub fn with_breakpoint_cache(
+        mut self,
+        cache: Arc<crate::cache::breakpoint::BreakpointCache>,
+    ) -> Self {
+        self.breakpoint_cache = Some(cache);
         self
     }
 }

@@ -44,6 +44,11 @@ fn default_true() -> bool {
     true
 }
 
+/// Anthropic 官方最小可缓存长度（Sonnet 等为 1024；部分 Opus/Haiku 更高，可按需调大）
+fn default_prompt_cache_min_tokens() -> i32 {
+    1024
+}
+
 fn default_fingerprint_enabled() -> bool {
     true
 }
@@ -162,6 +167,22 @@ pub struct Config {
     /// CLIENT_TOKEN_DISPLAY_SCALE 缩放）。默认 false 维持既有展示缩放。
     #[serde(default)]
     pub client_token_passthrough: bool,
+
+    /// 按 Anthropic cache_control 断点规则模拟缓存记账（见 `cache::breakpoint`）
+    ///
+    /// 开启后 cache_read / cache_creation 按请求里的断点、20 block 回看、TTL 计算，
+    /// 取代"除最后一条外全部算缓存读、写入恒为 0"的前缀估算。默认 false 保持既有行为。
+    #[serde(default)]
+    pub prompt_cache_accounting: bool,
+
+    /// 断点模拟的最小可缓存长度（token），低于此值的断点不建缓存条目
+    #[serde(default = "default_prompt_cache_min_tokens")]
+    pub prompt_cache_min_tokens: i32,
+
+    /// 对客户端上报的 output_tokens 是否包含 thinking（Anthropic 官方口径为包含）。
+    /// 默认 false 保持既有行为（仅可见输出）。
+    #[serde(default)]
+    pub output_tokens_include_thinking: bool,
 
     /// Suggestion Mode 输入建议请求放行开关
     ///
@@ -289,6 +310,9 @@ impl Default for Config {
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
             client_token_passthrough: false,
+            prompt_cache_accounting: false,
+            prompt_cache_min_tokens: default_prompt_cache_min_tokens(),
+            output_tokens_include_thinking: false,
             forward_suggestion_mode: false,
             thinking_as_text: true,
             write_chunking_max_lines: default_write_chunking_max_lines(),
@@ -400,6 +424,21 @@ impl Config {
             && let Ok(b) = v.parse::<bool>()
         {
             self.client_token_passthrough = b;
+        }
+        if let Ok(v) = env::var("PROMPT_CACHE_ACCOUNTING")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.prompt_cache_accounting = b;
+        }
+        if let Ok(v) = env::var("PROMPT_CACHE_MIN_TOKENS")
+            && let Ok(n) = v.parse::<i32>()
+        {
+            self.prompt_cache_min_tokens = n;
+        }
+        if let Ok(v) = env::var("OUTPUT_TOKENS_INCLUDE_THINKING")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.output_tokens_include_thinking = b;
         }
         if let Ok(v) = env::var("FORWARD_SUGGESTION_MODE")
             && let Ok(b) = v.parse::<bool>()

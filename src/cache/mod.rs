@@ -9,6 +9,7 @@
 //! cache_read 派生主路径已切换为 `token::count_prefix_tokens` 前缀字符估算，
 //! `simulation` 模拟与 `fingerprint` 追踪降级为兜底分支。
 
+pub mod breakpoint;
 pub mod fingerprint;
 pub mod simulation;
 
