@@ -63,7 +63,7 @@ pub async fn post_messages_cc(
             message_count = %payload.messages.len(),
             "拦截 Suggestion Mode 输入建议请求，返回空响应（不转发上游）"
         );
-        return suggestion_mode_response(payload.stream);
+        return suggestion_mode_response(payload.stream, &payload.model);
     }
 
     tracing::info!(
