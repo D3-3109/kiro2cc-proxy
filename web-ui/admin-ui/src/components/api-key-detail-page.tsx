@@ -1,11 +1,10 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { RotateCw } from 'lucide-react'
+import { ChevronDown, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Metric, MetricValue, MetricsBar } from '@/components/metrics'
-import { ModelAggPanel } from '@/components/model-agg-panel'
 import { PageHead } from '@/components/page-head'
 import { STATUS_VISUAL, TAG_BASE, type KeyStatus } from '@/components/api-key-row'
 import { CELL, PANEL, PANEL_FOOT, PANEL_TITLE, Pager, TH_BASE } from '@/components/table-kit'
@@ -39,9 +38,20 @@ const MODEL_COLS: { labelKey: string; num?: boolean }[] = [
   { labelKey: 'apiKeys.colCredits', num: true },
 ]
 
+/** 逐模型用量折叠偏好：模块级可变引用，跨实例/跨重挂共享（仅 UI 偏好，非业务数据） */
+const byModelOpenRef = { current: true }
+
 export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
+  // 折叠偏好为模块级全局：切换侧栏 tab 导致宿主组件卸载重挂后，折叠态不丢失；默认展开
+  const [modelOpen, setModelOpen] = useState(byModelOpenRef.current)
+  const modelBodyId = useId()
+
+  const toggleModelPanel = () => {
+    byModelOpenRef.current = !modelOpen
+    setModelOpen(byModelOpenRef.current)
+  }
 
   const { data: apiKeys } = useApiKeys()
   const { data: allUsage } = useAllUsage()
@@ -130,8 +140,23 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
       {/* 逐模型用量（原卡片网格改表格，与列表页同一套表头/单元格原语） */}
       {summary && summary.byModel.length > 0 && (
         <div className="mt-[15px]">
-          <h3 className={PANEL_TITLE}>{t('apiKeys.byModelTitle')}</h3>
-          <section className={PANEL}>
+          {/* 标题行整行可点击折叠；保留 panel-title 视觉，chevron 指示折叠方向 */}
+          <button
+            type="button"
+            onClick={toggleModelPanel}
+            aria-expanded={modelOpen}
+            aria-controls={modelBodyId}
+            className={`${PANEL_TITLE} flex w-full items-center gap-[5px] text-left transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand`}
+          >
+            <ChevronDown
+              className={`size-[13px] flex-none transition-transform ${modelOpen ? '' : '-rotate-90'}`}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            {t('apiKeys.byModelTitle')}
+          </button>
+          {/* 折叠时保留 DOM 并置 hidden，避免 aria-controls 指向已卸载节点 */}
+          <section id={modelBodyId} aria-label={t('apiKeys.byModelTitle')} className={PANEL} hidden={!modelOpen}>
             <div className="max-h-[42vh] overflow-y-auto">
               <table className="w-full border-separate border-spacing-0">
                 <thead>
@@ -177,9 +202,6 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
           </section>
         </div>
       )}
-
-      {/* 按模型分组（当前页）：与账号详情页同构的可折叠面板，聚合当前页请求日志 */}
-      <ModelAggPanel records={records} />
 
       {/* 请求日志（.panel + .tscroll + .panel-foot） */}
       <div className="mt-[15px]">
