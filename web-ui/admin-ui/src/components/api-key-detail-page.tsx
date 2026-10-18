@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Metric, MetricValue, MetricsBar } from '@/components/metrics'
+import { ModelAggPanel } from '@/components/model-agg-panel'
 import { PageHead } from '@/components/page-head'
 import { STATUS_VISUAL, TAG_BASE, type KeyStatus } from '@/components/api-key-row'
 import { CELL, PANEL, PANEL_FOOT, PANEL_TITLE, Pager, TH_BASE } from '@/components/table-kit'
@@ -176,6 +177,9 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
           </section>
         </div>
       )}
+
+      {/* 按模型分组（当前页）：与账号详情页同构的可折叠面板，聚合当前页请求日志 */}
+      <ModelAggPanel records={records} />
 
       {/* 请求日志（.panel + .tscroll + .panel-foot） */}
       <div className="mt-[15px]">
