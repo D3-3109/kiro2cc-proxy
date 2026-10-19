@@ -12,6 +12,7 @@ import {
   useClientTokenPassthrough, useSetClientTokenPassthrough,
   useThinkingAsText, useSetThinkingAsText,
   useDumpKiroBody, useSetDumpKiroBody,
+  useDebugLogs, useSetDebugLogs,
   useRuntimeConfig, useSetRuntimeConfig,
   useAuthKeys, useSetAuthKeys,
 } from '@/hooks/use-credentials'
@@ -185,6 +186,8 @@ export function SettingsPanel({
   const { mutate: setThinkingAsText, isPending: isSettingThinkingAsText } = useSetThinkingAsText()
   const { data: dumpKiroBodyData, isError: dumpKiroBodyError, isLoading: isLoadingDumpKiroBody } = useDumpKiroBody()
   const { mutate: setDumpKiroBody, isPending: isSettingDumpKiroBody } = useSetDumpKiroBody()
+  const { data: debugLogsData, isError: debugLogsError, isLoading: isLoadingDebugLogs } = useDebugLogs()
+  const { mutate: setDebugLogsMut, isPending: isSettingDebugLogs } = useSetDebugLogs()
   const { data: authKeysData, isLoading: isLoadingAuthKeys } = useAuthKeys()
   const { mutate: setAuthKeysMut, isPending: isSettingAuthKeys } = useSetAuthKeys()
   const [adminPswDraft, setAdminPswDraft] = useState('')
@@ -535,6 +538,19 @@ export function SettingsPanel({
               disabled={dumpKiroBodyError || isLoadingDumpKiroBody || isSettingDumpKiroBody}
               onToggle={() =>
                 setDumpKiroBody(!dumpKiroBodyData?.enabled, {
+                  onSuccess: (d) => toast.success(d.message),
+                  onError: (e) => toast.error(extractErrorMessage(e)),
+                })
+              }
+            />
+          </Row>
+          <Row label={t('settings.debugLogs')} desc={debugLogsError ? t('common.loadFailed') : t('settings.debugLogsDesc')}>
+            <Sw
+              label={t('settings.debugLogs')}
+              on={!!debugLogsData?.enabled}
+              disabled={debugLogsError || isLoadingDebugLogs || isSettingDebugLogs}
+              onToggle={() =>
+                setDebugLogsMut(!debugLogsData?.enabled, {
                   onSuccess: (d) => toast.success(d.message),
                   onError: (e) => toast.error(extractErrorMessage(e)),
                 })

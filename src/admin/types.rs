@@ -404,6 +404,22 @@ pub struct SetDumpKiroBodyRequest {
     pub enabled: bool,
 }
 
+/// DEBUG 日志开关查询响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugLogsResponse {
+    /// 是否输出 DEBUG 级别日志（控制台 / 日志文件 / Admin 日志页三处一致）
+    pub enabled: bool,
+}
+
+/// 设置 DEBUG 日志开关请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDebugLogsRequest {
+    /// 是否输出 DEBUG 级别日志
+    pub enabled: bool,
+}
+
 /// 运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）查询响应
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

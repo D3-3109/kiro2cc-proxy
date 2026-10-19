@@ -192,6 +192,18 @@ export async function setDumpKiroBody(enabled: boolean): Promise<{ success: bool
   return data
 }
 
+// 获取 DEBUG 日志开关
+export async function getDebugLogs(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>('/config/debug-logs')
+  return data
+}
+
+// 设置 DEBUG 日志开关（全局热生效：控制台 / 日志文件 / 日志页三处一致）
+export async function setDebugLogs(enabled: boolean): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/debug-logs', { enabled })
+  return data
+}
+
 // ============ 服务器信息 ============
 
 // 获取服务器信息

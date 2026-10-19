@@ -493,6 +493,7 @@ Lower `priority` value = higher priority. Up to 3 retries per account, 9 per req
 | `outputTokensIncludeThinking` | No | `false` | With `true`, the `output_tokens` returned to clients include thinking (matching Anthropic's official accounting); the default `false` counts visible output only. Override with `OUTPUT_TOKENS_INCLUDE_THINKING` |
 | `writeChunkingMaxLines` | No | `300` | Line limit of the chunked-writing instruction (see the `Reset(StreamId(1), INTERNAL_ERROR, Remote)` FAQ entry): when a request carries Write / Edit / MultiEdit, the system prompt asks for no more than ~N lines per tool call. Larger saves credits but makes the ~240s upstream stream reset more likely; `0` disables the instruction. Editable in the Admin settings page and hot-applied to subsequent requests. Override with `WRITE_CHUNKING_MAX_LINES` |
 | `thinkingAsText` | No | `false` | Thinking-as-text display for Claude Code only. `true` rewrites thinking blocks into markdown quote text streamed line by line with ANSI dim (gray) styling, similar to Kiro CLI. This avoids Claude Code appearing stalled while native thinking is folded. In both modes Claude Code's own context contains the thinking content, but it is dropped entirely when history is sent upstream: with the switch off, native thinking blocks are dropped; with it on, the marker line, thinking body and duration line are dropped, so the upstream context never contains thinking (only when the stream is interrupted and the duration line is missing does it conservatively fall back to stripping just the marker line). Override with `THINKING_AS_TEXT` |
+| `debugLogs` | No | `false` | DEBUG log switch: when `true`, DEBUG-level events are emitted to the console, the log file (`logFile`) and the Admin Log Viewer page in sync; hot-switchable from the Admin settings page (no restart) and persisted to config.json. Switching it off stops capturing new DEBUG entries while already captured ones are kept. Note the switch reports/saves its own state, not the effective level: when `RUST_LOG` is set its directives still take precedence (the switch only appends a global `debug` directive on top of `RUST_LOG`; target-specific directives are unaffected). Log volume grows significantly — turn it off after troubleshooting. Override with `DEBUG_LOGS` |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -510,7 +511,8 @@ Full example:
   "maxRpmPerCredential": 0,
   "forwardSuggestionMode": false,
   "clientTokenPassthrough": false,
-  "thinkingAsText": false
+  "thinkingAsText": false,
+  "debugLogs": false
 }
 ```
 
@@ -523,6 +525,7 @@ After configuring `adminPsw`, the Admin settings page manages the following opti
 | Suggestion Mode input suggestions | `forwardSuggestionMode` | Applies immediately |
 | Client token passthrough | `clientTokenPassthrough` | Applies immediately |
 | Thinking-as-text display | `thinkingAsText` | Applies immediately to subsequent requests only |
+| DEBUG logs | `debugLogs` | Applies immediately; console / log file / Log Viewer stay in sync |
 | Per-account RPM limit | `maxRpmPerCredential` | Applies immediately; `0` means unlimited |
 | Chunked-write line limit | `writeChunkingMaxLines` | Applies immediately to subsequent requests only; `0` disables the instruction |
 | Listen port | `port` | Takes effect after restart; valid range: `1–65535` |

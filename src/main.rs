@@ -10,6 +10,7 @@ mod common;
 mod http_client;
 mod kiro;
 mod log_capture;
+mod logging;
 mod model;
 mod openai;
 pub mod token;
@@ -55,10 +56,11 @@ async fn main() {
     // 初始化日志（registry 风格，同时输出到控制台、LogCapture 与可选的日志文件）
     {
         use tracing_subscriber::prelude::*;
-        let make_filter = || {
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
-        };
+        // 单一全局可重载过滤器：控制台 / 日志文件 / LogCapture 三处共用同一档位，
+        // 运行时通过 logging::set_debug_enabled 热切换（reload 内部会重建 callsite
+        // interest 缓存，切换即时生效）
+        let (log_filter, log_filter_handle) = logging::new_reload_layer(config.debug_logs);
+        logging::install(log_filter_handle);
         // log_file 配置时以 append 模式同步写文件；父目录不存在则自动创建；
         // 打开失败仅告警降级（只输出控制台），不影响启动
         let mut file_layer = None;
@@ -95,11 +97,12 @@ async fn main() {
             }
         }
         let registry = tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_filter(make_filter()))
-            .with(log_capture.as_layer().with_filter(make_filter()));
+            .with(log_filter)
+            .with(tracing_subscriber::fmt::layer())
+            .with(log_capture.as_layer());
         let log_file_enabled = file_layer.is_some();
         if let Some(layer) = file_layer {
-            registry.with(layer.with_filter(make_filter())).init();
+            registry.with(layer).init();
         } else {
             registry.init();
         }
@@ -142,6 +145,11 @@ async fn main() {
     if config.client_token_passthrough {
         tracing::info!(
             "已启用客户端 token 直通（clientTokenPassthrough），usage 字段将 1:1 上报真实值"
+        );
+    }
+    if config.debug_logs {
+        tracing::info!(
+            "DEBUG 日志已开启（debugLogs=true）：控制台、日志文件与 Admin 日志页将输出 DEBUG 级别事件"
         );
     }
 

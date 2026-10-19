@@ -238,6 +238,13 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_file: Option<String>,
 
+    /// 是否在日志中输出 DEBUG 级别事件（控制台 / 日志文件 / Admin 日志页三处一致）
+    ///
+    /// 默认 false 保持 info 级过滤。可在 Admin 设置页热切换并写回 config.json；
+    /// 开启时在 RUST_LOG 基础上追加全局 debug 指令，target 定向指令仍优先。
+    #[serde(default)]
+    pub debug_logs: bool,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -326,6 +333,7 @@ impl Default for Config {
             write_chunking_max_lines: default_write_chunking_max_lines(),
             dump_kiro_body: false,
             log_file: None,
+            debug_logs: false,
             config_path: None,
         }
     }
@@ -468,6 +476,11 @@ impl Config {
         {
             self.log_file = Some(v);
         }
+        if let Ok(v) = env::var("DEBUG_LOGS")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.debug_logs = b;
+        }
         if let Ok(v) = env::var("THINKING_AS_TEXT")
             && let Ok(b) = v.parse::<bool>()
         {
@@ -607,6 +620,22 @@ mod tests {
         let config: Config =
             serde_json::from_str(r#"{"logFile": "app/config/proxy.log"}"#).unwrap();
         assert_eq!(config.log_file.as_deref(), Some("app/config/proxy.log"));
+    }
+
+    #[test]
+    fn test_debug_logs_default_false() {
+        // 缺省该字段时必须为 false（保持 info 级过滤，行为与现状一致）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(!config.debug_logs);
+        assert!(!Config::default().debug_logs);
+    }
+
+    #[test]
+    fn test_debug_logs_deserialize_explicit() {
+        let config: Config = serde_json::from_str(r#"{"debugLogs": true}"#).unwrap();
+        assert!(config.debug_logs);
+        let config: Config = serde_json::from_str(r#"{"debugLogs": false}"#).unwrap();
+        assert!(!config.debug_logs);
     }
 
     #[test]

@@ -18,6 +18,8 @@ import {
   setThinkingAsText,
   getDumpKiroBody,
   setDumpKiroBody,
+  getDebugLogs,
+  setDebugLogs,
   getRuntimeConfig,
   setRuntimeConfig,
   setLoadBalancingMode,
@@ -263,6 +265,25 @@ export function useSetDumpKiroBody() {
     mutationFn: setDumpKiroBody,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dumpKiroBody'] })
+    },
+  })
+}
+
+// 获取 DEBUG 日志开关
+export function useDebugLogs() {
+  return useQuery({
+    queryKey: ['debugLogs'],
+    queryFn: getDebugLogs,
+  })
+}
+
+// 设置 DEBUG 日志开关
+export function useSetDebugLogs() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: setDebugLogs,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['debugLogs'] })
     },
   })
 }
