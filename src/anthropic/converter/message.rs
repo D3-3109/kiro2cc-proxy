@@ -12,6 +12,14 @@ use super::result::ConversionError;
 pub(super) fn process_message_content(
     content: &serde_json::Value,
 ) -> Result<(String, Vec<KiroImage>, Vec<ToolResult>), ConversionError> {
+    process_message_content_with_tool_filter(content, |_| true)
+}
+
+/// 过滤工具结果时，连同其内嵌图片一起过滤，保留顶层图片的原始顺序。
+pub(super) fn process_message_content_with_tool_filter(
+    content: &serde_json::Value,
+    mut keep_tool_result: impl FnMut(&str) -> bool,
+) -> Result<(String, Vec<KiroImage>, Vec<ToolResult>), ConversionError> {
     let mut text_parts = Vec::new();
     let mut images = Vec::new();
     let mut tool_results = Vec::new();
@@ -59,8 +67,14 @@ pub(super) fn process_message_content(
                             }
                         }
                         "tool_result" => {
-                            if let Some(tool_use_id) = block.tool_use_id {
-                                let result_content = extract_tool_result_content(&block.content);
+                            if let Some(tool_use_id) = block.tool_use_id
+                                && keep_tool_result(&tool_use_id)
+                            {
+                                let result_content = extract_tool_result_content(
+                                    &block.content,
+                                    &tool_use_id,
+                                    &mut images,
+                                );
                                 let is_error = block.is_error.unwrap_or(false);
 
                                 let mut result = if is_error {
@@ -103,14 +117,43 @@ pub(super) fn get_image_format(media_type: &str) -> Option<String> {
     }
 }
 
-/// 提取工具结果内容
-fn extract_tool_result_content(content: &Option<serde_json::Value>) -> String {
+/// 提取工具结果文字，同时保留 Claude Code Read 返回的内嵌图片。
+/// 工具结果文字仍放在 toolResults；图片放入同条 user 消息的 images 字段，
+/// 并在原工具结果位置留下带 tool_use_id 的说明，保留工具结果与附件的关系。
+fn extract_tool_result_content(
+    content: &Option<serde_json::Value>,
+    tool_use_id: &str,
+    images: &mut Vec<KiroImage>,
+) -> String {
     match content {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(serde_json::Value::Array(arr)) => {
             let mut parts = Vec::new();
             for item in arr {
-                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                if item.get("type").and_then(|v| v.as_str()) == Some("image") {
+                    match serde_json::from_value::<ContentBlock>(item.clone()) {
+                        Ok(block) => {
+                            if let Some(source) = block.source
+                                && source.source_type == "base64"
+                                && !source.data.is_empty()
+                                && let Some(format) = get_image_format(&source.media_type)
+                            {
+                                images.push(KiroImage::from_base64(format, source.data));
+                                parts.push(format!(
+                                    "[Image attached from tool_result {tool_use_id}]"
+                                ));
+                            } else {
+                                tracing::warn!(
+                                    "工具结果图片未转发：需要受支持格式的非空 base64 图片"
+                                );
+                            }
+                        }
+                        Err(_) => {
+                            // serde 错误可能包含原始载荷，避免把图片数据写入日志。
+                            tracing::warn!("工具结果图片格式无效，未转发");
+                        }
+                    }
+                } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
                     parts.push(text.to_string());
                 }
             }

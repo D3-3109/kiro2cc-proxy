@@ -10,7 +10,7 @@ use crate::kiro::model::requests::conversation::{
 
 use super::fields::build_additional_model_request_fields;
 use super::history::build_history;
-use super::message::process_message_content;
+use super::message::{process_message_content, process_message_content_with_tool_filter};
 use super::model::map_model;
 use super::prompt::{append_output_format_instruction, append_recent_knowledge_hints};
 use super::result::{ConversionError, ConversionResult};
@@ -195,6 +195,21 @@ pub(super) fn convert_request_with_chunking(
     // 同时返回孤立的 tool_use_id 集合，用于后续清理
     let (validated_tool_results, orphaned_tool_use_ids) =
         validate_tool_pairing(&history, &tool_results);
+
+    // 图片与其所属 tool_result 一起接受或丢弃。仅在配对校验过滤了结果时
+    // 重建 images；从集合中移除已接受的 ID，也能排除当前消息内的重复结果。
+    let images = if validated_tool_results.len() != tool_results.len() {
+        let mut accepted_ids: std::collections::HashSet<_> = validated_tool_results
+            .iter()
+            .map(|result| result.tool_use_id.as_str())
+            .collect();
+        process_message_content_with_tool_filter(&last_message.content, |id| {
+            accepted_ids.remove(id)
+        })?
+        .1
+    } else {
+        images
+    };
 
     // 9. 从历史中移除孤立的 tool_use（Kiro API 要求 tool_use 必须有对应的 tool_result）
     remove_orphaned_tool_uses(&mut history, &orphaned_tool_use_ids);
