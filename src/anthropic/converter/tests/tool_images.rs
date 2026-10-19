@@ -28,8 +28,14 @@ fn result_text(result: &ToolResult) -> String {
         .join("\n")
 }
 
-fn image_marker(id: &str) -> String {
-    format!("[Image attached from tool_result {id}]")
+// 第 n 张 / 共 total 张已附图片；序号只在同一个 tool_result 内编号。
+fn image_marker(id: &str, n: usize, total: usize) -> String {
+    format!("[Image {n}/{total} attached from tool_result {id}]")
+}
+
+// 图片未能转发时的占位，不含任何图片载荷。
+fn omitted_marker(id: &str) -> String {
+    format!("[Image omitted from tool_result {id}: unsupported or invalid image]")
 }
 
 #[test]
@@ -55,7 +61,7 @@ fn mixed_text_and_image_tool_result_preserves_text_and_image_position() {
         result_text(&results[0]),
         format!(
             "Screenshot begins\n{}\nScreenshot ends",
-            image_marker("read_mixed")
+            image_marker("read_mixed", 1, 1)
         )
     );
     assert_eq!(results[0].status.as_deref(), Some("success"));
@@ -76,7 +82,7 @@ fn image_only_tool_result_remains_nonempty_and_paired() {
     assert_eq!(images[0].source.bytes, "anBlZy1vbmx5");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].tool_use_id, "read_only");
-    assert_eq!(result_text(&results[0]), image_marker("read_only"));
+    assert_eq!(result_text(&results[0]), image_marker("read_only", 1, 1));
 }
 
 #[test]
@@ -100,7 +106,7 @@ fn tool_result_with_image_keeps_error_status() {
         result_text(&results[0]),
         format!(
             "Partial screenshot; capture failed.\n{}",
-            image_marker("read_error")
+            image_marker("read_error", 1, 1)
         )
     );
 }
@@ -139,20 +145,14 @@ fn multiple_tool_images_and_top_level_images_keep_original_order() {
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].tool_use_id, "read_a");
     assert_eq!(results[1].tool_use_id, "read_b");
-    assert_eq!(
-        result_text(&results[0])
-            .matches(&image_marker("read_a"))
-            .count(),
-        2
-    );
-    assert_eq!(result_text(&results[1]), image_marker("read_b"));
+    assert_eq!(result_text(&results[1]), image_marker("read_b", 1, 1));
     assert!(!result_text(&results[0]).contains("read_b"));
     assert_eq!(
         result_text(&results[0]),
         format!(
             "{}\nBetween the two tool images\n{}",
-            image_marker("read_a"),
-            image_marker("read_a")
+            image_marker("read_a", 1, 2),
+            image_marker("read_a", 2, 2)
         )
     );
 }
@@ -207,7 +207,7 @@ fn historical_and_current_tool_images_stay_with_matching_tool_ids() {
     assert_eq!(historical_results[0].tool_use_id, "read_history");
     assert_eq!(
         result_text(&historical_results[0]),
-        image_marker("read_history")
+        image_marker("read_history", 1, 1)
     );
 
     let current = &state.current_message.user_input_message;
@@ -222,7 +222,7 @@ fn historical_and_current_tool_images_stay_with_matching_tool_ids() {
     assert_eq!(current_results[0].tool_use_id, "read_current");
     assert_eq!(
         result_text(&current_results[0]),
-        image_marker("read_current")
+        image_marker("read_current", 1, 1)
     );
 
     let tool_ids = state
@@ -326,7 +326,7 @@ fn consumed_tool_image_is_not_resent_and_historical_image_is_preserved() {
     assert_eq!(historical_results[0].tool_use_id, "read_consumed");
     assert_eq!(
         result_text(&historical_results[0]),
-        image_marker("read_consumed")
+        image_marker("read_consumed", 1, 1)
     );
 }
 
@@ -375,9 +375,12 @@ fn repeated_current_tool_id_keeps_only_first_images_and_preserves_other_tool_ord
     assert_eq!(results[1].tool_use_id, "read_second");
     assert_eq!(
         result_text(&results[0]),
-        format!("Accepted first result\n{}", image_marker("read_first"))
+        format!(
+            "Accepted first result\n{}",
+            image_marker("read_first", 1, 1)
+        )
     );
-    assert_eq!(result_text(&results[1]), image_marker("read_second"));
+    assert_eq!(result_text(&results[1]), image_marker("read_second", 1, 1));
 }
 
 #[test]
@@ -430,7 +433,49 @@ fn unsupported_or_malformed_images_do_not_claim_successful_attachment() {
     let text = result_text(&results[0]);
     assert!(text.contains("Keep this diagnostic text."));
     assert!(
-        !text.contains(&image_marker("read_unsupported")),
+        !text.contains("attached from tool_result"),
         "未发送图片时不能声称已经附图"
+    );
+    // 6 张无法转发的图片各留一行占位，让模型知道这里本该有图；载荷不得出现在文本里。
+    assert_eq!(text.matches(&omitted_marker("read_unsupported")).count(), 6);
+    assert!(!text.contains("cHJpdmF0ZS1maXh0dXJl"));
+}
+
+#[test]
+fn image_only_tool_result_with_unsupported_image_is_not_empty() {
+    let content = json!([tool_result(
+        "read_svg",
+        json!([image("image/svg+xml", "PHN2Zy8+")])
+    )]);
+
+    let (_, images, results) = process_message_content(&content).unwrap();
+
+    assert!(images.is_empty());
+    assert_eq!(results.len(), 1);
+    assert_eq!(result_text(&results[0]), omitted_marker("read_svg"));
+}
+
+#[test]
+fn valid_and_invalid_images_number_only_the_attached_ones() {
+    let content = json!([tool_result(
+        "read_partial",
+        json!([
+            image("image/png", "b25l"),
+            image("image/svg+xml", "PHN2Zy8+"),
+            image("image/jpeg", "dHdv")
+        ])
+    )]);
+
+    let (_, images, results) = process_message_content(&content).unwrap();
+
+    assert_eq!(images.len(), 2);
+    assert_eq!(
+        result_text(&results[0]),
+        format!(
+            "{}\n{}\n{}",
+            image_marker("read_partial", 1, 2),
+            omitted_marker("read_partial"),
+            image_marker("read_partial", 2, 2)
+        )
     );
 }
