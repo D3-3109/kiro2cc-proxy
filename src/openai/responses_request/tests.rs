@@ -619,6 +619,18 @@ mod tests {
     }
 
     #[test]
+    fn function_call_output_unconvertible_image_leaves_placeholder_not_empty_content() {
+        // 缺 image_url / image_url 为空串：不能被静默丢弃成空 content 数组
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image"},
+            {"type": "input_image", "image_url": ""},
+        ])));
+        let placeholder =
+            json!({"type": "text", "text": "[image omitted: missing or empty image_url]"});
+        assert_eq!(tool_result_content(&r), json!([placeholder, placeholder]));
+    }
+
+    #[test]
     fn function_call_output_text_only_array_stays_flattened_string() {
         let r = convert_ok(tool_output_request(json!([
             {"type": "input_text", "text": "a"},

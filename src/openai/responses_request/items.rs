@@ -209,7 +209,15 @@ fn tool_output_content(output: Option<&Value>) -> Value {
         .iter()
         .filter_map(|part| {
             if is_image_part(part) {
-                convert_content_part(part)
+                // 转换失败（缺 image_url / 空串）时留占位，不静默丢弃：否则只含此类 part 的
+                // 输出会变成空 content 数组，与 Anthropic 层对未转发图片的占位策略也不一致
+                convert_content_part(part).or_else(|| {
+                    tracing::warn!("工具输出图片转换失败，降级为文本占位");
+                    Some(json!({
+                        "type": "text",
+                        "text": "[image omitted: missing or empty image_url]"
+                    }))
+                })
             } else {
                 part_text(part)
                     .filter(|text| !text.is_empty())
