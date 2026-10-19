@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::tools::{ToolCollector, ToolInputForm, base64_decode_compaction};
 use crate::openai::chat_request::{
-    MessageAccumulator, convert_image_url, flatten_text, parse_tool_arguments,
+    MessageAccumulator, convert_image_url, flatten_text, parse_tool_arguments, part_text,
 };
 
 /// 遍历 `input` 数组，把各类 item 分派到 system 块、消息累加器或工具收集器
@@ -190,8 +190,41 @@ fn tool_result_block(item: &Value) -> Option<Value> {
     Some(json!({
         "type": "tool_result",
         "tool_use_id": id,
-        "content": flatten_text(item.get("output")),
+        "content": tool_output_content(item.get("output")),
     }))
+}
+
+/// 工具输出 → `tool_result.content`
+///
+/// 输出数组里带图片 part（Codex `view_image`、截图类工具）时，保留为 Anthropic
+/// content 块数组，让图片随后进入 Kiro 的 `images`；否则仍压平成纯文本，与既有行为一致。
+fn tool_output_content(output: Option<&Value>) -> Value {
+    let Some(Value::Array(parts)) = output else {
+        return Value::String(flatten_text(output));
+    };
+    if !parts.iter().any(is_image_part) {
+        return Value::String(flatten_text(output));
+    }
+    let blocks = parts
+        .iter()
+        .filter_map(|part| {
+            if is_image_part(part) {
+                convert_content_part(part)
+            } else {
+                part_text(part)
+                    .filter(|text| !text.is_empty())
+                    .map(|text| json!({"type": "text", "text": text}))
+            }
+        })
+        .collect::<Vec<_>>();
+    Value::Array(blocks)
+}
+
+fn is_image_part(part: &Value) -> bool {
+    matches!(
+        part.get("type").and_then(Value::as_str),
+        Some("input_image" | "image_url")
+    )
 }
 
 /// 取工具调用的配对 id：`call_id` 是协议字段，`id` 是部分客户端的写法
