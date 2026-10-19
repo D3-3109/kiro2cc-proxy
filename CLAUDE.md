@@ -69,6 +69,7 @@ Client (Anthropic SSE format)
 - **模型映射按关键词**（`converter.rs::map_model`）：请求模型名含 `sonnet`/`opus`/`haiku`/`gpt` 等关键词即路由到对应 Kiro 模型，版本号（4.5/4.6/4.7/4.8/5）决定具体代际；未明确指定版本时 opus 兜底 4.6。含 `thinking` 后缀自动启用 extended thinking。
 - **additionalModelRequestFields 有"模型代际 × 字段"约束矩阵**：max_tokens 下限 1024 对全部 Claude 代际生效，上限按代际分 128K/64K 档；GPT 系整体跳过该字段。详见 `converter.rs::build_additional_model_request_fields` 注释与 `docs/源码全景解析.md` 难点 8。
 - **Prompt cache 用量四层降级链**（`src/cache/mod.rs`）：metering 真值 → `token::count_prefix_tokens` 前缀估算 → fingerprint 前缀指纹追踪（账号级）→ 比例模拟兜底。
+  开启 `promptCacheAccounting` 时，前缀估算被 `src/cache/breakpoint.rs` 的 cache_control 断点模拟取代（按 API Key + Kiro 模型 ID 隔离，直接解析原始 body，plan → 上游成功后 commit；本地模拟，不代表 Kiro 真实成本）。
 - **Token 计数用 tiktoken cl100k_base BPE**（`src/token.rs`，全局单例）。`stream.rs` 的 `CLIENT_TOKEN_DISPLAY_SCALE`（0.6657）是配合旧公式校准的显示缩放系数，控制客户端 auto-compact 触发时机——改动 token 口径时需评估是否需重新校准。
 - **history[0] 冻结是 prompt cache 的命脉**：系统提示中的 `cch=` 计费哈希规范化（`normalize_billing_header`）、`agentContinuationId` 由 conversationId 派生、标题生成请求隔离等机制都为让 history[0] 跨请求逐字节稳定。改动 converter 中系统提示/历史消息构建时必须保持这些不变量，否则 Kiro 侧缓存全量失效。
 

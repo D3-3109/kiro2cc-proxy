@@ -92,6 +92,8 @@ pub struct StreamContext {
     /// `Some(0)` 表示"已估算且无前缀"（首条请求且无 system/tools），cache_read=0；
     /// `None` 表示"未注入估算"，降级到模拟值。
     prefix_estimated_tokens: Option<i32>,
+    /// 断点缓存记账（promptCacheAccounting 开启时注入）—— 优先级高于前缀估算
+    cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
     /// 请求的 effort 级别（output_config 存在时取值），随 usage 记录入库
     effort: Option<String>,
     /// 思考文本化转换器（None = 关闭，出站事件原样输出）
@@ -145,6 +147,7 @@ impl StreamContext {
             metering_cache_creation_tokens: None,
             context_usage_percentage: None,
             prefix_estimated_tokens: None,
+            cache_accounting: None,
             effort: None,
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
             request_started_at: None,
@@ -176,6 +179,15 @@ impl StreamContext {
     /// 显式注入后，即使前缀 = 0 也会被选用（cache_read=0，全部计为 new_input）。
     pub fn with_prefix_estimated_tokens(mut self, prefix: i32) -> Self {
         self.prefix_estimated_tokens = Some(prefix);
+        self
+    }
+
+    /// 注入断点缓存记账（None 时维持前缀估算路径）
+    pub fn with_cache_accounting(
+        mut self,
+        accounting: Option<crate::cache::breakpoint::CacheAccounting>,
+    ) -> Self {
+        self.cache_accounting = accounting;
         self
     }
 
@@ -238,6 +250,13 @@ impl StreamContext {
         ) {
             let non_cached = input_tokens.saturating_sub(read).saturating_sub(creation);
             (non_cached, creation, read)
+        } else if let Some(acc) = &self.cache_accounting {
+            let u = acc.usage_for(input_tokens);
+            (
+                u.input_tokens,
+                u.cache_creation_input_tokens,
+                u.cache_read_input_tokens,
+            )
         } else if let Some(prefix) = self.prefix_estimated_tokens {
             let read = prefix.max(0).min(input_tokens);
             (input_tokens.saturating_sub(read), 0, read)
@@ -904,10 +923,15 @@ impl StreamContext {
             final_input_tokens
         );
 
-        // 对客户端上报「可见输出」token（已排除 thinking），不再套用固定上限
-        let reported_output_tokens = self.visible_output_tokens();
         // 计费口径（含 thinking），派生一次复用
         let billed_output_tokens = self.output_tokens();
+        // 对客户端上报：默认「可见输出」（已排除 thinking）；outputTokensIncludeThinking
+        // 开启时与官方口径一致，上报含 thinking 的计费值
+        let reported_output_tokens = if crate::anthropic::stream::output_tokens_include_thinking() {
+            billed_output_tokens
+        } else {
+            self.visible_output_tokens()
+        };
 
         // 派生逻辑见 derive_report_cache_usage（与 message_start 共用同一口径）
         let (report_input, cache_creation, cache_read) =
@@ -973,10 +997,22 @@ impl StreamContext {
                 },
             );
         }
-        // 流式 SSE 路径暂未接入 fingerprint，cache_creation 不区分 5m/1h tier，
-        // 这里把 report_cache_creation 全部归到 5m（与非流式 metering Layer 1 一致）
-        let report_creation_5m = report_cache_creation;
-        let report_creation_1h = Some(0);
+        // 断点记账：响应已完整产出，提交本请求的缓存写入；5m/1h 按断点 ttl 拆分。
+        // 未开启时 cache_creation 全部归到 5m（与非流式 metering Layer 1 一致）
+        let (report_creation_5m, report_creation_1h) = match &self.cache_accounting {
+            Some(acc)
+                if self.metering_cache_read_tokens.is_none()
+                    || self.metering_cache_creation_tokens.is_none() =>
+            {
+                acc.commit();
+                let u = acc.usage_for(final_input_tokens);
+                (
+                    Some(u.cache_creation_5m_input_tokens),
+                    Some(u.cache_creation_1h_input_tokens),
+                )
+            }
+            _ => (report_cache_creation, Some(0)),
+        };
 
         events.extend(self.state_manager.generate_final_events(
             report_input,

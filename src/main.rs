@@ -114,6 +114,8 @@ async fn main() {
 
     // 客户端 token 直通开关（true 时 usage 字段 1:1 上报，见 Issue #44）
     anthropic::set_client_token_passthrough(config.client_token_passthrough);
+    anthropic::set_output_tokens_include_thinking(config.output_tokens_include_thinking);
+    anthropic::set_models_official_aliases(config.models_official_aliases);
     anthropic::set_thinking_as_text(config.thinking_as_text);
     anthropic::set_write_chunking_max_lines(config.write_chunking_max_lines);
     anthropic::set_kiro_body_dump_enabled(config.dump_kiro_body);
@@ -286,6 +288,25 @@ async fn main() {
         .with_forward_suggestion_mode(config.forward_suggestion_mode)
         .with_forward_suggestion_mode_arc(suggestion_mode.clone())
         .with_fingerprint_tracker(fingerprint_tracker.clone());
+    if config.prompt_cache_accounting {
+        let snapshot = throttle_data_dir.join("prompt_cache.json");
+        let cache = Arc::new(cache::breakpoint::BreakpointCache::new(
+            config.prompt_cache_min_tokens,
+            Some(snapshot.clone()),
+        ));
+        cache.start_maintenance();
+        tracing::info!(
+            "Prompt cache 断点记账已启用 (min_tokens={}, 已恢复 {} 条, 快照 {:?})",
+            if config.prompt_cache_min_tokens > 0 {
+                config.prompt_cache_min_tokens.to_string()
+            } else {
+                "按模型".to_string()
+            },
+            cache.len(),
+            snapshot
+        );
+        anthropic_app_state = anthropic_app_state.with_breakpoint_cache(cache);
+    }
     if config.forward_suggestion_mode {
         tracing::info!(
             "Suggestion Mode 输入建议请求已放行（forward_suggestion_mode=true），将正常转发上游"

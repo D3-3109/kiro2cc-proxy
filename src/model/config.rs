@@ -44,6 +44,11 @@ fn default_true() -> bool {
     true
 }
 
+/// 0 = 按模型使用 Anthropic 官方最小可缓存长度（见 `cache::breakpoint::min_cacheable_tokens`）
+fn default_prompt_cache_min_tokens() -> i32 {
+    0
+}
+
 fn default_fingerprint_enabled() -> bool {
     true
 }
@@ -162,6 +167,29 @@ pub struct Config {
     /// CLIENT_TOKEN_DISPLAY_SCALE 缩放）。默认 false 维持既有展示缩放。
     #[serde(default)]
     pub client_token_passthrough: bool,
+
+    /// 按 Anthropic cache_control 断点规则模拟缓存记账（见 `cache::breakpoint`）
+    ///
+    /// 开启后 cache_read / cache_creation 按请求里的断点、20 block 回看、TTL 计算，
+    /// 取代"除最后一条外全部算缓存读、写入恒为 0"的前缀估算。默认 false 保持既有行为。
+    #[serde(default)]
+    pub prompt_cache_accounting: bool,
+
+    /// 断点模拟最小可缓存长度的全局覆盖（token）。默认 0 = 按模型取官方值
+    /// （512 / 1024 / 2048 / 4096 不等）；> 0 时对所有模型统一使用该值
+    #[serde(default = "default_prompt_cache_min_tokens")]
+    pub prompt_cache_min_tokens: i32,
+
+    /// `/v1/models` 是否为点号模型 ID 追加官方连字符别名（如 `claude-opus-4.6` →
+    /// `claude-opus-4-6`）。供按模型列表生成映射的下游网关使用；默认 false，
+    /// 避免 Claude Code 模型选择器出现重复项
+    #[serde(default)]
+    pub models_official_aliases: bool,
+
+    /// 对客户端上报的 output_tokens 是否包含 thinking（Anthropic 官方口径为包含）。
+    /// 默认 false 保持既有行为（仅可见输出）。
+    #[serde(default)]
+    pub output_tokens_include_thinking: bool,
 
     /// Suggestion Mode 输入建议请求放行开关
     ///
@@ -289,6 +317,10 @@ impl Default for Config {
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
             client_token_passthrough: false,
+            prompt_cache_accounting: false,
+            prompt_cache_min_tokens: default_prompt_cache_min_tokens(),
+            models_official_aliases: false,
+            output_tokens_include_thinking: false,
             forward_suggestion_mode: false,
             thinking_as_text: true,
             write_chunking_max_lines: default_write_chunking_max_lines(),
@@ -400,6 +432,26 @@ impl Config {
             && let Ok(b) = v.parse::<bool>()
         {
             self.client_token_passthrough = b;
+        }
+        if let Ok(v) = env::var("PROMPT_CACHE_ACCOUNTING")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.prompt_cache_accounting = b;
+        }
+        if let Ok(v) = env::var("PROMPT_CACHE_MIN_TOKENS")
+            && let Ok(n) = v.parse::<i32>()
+        {
+            self.prompt_cache_min_tokens = n;
+        }
+        if let Ok(v) = env::var("MODELS_OFFICIAL_ALIASES")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.models_official_aliases = b;
+        }
+        if let Ok(v) = env::var("OUTPUT_TOKENS_INCLUDE_THINKING")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.output_tokens_include_thinking = b;
         }
         if let Ok(v) = env::var("FORWARD_SUGGESTION_MODE")
             && let Ok(b) = v.parse::<bool>()

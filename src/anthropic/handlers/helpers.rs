@@ -266,7 +266,10 @@ pub(crate) fn is_suggestion_mode_request(payload: &MessagesRequest) -> bool {
 ///
 /// Claude Code 对该响应只取候选文本，空文本等价于"无建议"；返回结构完整的
 /// 正常响应而非错误，避免客户端把建议失败当主对话故障重试。
-pub(crate) fn suggestion_mode_response(stream: bool) -> axum::response::Response {
+///
+/// `model` 回显请求模型、usage 全部为 0：下游计费网关（如 sub2api）按响应的
+/// model / usage 记账，回显假模型名会被标记"模型不一致"，非零 output 会被计费。
+pub(crate) fn suggestion_mode_response(stream: bool, model: &str) -> axum::response::Response {
     if !stream {
         return axum::response::Response::builder()
             .status(axum::http::StatusCode::OK)
@@ -277,12 +280,12 @@ pub(crate) fn suggestion_mode_response(stream: bool) -> axum::response::Response
                     "type": "message",
                     "role": "assistant",
                     "content": [{ "type": "text", "text": "" }],
-                    "model": "suggestion",
+                    "model": model,
                     "stop_reason": "end_turn",
                     "stop_sequence": null,
                     "usage": {
                         "input_tokens": 0,
-                        "output_tokens": 1,
+                        "output_tokens": 0,
                         "cache_creation_input_tokens": 0,
                         "cache_read_input_tokens": 0
                     }
@@ -307,12 +310,12 @@ pub(crate) fn suggestion_mode_response(stream: bool) -> axum::response::Response
                     "type": "message",
                     "role": "assistant",
                     "content": [],
-                    "model": "suggestion",
+                    "model": model,
                     "stop_reason": null,
                     "stop_sequence": null,
                     "usage": {
                         "input_tokens": 0,
-                        "output_tokens": 1,
+                        "output_tokens": 0,
                         "cache_creation_input_tokens": 0,
                         "cache_read_input_tokens": 0
                     }
@@ -336,7 +339,7 @@ pub(crate) fn suggestion_mode_response(stream: bool) -> axum::response::Response
             serde_json::json!({
                 "type": "message_delta",
                 "delta": { "stop_reason": "end_turn", "stop_sequence": null },
-                "usage": { "input_tokens": 0, "output_tokens": 1 }
+                "usage": { "input_tokens": 0, "output_tokens": 0 }
             }),
         ),
         SseEvent::new(
@@ -363,6 +366,29 @@ pub(crate) fn suggestion_mode_response(stream: bool) -> axum::response::Response
 mod tests {
     use super::*;
     use serde_json::json;
+
+    async fn body_string(resp: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn suggestion_response_echoes_model_with_zero_usage() {
+        let v: serde_json::Value = serde_json::from_str(
+            &body_string(suggestion_mode_response(false, "claude-opus-5-5")).await,
+        )
+        .unwrap();
+        assert_eq!(v["model"], "claude-opus-5-5");
+        assert_eq!(v["usage"]["output_tokens"], 0);
+        assert_eq!(v["usage"]["input_tokens"], 0);
+
+        let sse = body_string(suggestion_mode_response(true, "claude-opus-5-5")).await;
+        assert!(sse.contains("\"model\":\"claude-opus-5-5\""));
+        assert!(!sse.contains("\"suggestion\""));
+        assert!(!sse.contains("\"output_tokens\":1"));
+    }
 
     fn request_with_last_message(role: &str, content: serde_json::Value) -> MessagesRequest {
         serde_json::from_value(json!({

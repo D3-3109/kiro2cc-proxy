@@ -392,7 +392,7 @@ fn canonicalize_content_block(block: &serde_json::Value, tools: Option<&[Tool]>)
     }
 }
 
-fn canonical_json(v: &serde_json::Value) -> String {
+pub(crate) fn canonical_json(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Object(m) => {
             let sorted: BTreeMap<&String, &serde_json::Value> = m.iter().collect();
