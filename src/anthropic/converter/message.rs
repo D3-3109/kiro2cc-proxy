@@ -117,9 +117,17 @@ pub(super) fn get_image_format(media_type: &str) -> Option<String> {
     }
 }
 
+/// 工具结果数组里的一项：文字，或一张图片（`None` 表示无法转发）。
+enum ToolResultPart {
+    Text(String),
+    Image(Option<(String, String)>),
+}
+
 /// 提取工具结果文字，同时保留 Claude Code Read 返回的内嵌图片。
 /// 工具结果文字仍放在 toolResults；图片放入同条 user 消息的 images 字段，
-/// 并在原工具结果位置留下带 tool_use_id 的说明，保留工具结果与附件的关系。
+/// 并在原工具结果位置留下带序号和 tool_use_id 的说明（`[Image k/N attached ...]`），
+/// 保留工具结果与附件的关系。无法转发的图片留下 `[Image omitted ...]` 占位，
+/// 避免模型把图片丢失误认为工具返回了空内容。
 fn extract_tool_result_content(
     content: &Option<serde_json::Value>,
     tool_use_id: &str,
@@ -128,38 +136,68 @@ fn extract_tool_result_content(
     match content {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(serde_json::Value::Array(arr)) => {
-            let mut parts = Vec::new();
-            for item in arr {
-                if item.get("type").and_then(|v| v.as_str()) == Some("image") {
-                    match serde_json::from_value::<ContentBlock>(item.clone()) {
-                        Ok(block) => {
-                            if let Some(source) = block.source
-                                && source.source_type == "base64"
-                                && !source.data.is_empty()
-                                && let Some(format) = get_image_format(&source.media_type)
-                            {
-                                images.push(KiroImage::from_base64(format, source.data));
-                                parts.push(format!(
-                                    "[Image attached from tool_result {tool_use_id}]"
-                                ));
-                            } else {
-                                tracing::warn!(
-                                    "工具结果图片未转发：需要受支持格式的非空 base64 图片"
-                                );
-                            }
-                        }
-                        Err(_) => {
-                            // serde 错误可能包含原始载荷，避免把图片数据写入日志。
-                            tracing::warn!("工具结果图片格式无效，未转发");
-                        }
+            let items: Vec<ToolResultPart> = arr
+                .iter()
+                .filter_map(|item| {
+                    if item.get("type").and_then(|v| v.as_str()) == Some("image") {
+                        Some(ToolResultPart::Image(parse_tool_result_image(item)))
+                    } else {
+                        item.get("text")
+                            .and_then(|v| v.as_str())
+                            .map(|text| ToolResultPart::Text(text.to_string()))
                     }
-                } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-                    parts.push(text.to_string());
+                })
+                .collect();
+            // 序号只给真正会附上的图片编号，所以先数一遍。
+            let total = items
+                .iter()
+                .filter(|part| matches!(part, ToolResultPart::Image(Some(_))))
+                .count();
+
+            let mut parts = Vec::new();
+            let mut attached = 0;
+            for part in items {
+                match part {
+                    ToolResultPart::Text(text) => parts.push(text),
+                    ToolResultPart::Image(Some((format, data))) => {
+                        attached += 1;
+                        images.push(KiroImage::from_base64(format, data));
+                        parts.push(format!(
+                            "[Image {attached}/{total} attached from tool_result {tool_use_id}]"
+                        ));
+                    }
+                    ToolResultPart::Image(None) => parts.push(format!(
+                        "[Image omitted from tool_result {tool_use_id}: unsupported or invalid image]"
+                    )),
                 }
             }
             parts.join("\n")
         }
         Some(v) => v.to_string(),
         None => String::new(),
+    }
+}
+
+/// 解析工具结果里的一张图片，返回 `(format, base64 data)`。
+/// 需要受支持格式的非空 base64 图片；其余情况返回 `None`。
+fn parse_tool_result_image(item: &serde_json::Value) -> Option<(String, String)> {
+    match serde_json::from_value::<ContentBlock>(item.clone()) {
+        Ok(block) => {
+            if let Some(source) = block.source
+                && source.source_type == "base64"
+                && !source.data.is_empty()
+                && let Some(format) = get_image_format(&source.media_type)
+            {
+                Some((format, source.data))
+            } else {
+                tracing::warn!("工具结果图片未转发：需要受支持格式的非空 base64 图片");
+                None
+            }
+        }
+        Err(_) => {
+            // serde 错误可能包含原始载荷，避免把图片数据写入日志。
+            tracing::warn!("工具结果图片格式无效，未转发");
+            None
+        }
     }
 }
