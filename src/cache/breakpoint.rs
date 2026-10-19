@@ -6,21 +6,26 @@
 //! `input / cache_creation(5m/1h) / cache_read` 拆分：
 //!
 //! 1. 请求按 tools → system → messages 的顺序展开为有序 block 序列；
-//!    每个 block 的键 = SHA-256(model ‖ block[0] ‖ … ‖ block[i])（剔除 cache_control 后规范化）
+//!    每个 block 的键 = SHA-256(tenant ‖ model ‖ block[0] ‖ … ‖ block[i])（剔除 cache_control 后规范化）；
+//!    tenant 为 API Key 标识，model 为映射后的 Kiro 模型 ID
 //! 2. 只有带 `cache_control` 的 block（断点）才会写入缓存条目；
 //!    顶层 `cache_control`（自动缓存）等价于在最后一个 block 上打断点
 //! 3. 读取：从每个断点往前回看最多 20 个 block，取最长的未过期命中，命中即刷新 TTL
-//! 4. 断点处累计 token 低于 `min_tokens` 时不建条目（官方最小可缓存长度）
+//! 4. 断点处累计 token 低于最小可缓存长度时不建条目（官方按模型取值，见 `min_cacheable_tokens`）
 //! 5. 拆分：read = 命中位置累计 token；creation = 命中位置 → 最后一个有效断点；
 //!    input = 最后一个有效断点之后
 //!
 //! 请求不带任何 cache_control 时与官方一致：全部计为普通输入。
 //!
-//! 缓存表全局共享（键里含 model），条目只存哈希、累计 token 与过期时间（墙钟毫秒），
+//! 缓存按 API Key 隔离（对应官方的 workspace 级隔离），避免一个 Key 通过 cache_read
+//! 探测其他 Key 是否发送过同一前缀。条目只存哈希、档位与过期时间（墙钟毫秒），
 //! 周期性原子写入 `prompt_cache.json`，重启后读回，缓存状态可跨进程延续。
 //!
 //! 写入采用两阶段：`plan` 只读（命中刷新 TTL 除外），返回待写条目；上游成功产出
 //! 响应后才 `commit`，失败请求不产生缓存写入。
+//!
+//! 注意：这是本地模拟，让下游账单的拆分口径贴近官方，**不反映 Kiro 侧真实缓存命中与
+//! 真实成本**（真实成本以 meteringEvent 的 credits 为准）。
 
 use crate::cache::PromptCacheUsage;
 use parking_lot::Mutex;
@@ -71,7 +76,7 @@ impl Tier {
 /// 展开后的单个 block
 #[derive(Debug, Clone)]
 pub struct Block {
-    /// 累积哈希：model ‖ block[0..=i]
+    /// 累积哈希：tenant ‖ model ‖ block[0..=i]
     pub hash: [u8; 32],
     /// 截至本 block（含）的累计 token
     pub cum_tokens: i32,
@@ -83,6 +88,8 @@ pub struct Block {
 #[derive(Debug, Clone, Default)]
 pub struct CacheProfile {
     pub blocks: Vec<Block>,
+    /// 该模型的官方最小可缓存长度（未配置全局覆盖时生效）
+    pub min_tokens: i32,
 }
 
 impl CacheProfile {
@@ -90,32 +97,54 @@ impl CacheProfile {
         self.blocks.last().map_or(0, |b| b.cum_tokens)
     }
 }
-/// 剔除 `cache_control` 后做规范化 JSON：断点每轮会移动，标记本身不能进入哈希
-fn canonical_without_cache_control(v: &serde_json::Value) -> String {
-    let mut v = v.clone();
-    strip_cache_control(&mut v);
-    super::fingerprint::canonical_json(&v)
-}
-
-fn strip_cache_control(v: &mut serde_json::Value) {
+/// 跳过 block 顶层 `cache_control` 做规范化 JSON：断点每轮会移动，标记本身不能进入哈希。
+///
+/// 只剔除顶层键（与 `breakpoint_of` 的判定层级一致）：嵌套位置的同名键（如工具
+/// `input_schema` 里恰好叫 `cache_control` 的属性）属于内容本身，必须参与哈希。
+/// 直接跳过而非 clone 后删除，避免每个 block 一次深拷贝。
+fn canonical_block(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Object(m) => {
-            m.remove("cache_control");
-            m.values_mut().for_each(strip_cache_control);
+            let mut keys: Vec<&String> = m.keys().filter(|k| *k != "cache_control").collect();
+            keys.sort_unstable();
+            let parts: Vec<String> = keys
+                .into_iter()
+                .map(|k| format!("{}:{}", k, super::fingerprint::canonical_json(&m[k])))
+                .collect();
+            format!("{{{}}}", parts.join(","))
         }
-        serde_json::Value::Array(arr) => arr.iter_mut().for_each(strip_cache_control),
-        _ => {}
+        other => super::fingerprint::canonical_json(other),
     }
 }
 
-/// 请求体任意位置是否带有 `cache_control`
-pub fn has_cache_control(v: &serde_json::Value) -> bool {
-    match v {
-        serde_json::Value::Object(m) => {
-            m.contains_key("cache_control") || m.values().any(has_cache_control)
-        }
-        serde_json::Value::Array(arr) => arr.iter().any(has_cache_control),
-        _ => false,
+/// 请求是否带有 `cache_control`：只看顶层与 tools / system / messages 的 block 层，
+/// 与 `build_profile` 识别断点的位置一致（不扫描 `input_schema` 等内容内部）
+pub fn has_cache_control(body: &serde_json::Value) -> bool {
+    let marked = |v: &serde_json::Value| v.get("cache_control").is_some();
+    let array = |k: &str| body.get(k).and_then(|v| v.as_array());
+    marked(body)
+        || array("tools").is_some_and(|tools| tools.iter().any(marked))
+        || array("system").is_some_and(|blocks| blocks.iter().any(marked))
+        || array("messages").is_some_and(|msgs| {
+            msgs.iter().any(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .is_some_and(|blocks| blocks.iter().any(marked))
+            })
+        })
+}
+
+/// Anthropic 官方各模型的最小可缓存长度（入参为 `map_model` 映射后的 Kiro 模型 ID）。
+///
+/// 数据来源：platform.claude.com prompt caching 文档 "Cache limitations"。
+/// 未列出的模型（含非 Claude 模型）按 1024 处理。
+pub fn min_cacheable_tokens(kiro_model: &str) -> i32 {
+    match kiro_model {
+        "claude-opus-5.5" | "claude-opus-5" | "claude-sonnet-5.5" | "claude-fable-5"
+        | "claude-haiku-5.5" => 512,
+        "claude-opus-4.7" => 2048,
+        "claude-opus-4.6" | "claude-opus-4.5" | "claude-haiku-4.5" => 4096,
+        _ => 1024,
     }
 }
 
@@ -156,14 +185,17 @@ fn count_tool_tokens(tool: &serde_json::Value) -> u64 {
 /// 直接解析原始 body 而不是 `MessagesRequest`：类型化结构的 `SystemMessage` / `Tool`
 /// 在反序列化时会丢掉 `cache_control`。token 计数与 `token::count_all_tokens` 同口径
 /// （同一 `count_tokens` / `count_content_block`），保证比例换算不失真。
-pub fn build_profile(body: &serde_json::Value, model: &str) -> CacheProfile {
+///
+/// - `tenant`：缓存隔离域（API Key 标识），并入哈希起点
+/// - `kiro_model`：映射后的 Kiro 模型 ID，同一模型的不同写法共享缓存
+pub fn build_profile(body: &serde_json::Value, tenant: &str, kiro_model: &str) -> CacheProfile {
     // (规范化内容, token, 断点)
     let mut segs: Vec<(String, u64, Option<Tier>)> = Vec::new();
 
     if let Some(tools) = body.get("tools").and_then(|v| v.as_array()) {
         for tool in tools {
             segs.push((
-                format!("T:{}", canonical_without_cache_control(tool)),
+                format!("T:{}", canonical_block(tool)),
                 count_tool_tokens(tool),
                 breakpoint_of(tool),
             ));
@@ -178,7 +210,7 @@ pub fn build_profile(body: &serde_json::Value, model: &str) -> CacheProfile {
             for b in blocks {
                 let text = b.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 segs.push((
-                    format!("S:{}", canonical_without_cache_control(b)),
+                    format!("S:{}", canonical_block(b)),
                     crate::token::count_tokens(text),
                     breakpoint_of(b),
                 ));
@@ -198,7 +230,7 @@ pub fn build_profile(body: &serde_json::Value, model: &str) -> CacheProfile {
                     for (i, b) in blocks.iter().enumerate() {
                         // 块序号进键：同一消息内拆分方式不同时不应误命中
                         segs.push((
-                            format!("M:{role}:{i}:{}", canonical_without_cache_control(b)),
+                            format!("M:{role}:{i}:{}", canonical_block(b)),
                             crate::token::count_content_block(b),
                             breakpoint_of(b),
                         ));
@@ -218,8 +250,10 @@ pub fn build_profile(body: &serde_json::Value, model: &str) -> CacheProfile {
     }
 
     let mut hasher = Sha256::new();
-    hasher.update(model.as_bytes());
-    hasher.update([0u8]);
+    for part in [tenant, kiro_model] {
+        hasher.update((part.len() as u64).to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
     let mut cum: u64 = 0;
     let blocks = segs
         .into_iter()
@@ -236,8 +270,12 @@ pub fn build_profile(body: &serde_json::Value, model: &str) -> CacheProfile {
         })
         .collect();
 
-    CacheProfile { blocks }
+    CacheProfile {
+        blocks,
+        min_tokens: min_cacheable_tokens(kiro_model),
+    }
 }
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct Entry {
     tier: Tier,
@@ -290,23 +328,44 @@ pub struct CacheAccounting {
 }
 
 impl CacheAccounting {
-    /// 从原始请求体构建画像并立即 plan（须在转发上游前调用）
-    pub fn from_request(cache: &Arc<BreakpointCache>, body: &[u8], model: &str) -> Option<Self> {
+    /// 从原始请求体构建画像并立即 plan（须在转发上游前调用）。
+    ///
+    /// 解析 JSON、规范化与 BPE 计数对大上下文是可观的 CPU 开销，放到 blocking 线程池，
+    /// 不占用异步 worker。`tenant` 为缓存隔离域（API Key 标识），`kiro_model` 为映射后的模型 ID。
+    pub async fn from_request(
+        cache: &Arc<BreakpointCache>,
+        body: bytes::Bytes,
+        tenant: String,
+        kiro_model: String,
+    ) -> Option<Self> {
+        let cache = Arc::clone(cache);
+        tokio::task::spawn_blocking(move || {
+            Self::from_request_blocking(cache, &body, &tenant, &kiro_model)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    fn from_request_blocking(
+        cache: Arc<BreakpointCache>,
+        body: &[u8],
+        tenant: &str,
+        kiro_model: &str,
+    ) -> Option<Self> {
         let raw: serde_json::Value = serde_json::from_slice(body).ok()?;
-        let plan = cache.plan(&build_profile(&raw, model));
+        let plan = cache.plan(&build_profile(&raw, tenant, kiro_model));
         tracing::info!(
-            "[prompt-cache] plan: model={} total={} read={} creation_5m={} creation_1h={} pending_writes={}",
-            model,
+            "[prompt-cache] plan: tenant={} model={} total={} read={} creation_5m={} creation_1h={} pending_writes={}",
+            tenant,
+            kiro_model,
             plan.total,
             plan.read,
             plan.creation_5m,
             plan.creation_1h,
             plan.pending.entries.len()
         );
-        Some(Self {
-            cache: Arc::clone(cache),
-            plan,
-        })
+        Some(Self { cache, plan })
     }
 
     pub fn usage_for(&self, final_input_tokens: i32) -> PromptCacheUsage {
@@ -330,21 +389,23 @@ fn now_ms() -> u64 {
 #[derive(Debug)]
 pub struct BreakpointCache {
     table: Mutex<HashMap<[u8; 32], Entry>>,
-    min_tokens: i32,
+    /// 最小可缓存长度的全局覆盖；None 时按模型取官方值（`CacheProfile::min_tokens`）
+    min_tokens_override: Option<i32>,
     snapshot_path: Option<PathBuf>,
     dirty: AtomicBool,
 }
 
 impl BreakpointCache {
-    /// 创建并从快照恢复；`snapshot_path` 为 None 时纯内存（测试用）
-    pub fn new(min_tokens: i32, snapshot_path: Option<PathBuf>) -> Self {
+    /// 创建并从快照恢复；`snapshot_path` 为 None 时纯内存（测试用）。
+    /// `min_tokens_override <= 0` 表示按模型使用官方最小可缓存长度。
+    pub fn new(min_tokens_override: i32, snapshot_path: Option<PathBuf>) -> Self {
         let table = snapshot_path
             .as_ref()
             .map(|p| load_snapshot(p))
             .unwrap_or_default();
         Self {
             table: Mutex::new(table),
-            min_tokens: min_tokens.max(0),
+            min_tokens_override: (min_tokens_override > 0).then_some(min_tokens_override),
             snapshot_path,
             dirty: AtomicBool::new(false),
         }
@@ -402,9 +463,10 @@ impl BreakpointCache {
             ..Default::default()
         };
         let mut prev = read;
+        let min_tokens = self.min_tokens_override.unwrap_or(profile.min_tokens);
         for &bp in bps.iter().filter(|&&bp| hit.is_none_or(|h| bp > h)) {
             let b = &blocks[bp];
-            if b.cum_tokens < self.min_tokens || b.cum_tokens <= prev {
+            if b.cum_tokens < min_tokens || b.cum_tokens <= prev {
                 continue;
             }
             let seg = b.cum_tokens - prev;
@@ -568,7 +630,7 @@ mod tests {
     }
 
     fn run(cache: &BreakpointCache, body: &serde_json::Value, now: u64) -> CachePlan {
-        let profile = build_profile(body, "claude-opus-5-5");
+        let profile = build_profile(body, "t", "claude-opus-5-5");
         let plan = cache.plan_at(&profile, now);
         cache.commit_at(&plan.pending, now);
         plan
@@ -591,7 +653,7 @@ mod tests {
 
     #[test]
     fn no_cache_control_is_plain_input() {
-        let cache = BreakpointCache::new(0, None);
+        let cache = BreakpointCache::new(1, None);
         let body = json!({"model":"m","system":"sys","messages":[{"role":"user","content":"hi"}]});
         let p = run(&cache, &body, T0);
         assert_eq!((p.read, p.creation_5m, p.creation_1h), (0, 0, 0));
@@ -634,7 +696,7 @@ mod tests {
 
     #[test]
     fn one_hour_tier_split() {
-        let cache = BreakpointCache::new(0, None);
+        let cache = BreakpointCache::new(1, None);
         let body = json!({"model":"m",
             "system":[{"type":"text","text":long("sys", 300),"cache_control":{"type":"ephemeral","ttl":"1h"}}],
             "messages":[{"role":"user","content":[{"type":"text","text":long("q", 50),"cache_control":{"type":"ephemeral"}}]}]});
@@ -648,8 +710,8 @@ mod tests {
         let a = json!({"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"x","cache_control":{"type":"ephemeral"}}]}]});
         let b = json!({"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"x"}]}]});
         assert_eq!(
-            build_profile(&a, "m").blocks[0].hash,
-            build_profile(&b, "m").blocks[0].hash
+            build_profile(&a, "t", "m").blocks[0].hash,
+            build_profile(&b, "t", "m").blocks[0].hash
         );
     }
 
@@ -657,8 +719,72 @@ mod tests {
     fn model_partitions_cache() {
         let body = cc_body(&[], "hello");
         assert_ne!(
-            build_profile(&body, "claude-opus-5-5").blocks[0].hash,
-            build_profile(&body, "claude-sonnet-5").blocks[0].hash
+            build_profile(&body, "t", "claude-opus-5-5").blocks[0].hash,
+            build_profile(&body, "t", "claude-sonnet-5").blocks[0].hash
+        );
+    }
+
+    #[test]
+    fn tenant_partitions_cache() {
+        // 评审意见：缓存按 API Key 隔离，B 不能通过 cache_read 探测 A 发过的前缀
+        let cache = BreakpointCache::new(1, None);
+        let body = cc_body(&[], "hello");
+        let a = build_profile(&body, "key:1", "claude-opus-5.5");
+        let pa = cache.plan_at(&a, T0);
+        cache.commit_at(&pa.pending, T0);
+        let b = build_profile(&body, "key:2", "claude-opus-5.5");
+        assert_eq!(cache.plan_at(&b, T0 + 1000).read, 0, "其他 Key 不命中");
+        assert!(cache.plan_at(&a, T0 + 1000).read > 0, "同一 Key 命中");
+    }
+
+    #[test]
+    fn nested_cache_control_in_schema_is_content_not_breakpoint() {
+        // 评审意见：input_schema 里名为 cache_control 的属性不是断点
+        let schema = json!({"type":"object","properties":{"cache_control":{"type":"string"}}});
+        let body = json!({"model":"m",
+            "tools":[{"name":"t","description":"d","input_schema":schema}],
+            "messages":[{"role":"user","content":"hi"}]});
+        assert!(!has_cache_control(&body));
+        let mut injected = body.clone();
+        ensure_auto_cache_control(&mut injected);
+        assert_eq!(injected["cache_control"]["type"], "ephemeral");
+
+        // 嵌套同名键参与哈希：schema 不同则前缀不同
+        let other = json!({"model":"m",
+            "tools":[{"name":"t","description":"d","input_schema":{"type":"object","properties":{"cache_control":{"type":"number"}}}}],
+            "messages":[{"role":"user","content":"hi"}]});
+        assert_ne!(
+            build_profile(&body, "t", "m").blocks[0].hash,
+            build_profile(&other, "t", "m").blocks[0].hash
+        );
+    }
+
+    #[test]
+    fn min_cacheable_tokens_per_model() {
+        assert_eq!(min_cacheable_tokens("claude-opus-5.5"), 512);
+        assert_eq!(min_cacheable_tokens("claude-opus-4.7"), 2048);
+        assert_eq!(min_cacheable_tokens("claude-opus-4.6"), 4096);
+        assert_eq!(min_cacheable_tokens("claude-haiku-4.5"), 4096);
+        assert_eq!(min_cacheable_tokens("claude-sonnet-4.6"), 1024);
+        assert_eq!(min_cacheable_tokens("deepseek-3.2"), 1024);
+    }
+
+    #[test]
+    fn per_model_min_applies_without_override() {
+        // ~2400 token 前缀：Opus 5.5（512）可缓存，Haiku 4.5（4096）不可缓存
+        let cache = BreakpointCache::new(0, None);
+        let body = cc_body(&[], "hello");
+        let opus = cache.plan_at(&build_profile(&body, "t", "claude-opus-5.5"), T0);
+        assert!(opus.creation_5m > 0);
+        let haiku = cache.plan_at(&build_profile(&body, "t", "claude-haiku-4.5"), T0);
+        assert_eq!(haiku.creation_5m, 0);
+        // 显式覆盖优先于按模型取值
+        let forced = BreakpointCache::new(1, None);
+        assert!(
+            forced
+                .plan_at(&build_profile(&body, "t", "claude-haiku-4.5"), T0)
+                .creation_5m
+                > 0
         );
     }
 
@@ -666,7 +792,7 @@ mod tests {
     fn top_level_cache_control_marks_last_block() {
         let body = json!({"model":"m","cache_control":{"type":"ephemeral"},
             "messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"c"}]});
-        let p = build_profile(&body, "m");
+        let p = build_profile(&body, "t", "m");
         assert_eq!(p.blocks.last().unwrap().breakpoint, Some(Tier::FiveM));
         assert!(
             p.blocks[..p.blocks.len() - 1]
@@ -689,7 +815,7 @@ mod tests {
 
     #[test]
     fn lookback_window_limits_hits() {
-        let cache = BreakpointCache::new(0, None);
+        let cache = BreakpointCache::new(1, None);
         // 首轮：单条消息带断点
         let mut msgs = vec![
             json!({"role":"user","content":[{"type":"text","text":long("w", 50),"cache_control":{"type":"ephemeral"}}]}),
@@ -710,8 +836,8 @@ mod tests {
 
     #[test]
     fn plan_without_commit_does_not_write() {
-        let cache = BreakpointCache::new(0, None);
-        let profile = build_profile(&cc_body(&[], "hello"), "m");
+        let cache = BreakpointCache::new(1, None);
+        let profile = build_profile(&cc_body(&[], "hello"), "t", "m");
         let p = cache.plan_at(&profile, T0);
         assert!(!p.pending.entries.is_empty());
         assert_eq!(cache.len(), 0);
@@ -743,7 +869,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         {
             let cache = BreakpointCache::new(1024, Some(path.clone()));
-            let profile = build_profile(&cc_body(&[], "hello"), "claude-opus-5-5");
+            let profile = build_profile(&cc_body(&[], "hello"), "t", "claude-opus-5-5");
             let plan = cache.plan(&profile);
             cache.commit(&plan.pending);
             cache.save_snapshot();
@@ -752,6 +878,7 @@ mod tests {
         assert!(cache.len() > 0, "重启后从快照恢复");
         let p = cache.plan(&build_profile(
             &cc_body(&[("hello", "hi")], "x"),
+            "t",
             "claude-opus-5-5",
         ));
         assert!(p.read > 0);

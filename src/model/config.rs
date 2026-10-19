@@ -44,9 +44,9 @@ fn default_true() -> bool {
     true
 }
 
-/// Anthropic 官方最小可缓存长度（Sonnet 等为 1024；部分 Opus/Haiku 更高，可按需调大）
+/// 0 = 按模型使用 Anthropic 官方最小可缓存长度（见 `cache::breakpoint::min_cacheable_tokens`）
 fn default_prompt_cache_min_tokens() -> i32 {
-    1024
+    0
 }
 
 fn default_fingerprint_enabled() -> bool {
@@ -175,9 +175,16 @@ pub struct Config {
     #[serde(default)]
     pub prompt_cache_accounting: bool,
 
-    /// 断点模拟的最小可缓存长度（token），低于此值的断点不建缓存条目
+    /// 断点模拟最小可缓存长度的全局覆盖（token）。默认 0 = 按模型取官方值
+    /// （512 / 1024 / 2048 / 4096 不等）；> 0 时对所有模型统一使用该值
     #[serde(default = "default_prompt_cache_min_tokens")]
     pub prompt_cache_min_tokens: i32,
+
+    /// `/v1/models` 是否为点号模型 ID 追加官方连字符别名（如 `claude-opus-4.6` →
+    /// `claude-opus-4-6`）。供按模型列表生成映射的下游网关使用；默认 false，
+    /// 避免 Claude Code 模型选择器出现重复项
+    #[serde(default)]
+    pub models_official_aliases: bool,
 
     /// 对客户端上报的 output_tokens 是否包含 thinking（Anthropic 官方口径为包含）。
     /// 默认 false 保持既有行为（仅可见输出）。
@@ -312,6 +319,7 @@ impl Default for Config {
             client_token_passthrough: false,
             prompt_cache_accounting: false,
             prompt_cache_min_tokens: default_prompt_cache_min_tokens(),
+            models_official_aliases: false,
             output_tokens_include_thinking: false,
             forward_suggestion_mode: false,
             thinking_as_text: true,
@@ -434,6 +442,11 @@ impl Config {
             && let Ok(n) = v.parse::<i32>()
         {
             self.prompt_cache_min_tokens = n;
+        }
+        if let Ok(v) = env::var("MODELS_OFFICIAL_ALIASES")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.models_official_aliases = b;
         }
         if let Ok(v) = env::var("OUTPUT_TOKENS_INCLUDE_THINKING")
             && let Ok(b) = v.parse::<bool>()

@@ -51,9 +51,14 @@ pub(crate) async fn fetch_models_dynamic(state: &AppState) -> Vec<Model> {
     // 缓存缺失/过期，尝试刷新上游（仅此处涉及网络；结果归一化为 Option<Vec<Model>>）
     let refreshed: Option<Vec<Model>> = match provider.token_manager().list_available_models().await
     {
-        Ok(resp) if !resp.models.is_empty() => Some(with_official_aliases(
-            resp.models.iter().map(available_model_to_model).collect(),
-        )),
+        Ok(resp) if !resp.models.is_empty() => {
+            let models: Vec<Model> = resp.models.iter().map(available_model_to_model).collect();
+            Some(if models_official_aliases_enabled() {
+                with_official_aliases(models)
+            } else {
+                models
+            })
+        }
         Ok(_) => {
             tracing::warn!("上游模型列表为空，回退缓存/静态表");
             None
@@ -65,6 +70,19 @@ pub(crate) async fn fetch_models_dynamic(state: &AppState) -> Vec<Model> {
     };
 
     resolve_after_refresh(&state.model_cache, refreshed)
+}
+
+/// `/v1/models` 官方连字符别名开关（config `modelsOfficialAliases`，默认 false）
+static MODELS_OFFICIAL_ALIASES: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 设置官方别名开关（main.rs 启动时按 config 调用）
+pub fn set_models_official_aliases(enabled: bool) {
+    MODELS_OFFICIAL_ALIASES.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn models_official_aliases_enabled() -> bool {
+    MODELS_OFFICIAL_ALIASES.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// 4.5 代际在 Anthropic 官方只有带日期的模型 ID（Kiro 点号 ID → 官方 ID）

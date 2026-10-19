@@ -189,9 +189,25 @@ pub async fn post_messages(
 
     // 构造 fingerprint profile（在消耗 payload 前 clone system/messages）
     // 断点缓存记账：按原始 body 的 cache_control 断点 plan（类型化 payload 已丢弃 cache_control）
-    let cache_accounting = state.breakpoint_cache.as_ref().and_then(|cache| {
-        crate::cache::breakpoint::CacheAccounting::from_request(cache, &body, &payload.model)
-    });
+    // 缓存按 API Key 隔离（无 Key 上下文时归入同一匿名域）；模型取映射后的 Kiro ID，
+    // 同一模型的不同写法（claude-opus-4-6 / claude-opus-4.6）共享缓存
+    let cache_accounting = match state.breakpoint_cache.as_ref() {
+        Some(cache) => {
+            let tenant = identity
+                .as_ref()
+                .map_or_else(|| "anon".to_string(), |ext| format!("key:{}", ext.0.id));
+            let kiro_model = crate::anthropic::converter::map_model(&payload.model)
+                .unwrap_or_else(|| payload.model.clone());
+            crate::cache::breakpoint::CacheAccounting::from_request(
+                cache,
+                body.clone(),
+                tenant,
+                kiro_model,
+            )
+            .await
+        }
+        None => None,
+    };
 
     let fp_tracker = state.fingerprint_tracker.clone();
     let fp_profile = fp_tracker.as_ref().map(|_| {
