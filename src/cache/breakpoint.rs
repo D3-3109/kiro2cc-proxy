@@ -128,6 +128,22 @@ fn is_deferred_tool(tool: &serde_json::Value) -> bool {
     tool.get("defer_loading").and_then(|v| v.as_bool()) == Some(true)
 }
 
+/// 递归收集内容里 `tool_reference` 块引用的工具名（含嵌套在 `tool_result.content` 中的）
+fn collect_tool_references<'a>(v: &'a serde_json::Value, out: &mut Vec<&'a str>) {
+    match v {
+        serde_json::Value::Object(m) => {
+            if m.get("type").and_then(|t| t.as_str()) == Some("tool_reference")
+                && let Some(name) = m.get("tool_name").and_then(|n| n.as_str())
+            {
+                out.push(name);
+            }
+            m.values().for_each(|c| collect_tool_references(c, out));
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|c| collect_tool_references(c, out)),
+        _ => {}
+    }
+}
+
 /// 请求是否带有 `cache_control`：只看顶层与 tools / system / messages 的 block 层，
 /// 与 `build_profile` 识别断点的位置一致（不扫描 `input_schema` 等内容内部）
 pub fn has_cache_control(body: &serde_json::Value) -> bool {
@@ -232,6 +248,20 @@ pub fn build_profile(body: &serde_json::Value, tenant: &str, kiro_model: &str) -
         _ => {}
     }
 
+    // 延迟工具定义：不进顶层前缀，改在引用它的 tool_reference 块处展开（见下），
+    // 与 fingerprint 路径一致——否则只改被引用延迟工具的 schema 时缓存键不变，会误命中
+    let deferred_tools: std::collections::HashMap<&str, &serde_json::Value> = body
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .map(|tools| {
+            tools
+                .iter()
+                .filter(|t| is_deferred_tool(t))
+                .filter_map(|t| Some((t.get("name")?.as_str()?, t)))
+                .collect()
+        })
+        .unwrap_or_default();
+
     if let Some(messages) = body.get("messages").and_then(|v| v.as_array()) {
         for msg in messages {
             let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
@@ -242,11 +272,19 @@ pub fn build_profile(body: &serde_json::Value, tenant: &str, kiro_model: &str) -
                 Some(serde_json::Value::Array(blocks)) => {
                     for (i, b) in blocks.iter().enumerate() {
                         // 块序号进键：同一消息内拆分方式不同时不应误命中
-                        segs.push((
-                            format!("M:{role}:{i}:{}", canonical_block(b)),
-                            crate::token::count_content_block(b),
-                            breakpoint_of(b),
-                        ));
+                        let mut key = format!("M:{role}:{i}:{}", canonical_block(b));
+                        let mut tokens = crate::token::count_content_block(b);
+                        if !deferred_tools.is_empty() {
+                            let mut refs = Vec::new();
+                            collect_tool_references(b, &mut refs);
+                            for name in refs {
+                                if let Some(tool) = deferred_tools.get(name) {
+                                    key.push_str(&format!("|D:{}", canonical_block(tool)));
+                                    tokens = tokens.saturating_add(count_tool_tokens(tool));
+                                }
+                            }
+                        }
+                        segs.push((key, tokens, breakpoint_of(b)));
                     }
                 }
                 _ => {}
@@ -824,6 +862,43 @@ mod tests {
         b3["tools"] = json!([tool("Read", false), tool("Write", false)]);
         let p3 = cache.plan_at(&build_profile(&b3, "t", "claude-opus-5-5"), T0 + 2000);
         assert_eq!(p3.read, 0, "非延迟工具变更应使前缀失效");
+    }
+
+    #[test]
+    fn referenced_deferred_tool_definition_is_part_of_the_reference_block_key() {
+        let build = |desc: &str, referenced: bool| {
+            let mut ref_content = vec![json!({"type":"text","text":"loaded"})];
+            if referenced {
+                ref_content.push(json!({"type":"tool_reference","tool_name":"mcp__x__search"}));
+            }
+            let body = json!({
+                "model": "claude-opus-5-5",
+                "tools": [
+                    {"name":"Read","description":"d","input_schema":{"type":"object"}},
+                    {"name":"mcp__x__search","description":desc,"defer_loading":true,
+                     "input_schema":{"type":"object"}}
+                ],
+                "messages": [
+                    {"role":"user","content":[{"type":"text","text":"hi"}]},
+                    {"role":"user","content":[
+                        {"type":"tool_result","tool_use_id":"t1","content":ref_content}
+                    ]}
+                ],
+            });
+            build_profile(&body, "t", "claude-opus-5-5")
+        };
+        let hashes = |p: &CacheProfile| p.blocks.iter().map(|b| b.hash).collect::<Vec<_>>();
+
+        // 被引用的延迟工具改了描述：引用块（最后一段）哈希必须变，之前的段不变
+        let (a, b) = (build("v1", true), build("v2", true));
+        let (ha, hb) = (hashes(&a), hashes(&b));
+        assert_eq!(ha.len(), hb.len());
+        let last = ha.len() - 1;
+        assert_eq!(ha[..last], hb[..last]);
+        assert_ne!(ha[last], hb[last], "引用处必须带上延迟工具定义");
+
+        // 没被引用的延迟工具改动：不影响任何段（Tool Search 契约）
+        assert_eq!(hashes(&build("v1", false)), hashes(&build("v2", false)));
     }
 
     #[test]
