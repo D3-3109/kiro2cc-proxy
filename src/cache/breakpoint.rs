@@ -339,12 +339,18 @@ impl CacheAccounting {
         kiro_model: String,
     ) -> Option<Self> {
         let cache = Arc::clone(cache);
-        tokio::task::spawn_blocking(move || {
+        match tokio::task::spawn_blocking(move || {
             Self::from_request_blocking(cache, &body, &tenant, &kiro_model)
         })
         .await
-        .ok()
-        .flatten()
+        {
+            Ok(accounting) => accounting,
+            Err(e) => {
+                // 记账失败不影响请求（回落到前缀估算），但要留线索
+                tracing::warn!("[prompt-cache] 记账画像任务失败: {}", e);
+                None
+            }
+        }
     }
 
     fn from_request_blocking(
@@ -501,7 +507,8 @@ impl BreakpointCache {
             );
         }
         if table.len() > MAX_ENTRIES {
-            evict_oldest(&mut table, MAX_ENTRIES);
+            // 淘汰到上限的 90%：留出滞回，避免表满后每次 commit 都对全表排序（且持锁）
+            evict_oldest(&mut table, MAX_ENTRIES / 10 * 9);
         }
         self.dirty.store(true, Ordering::Relaxed);
     }
@@ -526,12 +533,13 @@ impl BreakpointCache {
         if !self.dirty.swap(false, Ordering::Relaxed) {
             return;
         }
-        let snapshot: HashMap<String, Entry> = self
-            .table
-            .lock()
-            .iter()
-            .map(|(k, v)| (hex::encode(k), *v))
-            .collect();
+        // 持锁只做 Copy 级拷贝；hex 编码与序列化在锁外，避免大表时阻塞 plan/commit
+        let raw: Vec<([u8; 32], Entry)> = {
+            let table = self.table.lock();
+            table.iter().map(|(k, v)| (*k, *v)).collect()
+        };
+        let snapshot: HashMap<String, Entry> =
+            raw.into_iter().map(|(k, v)| (hex::encode(k), v)).collect();
         let bytes = match serde_json::to_vec(&snapshot) {
             Ok(b) => b,
             Err(e) => {
@@ -556,19 +564,28 @@ impl BreakpointCache {
                 tick.tick().await;
                 let this = Arc::clone(&this);
                 // 快照写盘是同步 IO，放到 blocking 线程池
-                let _ = tokio::task::spawn_blocking(move || {
+                if let Err(e) = tokio::task::spawn_blocking(move || {
                     this.evict_expired();
                     this.save_snapshot();
                 })
-                .await;
+                .await
+                {
+                    tracing::warn!("[prompt-cache] 后台维护任务异常: {}", e);
+                }
             }
         });
     }
 }
 
 fn load_snapshot(path: &std::path::Path) -> HashMap<[u8; 32], Entry> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return HashMap::new();
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        // 首次运行没有快照文件，属正常情况
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return HashMap::new(),
+        Err(e) => {
+            tracing::warn!("[prompt-cache] 快照读取失败 {}: {}", path.display(), e);
+            return HashMap::new();
+        }
     };
     let raw: HashMap<String, Entry> = match serde_json::from_slice(&bytes) {
         Ok(m) => m,

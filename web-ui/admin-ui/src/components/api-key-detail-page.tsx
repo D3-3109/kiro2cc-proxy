@@ -141,20 +141,23 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
       {summary && summary.byModel.length > 0 && (
         <div className="mt-[15px]">
           {/* 标题行整行可点击折叠；保留 panel-title 视觉，chevron 指示折叠方向 */}
-          <button
-            type="button"
-            onClick={toggleModelPanel}
-            aria-expanded={modelOpen}
-            aria-controls={modelBodyId}
-            className={`${PANEL_TITLE} flex w-full items-center gap-[5px] text-left transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand`}
-          >
-            <ChevronDown
-              className={`size-[13px] flex-none transition-transform ${modelOpen ? '' : '-rotate-90'}`}
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-            {t('apiKeys.byModelTitle')}
-          </button>
+          {/* h3 包住 button：保留标题语义，屏幕阅读器可按标题导航到该区块 */}
+          <h3 className={`${PANEL_TITLE} m-0`}>
+            <button
+              type="button"
+              onClick={toggleModelPanel}
+              aria-expanded={modelOpen}
+              aria-controls={modelBodyId}
+              className="flex w-full items-center gap-[5px] text-left transition-colors hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >
+              <ChevronDown
+                className={`size-[13px] flex-none transition-transform ${modelOpen ? '' : '-rotate-90'}`}
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              {t('apiKeys.byModelTitle')}
+            </button>
+          </h3>
           {/* 折叠时保留 DOM 并置 hidden，避免 aria-controls 指向已卸载节点 */}
           <section id={modelBodyId} aria-label={t('apiKeys.byModelTitle')} className={PANEL} hidden={!modelOpen}>
             <div className="max-h-[42vh] overflow-y-auto">
