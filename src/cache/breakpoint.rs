@@ -109,12 +109,23 @@ fn canonical_block(v: &serde_json::Value) -> String {
             keys.sort_unstable();
             let parts: Vec<String> = keys
                 .into_iter()
-                .map(|k| format!("{}:{}", k, super::fingerprint::canonical_json(&m[k])))
+                .map(|k| {
+                    format!(
+                        "{}:{}",
+                        super::fingerprint::json_key(k),
+                        super::fingerprint::canonical_json(&m[k])
+                    )
+                })
                 .collect();
             format!("{{{}}}", parts.join(","))
         }
         other => super::fingerprint::canonical_json(other),
     }
+}
+
+/// 工具是否为延迟加载（`defer_loading: true`）
+fn is_deferred_tool(tool: &serde_json::Value) -> bool {
+    tool.get("defer_loading").and_then(|v| v.as_bool()) == Some(true)
 }
 
 /// 请求是否带有 `cache_control`：只看顶层与 tools / system / messages 的 block 层，
@@ -193,7 +204,9 @@ pub fn build_profile(body: &serde_json::Value, tenant: &str, kiro_model: &str) -
     let mut segs: Vec<(String, u64, Option<Tier>)> = Vec::new();
 
     if let Some(tools) = body.get("tools").and_then(|v| v.as_array()) {
-        for tool in tools {
+        // Tool Search 契约（与 fingerprint 路径一致，见 types.rs Tool.defer_loading）：
+        // defer_loading=true 的工具不进入顶层前缀，否则中途增减延迟工具会使 system/历史全部失效
+        for tool in tools.iter().filter(|t| !is_deferred_tool(t)) {
             segs.push((
                 format!("T:{}", canonical_block(tool)),
                 count_tool_tokens(tool),
@@ -774,6 +787,43 @@ mod tests {
             build_profile(&body, "t", "m").blocks[0].hash,
             build_profile(&other, "t", "m").blocks[0].hash
         );
+    }
+
+    #[test]
+    fn object_keys_are_escaped_in_canonical_form() {
+        // CR：键 "a:1,b" 与两个键 a、b 不能规范化成同一串
+        let two_keys = json!({"type":"tool_use","id":"x","name":"n","input":{"a":1,"b":2}});
+        let one_key = json!({"type":"tool_use","id":"x","name":"n","input":{"a:1,b":2}});
+        assert_ne!(canonical_block(&two_keys), canonical_block(&one_key));
+    }
+
+    #[test]
+    fn deferred_tools_do_not_enter_top_level_prefix() {
+        // CR：defer_loading=true 的工具不进顶层前缀；中途新增延迟工具不应使旧前缀失效
+        let cache = BreakpointCache::new(1, None);
+        let tool = |name: &str, deferred: bool| {
+            let mut t = json!({"name":name,"description":"d","input_schema":{"type":"object"}});
+            if deferred {
+                t["defer_loading"] = json!(true);
+            }
+            t
+        };
+        let mut b1 = cc_body(&[], "hello");
+        b1["tools"] = json!([tool("Read", false)]);
+        let p1 = run(&cache, &b1, T0);
+        assert_eq!(p1.read, 0);
+
+        // 次轮：追加一个延迟加载工具，其余前缀不变
+        let mut b2 = cc_body(&[("hello", "hi there")], "next question");
+        b2["tools"] = json!([tool("Read", false), tool("mcp__x__search", true)]);
+        let p2 = run(&cache, &b2, T0 + 1000);
+        assert!(p2.read >= p1.total, "新增延迟工具后上一轮前缀仍应命中");
+
+        // 对照：追加的是非延迟工具则必须破坏前缀
+        let mut b3 = cc_body(&[("hello", "hi there")], "next question");
+        b3["tools"] = json!([tool("Read", false), tool("Write", false)]);
+        let p3 = cache.plan_at(&build_profile(&b3, "t", "claude-opus-5-5"), T0 + 2000);
+        assert_eq!(p3.read, 0, "非延迟工具变更应使前缀失效");
     }
 
     #[test]

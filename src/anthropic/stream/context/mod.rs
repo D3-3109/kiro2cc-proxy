@@ -999,12 +999,16 @@ impl StreamContext {
         }
         // 断点记账：响应已完整产出，提交本请求的缓存写入；5m/1h 按断点 ttl 拆分。
         // 未开启时 cache_creation 全部归到 5m（与非流式 metering Layer 1 一致）
+        // 本地写入的提交与上报口径解耦：即便本次用 metering 真值上报也要提交，
+        // 否则后续请求回落到本地模拟时（如换到不返回缓存字段的端点）读不到这次的前缀
+        if let Some(acc) = &self.cache_accounting {
+            acc.commit();
+        }
         let (report_creation_5m, report_creation_1h) = match &self.cache_accounting {
             Some(acc)
                 if self.metering_cache_read_tokens.is_none()
                     || self.metering_cache_creation_tokens.is_none() =>
             {
-                acc.commit();
                 let u = acc.usage_for(final_input_tokens);
                 (
                     Some(u.cache_creation_5m_input_tokens),

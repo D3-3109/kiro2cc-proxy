@@ -638,12 +638,14 @@ pub(crate) async fn handle_non_stream_request(
         }
         _ => None,
     };
+    // 本地写入的提交与上报口径解耦：即便本次用 metering 真值上报也要提交，
+    // 否则后续请求回落到本地模拟时（如换到不返回缓存字段的端点）读不到这次的前缀
+    if let Some(acc) = &cache_accounting {
+        acc.commit();
+    }
     let final_usage = match (&cache_accounting, metering_pair) {
-        // 断点记账：metering 未透传缓存真值时取代前缀估算，并提交本请求的缓存写入
-        (Some(acc), None) => {
-            acc.commit();
-            acc.usage_for(final_input_tokens)
-        }
+        // 断点记账：metering 未透传缓存真值时取代前缀估算
+        (Some(acc), None) => acc.usage_for(final_input_tokens),
         _ => crate::cache::select_final_usage(
             final_input_tokens,
             metering_pair,
