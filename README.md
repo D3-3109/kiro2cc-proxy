@@ -953,6 +953,7 @@ MIT
 
 感谢所有为本项目做出贡献的开发者（排名不分先后）：
 
+- [jayus71](https://github.com/jayus71)
 - [fhy12130-afk](https://github.com/fhy12130-afk)
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
