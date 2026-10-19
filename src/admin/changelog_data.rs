@@ -2,8 +2,8 @@
 //! 更新日志静态数据
 //!
 //! 与 `build_model_list()`（`src/anthropic/handlers.rs`）同模式：编译期硬编码，
-//! 随代码发布同步维护。新增版本时在 `build_release_notes()` 顶部追加一条，
-//! 并将上一条的 `is_latest` 改回 `false`。
+//! 随代码发布同步维护。新增版本时在 `build_release_notes()` 顶部追加一条即可，
+//! `is_latest` 由 `CURRENT_VERSION` 与条目 `version` 自动比对设定，无需手工修改。
 
 /// 中英双语文案
 #[derive(Debug, Clone)]
@@ -66,6 +66,32 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// bump Cargo.toml 后无需手动改此标记。
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
+        ReleaseNote {
+            version: "3.4.31".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "新增 promptCacheAccounting 开关：按 Anthropic cache_control 断点规则在本地模拟缓存记账，cache_read / cache_creation（含 5m/1h 拆分）按请求断点、20 block 回看与 TTL 计算，取代「除最后一条外全部计为缓存读」的前缀估算；缓存按 API Key 隔离并落盘 prompt_cache.json，重启后恢复，OpenAI 兼容端点按自动前缀缓存处理。配套 promptCacheMinTokens 覆盖最小可缓存长度，outputTokensIncludeThinking 让上报的 output_tokens 含 thinking（官方口径）。默认关闭，行为与此前一致（本地模拟，不代表 Kiro 真实成本）",
+                        "New promptCacheAccounting switch: simulates prompt cache accounting locally following Anthropic cache_control breakpoint rules — cache_read / cache_creation (including the 5m/1h split) are computed from request breakpoints, the 20-block lookback and TTL, replacing the prefix estimate that counted everything except the last message as cache reads. Caches are isolated per API Key and persisted to prompt_cache.json, restored on restart; OpenAI-compatible endpoints use automatic prefix caching. Companion options: promptCacheMinTokens overrides the minimum cacheable length, and outputTokensIncludeThinking makes reported output_tokens include thinking (official semantics). Disabled by default with unchanged behavior (local simulation, not Kiro's real cost)",
+                    ),
+                    Bilingual::new(
+                        "/v1/models 新增 modelsOfficialAliases 开关：为上游点号模型 ID 追加官方连字符别名（如 claude-opus-4.6 → claude-opus-4-6，4.5 代际额外追加带日期 ID），供按模型列表生成映射的下游网关使用；默认关闭，避免 Claude Code 模型选择器出现重复项",
+                        "New modelsOfficialAliases switch for /v1/models: appends official hyphenated aliases to upstream dotted model IDs (e.g. claude-opus-4.6 → claude-opus-4-6, with dated IDs added for the 4.5 generation) for downstream gateways that build model mappings from the list; disabled by default to avoid duplicate entries in the Claude Code model picker",
+                    ),
+                ]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复 Suggestion Mode 拦截后的空响应写死 model=\"suggestion\"、output_tokens=1：改为回显请求 model 并上报零用量，避免下游按响应记账的网关误判模型不一致并产生计费",
+                        "Fixed the intercepted Suggestion Mode response hardcoding model=\"suggestion\" and output_tokens=1: it now echoes the requested model and reports zero usage, so downstream gateways that bill from responses no longer flag a model mismatch or charge for it",
+                    ),
+                    Bilingual::new(
+                        "断点记账按评审与 CR 意见收紧：缓存按 API Key + 映射后 Kiro 模型 ID 隔离，低于最小长度的断点不建条目；默认关闭路径恢复零拷贝，缓存表淘汰保留 10% 滞回，快照持锁仅复制条目、编码移到锁外，后台任务 JoinError 与快照读取失败补 warn 日志；API Key 详情页逐模型用量折叠标题恢复 h3 语义",
+                        "Tightened breakpoint accounting per review and code-review feedback: caches are isolated by API Key plus mapped Kiro model ID, breakpoints below the minimum length create no entry; the default-off path is zero-copy again, eviction keeps a 10% hysteresis, snapshots copy entries under lock and encode outside it, and warn logs cover JoinError and snapshot read failures; the per-model usage collapsible title on the API Key detail page regains h3 semantics",
+                    ),
+                ]),
+            ],
+        },
         ReleaseNote {
             version: "3.4.30".to_string(),
             is_latest: false,
