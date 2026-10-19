@@ -14,7 +14,7 @@ use crate::kiro::model::requests::conversation::{
 use crate::kiro::model::requests::tool::ToolUseEntry;
 
 use super::cache::{CacheEntry, PREV_H0, evict_oldest_if_full};
-use super::message::process_message_content;
+use super::message::process_message_content_with_tool_filter;
 use super::prompt::{
     is_dynamic_hook_injection, is_token_budget_reminder, normalize_billing_header,
 };
@@ -220,7 +220,8 @@ pub(super) fn merge_user_messages(
     let mut all_tool_results = Vec::new();
 
     for msg in messages {
-        let (text, images, tool_results) = process_message_content(&msg.content)?;
+        let (text, images, tool_results) =
+            process_message_content_with_tool_filter(&msg.content, all_images.len(), |_| true)?;
         if !text.is_empty() {
             content_parts.push(text);
         }

@@ -12,12 +12,16 @@ use super::result::ConversionError;
 pub(super) fn process_message_content(
     content: &serde_json::Value,
 ) -> Result<(String, Vec<KiroImage>, Vec<ToolResult>), ConversionError> {
-    process_message_content_with_tool_filter(content, |_| true)
+    process_message_content_with_tool_filter(content, 0, |_| true)
 }
 
 /// 过滤工具结果时，连同其内嵌图片一起过滤，保留顶层图片的原始顺序。
+///
+/// `image_offset` 是同一条 Kiro 消息里排在本内容之前的图片数（合并多条 user 消息时非 0），
+/// 用于让工具图片的序号等于它在最终 `images` 里的位置。
 pub(super) fn process_message_content_with_tool_filter(
     content: &serde_json::Value,
+    image_offset: usize,
     mut keep_tool_result: impl FnMut(&str) -> bool,
 ) -> Result<(String, Vec<KiroImage>, Vec<ToolResult>), ConversionError> {
     let mut text_parts = Vec::new();
@@ -73,6 +77,7 @@ pub(super) fn process_message_content_with_tool_filter(
                                 let result_content = extract_tool_result_content(
                                     &block.content,
                                     &tool_use_id,
+                                    image_offset,
                                     &mut images,
                                 );
                                 let is_error = block.is_error.unwrap_or(false);
@@ -117,58 +122,41 @@ pub(super) fn get_image_format(media_type: &str) -> Option<String> {
     }
 }
 
-/// 工具结果数组里的一项：文字，或一张图片（`None` 表示无法转发）。
-enum ToolResultPart {
-    Text(String),
-    Image(Option<(String, String)>),
-}
-
 /// 提取工具结果文字，同时保留 Claude Code Read 返回的内嵌图片。
 /// 工具结果文字仍放在 toolResults；图片放入同条 user 消息的 images 字段，
-/// 并在原工具结果位置留下带序号和 tool_use_id 的说明（`[Image k/N attached ...]`），
-/// 保留工具结果与附件的关系。无法转发的图片留下 `[Image omitted ...]` 占位，
-/// 避免模型把图片丢失误认为工具返回了空内容。
+/// 并在原工具结果位置留下带序号和 tool_use_id 的说明（`[Image n attached ...]`）。
+///
+/// 序号 n 是该图片在整条 user 消息 `images` 里的位置（从 1 开始，含顶层图片和
+/// 其他工具结果的图片）。Kiro 的 images 是不带标签的平铺列表，模型只能按顺序数图；
+/// 若每个工具结果各自从 1 编号（如 1/1、1/1、1/1），并行读多张图时模型无法把图对应到
+/// 工具结果。无法转发的图片留下 `[Image omitted ...]` 占位，避免模型把图片丢失
+/// 误认为工具返回了空内容。
 fn extract_tool_result_content(
     content: &Option<serde_json::Value>,
     tool_use_id: &str,
+    image_offset: usize,
     images: &mut Vec<KiroImage>,
 ) -> String {
     match content {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(serde_json::Value::Array(arr)) => {
-            let items: Vec<ToolResultPart> = arr
-                .iter()
-                .filter_map(|item| {
-                    if item.get("type").and_then(|v| v.as_str()) == Some("image") {
-                        Some(ToolResultPart::Image(parse_tool_result_image(item)))
-                    } else {
-                        item.get("text")
-                            .and_then(|v| v.as_str())
-                            .map(|text| ToolResultPart::Text(text.to_string()))
-                    }
-                })
-                .collect();
-            // 序号只给真正会附上的图片编号，所以先数一遍。
-            let total = items
-                .iter()
-                .filter(|part| matches!(part, ToolResultPart::Image(Some(_))))
-                .count();
-
             let mut parts = Vec::new();
-            let mut attached = 0;
-            for part in items {
-                match part {
-                    ToolResultPart::Text(text) => parts.push(text),
-                    ToolResultPart::Image(Some((format, data))) => {
-                        attached += 1;
-                        images.push(KiroImage::from_base64(format, data));
-                        parts.push(format!(
-                            "[Image {attached}/{total} attached from tool_result {tool_use_id}]"
-                        ));
+            for item in arr {
+                if item.get("type").and_then(|v| v.as_str()) == Some("image") {
+                    match parse_tool_result_image(item) {
+                        Some((format, data)) => {
+                            images.push(KiroImage::from_base64(format, data));
+                            let n = image_offset + images.len();
+                            parts.push(format!(
+                                "[Image {n} attached from tool_result {tool_use_id}]"
+                            ));
+                        }
+                        None => parts.push(format!(
+                            "[Image omitted from tool_result {tool_use_id}: unsupported or invalid image]"
+                        )),
                     }
-                    ToolResultPart::Image(None) => parts.push(format!(
-                        "[Image omitted from tool_result {tool_use_id}: unsupported or invalid image]"
-                    )),
+                } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                    parts.push(text.to_string());
                 }
             }
             parts.join("\n")

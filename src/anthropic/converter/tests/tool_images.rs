@@ -28,9 +28,9 @@ fn result_text(result: &ToolResult) -> String {
         .join("\n")
 }
 
-// 第 n 张 / 共 total 张已附图片；序号只在同一个 tool_result 内编号。
-fn image_marker(id: &str, n: usize, total: usize) -> String {
-    format!("[Image {n}/{total} attached from tool_result {id}]")
+// n 是该图片在整条 user 消息 images 里的位置（从 1 开始，含顶层图片）。
+fn image_marker(id: &str, n: usize) -> String {
+    format!("[Image {n} attached from tool_result {id}]")
 }
 
 // 图片未能转发时的占位，不含任何图片载荷。
@@ -61,7 +61,7 @@ fn mixed_text_and_image_tool_result_preserves_text_and_image_position() {
         result_text(&results[0]),
         format!(
             "Screenshot begins\n{}\nScreenshot ends",
-            image_marker("read_mixed", 1, 1)
+            image_marker("read_mixed", 1)
         )
     );
     assert_eq!(results[0].status.as_deref(), Some("success"));
@@ -82,7 +82,7 @@ fn image_only_tool_result_remains_nonempty_and_paired() {
     assert_eq!(images[0].source.bytes, "anBlZy1vbmx5");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].tool_use_id, "read_only");
-    assert_eq!(result_text(&results[0]), image_marker("read_only", 1, 1));
+    assert_eq!(result_text(&results[0]), image_marker("read_only", 1));
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn tool_result_with_image_keeps_error_status() {
         result_text(&results[0]),
         format!(
             "Partial screenshot; capture failed.\n{}",
-            image_marker("read_error", 1, 1)
+            image_marker("read_error", 1)
         )
     );
 }
@@ -145,14 +145,14 @@ fn multiple_tool_images_and_top_level_images_keep_original_order() {
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].tool_use_id, "read_a");
     assert_eq!(results[1].tool_use_id, "read_b");
-    assert_eq!(result_text(&results[1]), image_marker("read_b", 1, 1));
+    assert_eq!(result_text(&results[1]), image_marker("read_b", 5));
     assert!(!result_text(&results[0]).contains("read_b"));
     assert_eq!(
         result_text(&results[0]),
         format!(
             "{}\nBetween the two tool images\n{}",
-            image_marker("read_a", 1, 2),
-            image_marker("read_a", 2, 2)
+            image_marker("read_a", 2),
+            image_marker("read_a", 3)
         )
     );
 }
@@ -207,7 +207,7 @@ fn historical_and_current_tool_images_stay_with_matching_tool_ids() {
     assert_eq!(historical_results[0].tool_use_id, "read_history");
     assert_eq!(
         result_text(&historical_results[0]),
-        image_marker("read_history", 1, 1)
+        image_marker("read_history", 1)
     );
 
     let current = &state.current_message.user_input_message;
@@ -222,7 +222,7 @@ fn historical_and_current_tool_images_stay_with_matching_tool_ids() {
     assert_eq!(current_results[0].tool_use_id, "read_current");
     assert_eq!(
         result_text(&current_results[0]),
-        image_marker("read_current", 1, 1)
+        image_marker("read_current", 1)
     );
 
     let tool_ids = state
@@ -326,7 +326,7 @@ fn consumed_tool_image_is_not_resent_and_historical_image_is_preserved() {
     assert_eq!(historical_results[0].tool_use_id, "read_consumed");
     assert_eq!(
         result_text(&historical_results[0]),
-        image_marker("read_consumed", 1, 1)
+        image_marker("read_consumed", 1)
     );
 }
 
@@ -375,12 +375,9 @@ fn repeated_current_tool_id_keeps_only_first_images_and_preserves_other_tool_ord
     assert_eq!(results[1].tool_use_id, "read_second");
     assert_eq!(
         result_text(&results[0]),
-        format!(
-            "Accepted first result\n{}",
-            image_marker("read_first", 1, 1)
-        )
+        format!("Accepted first result\n{}", image_marker("read_first", 2))
     );
-    assert_eq!(result_text(&results[1]), image_marker("read_second", 1, 1));
+    assert_eq!(result_text(&results[1]), image_marker("read_second", 3));
 }
 
 #[test]
@@ -473,9 +470,80 @@ fn valid_and_invalid_images_number_only_the_attached_ones() {
         result_text(&results[0]),
         format!(
             "{}\n{}\n{}",
-            image_marker("read_partial", 1, 2),
+            image_marker("read_partial", 1),
             omitted_marker("read_partial"),
-            image_marker("read_partial", 2, 2)
+            image_marker("read_partial", 2)
         )
     );
+}
+
+#[test]
+fn parallel_tool_results_get_message_wide_image_numbers() {
+    // 并行读多张图时，每个工具结果各自从 1 编号会让模型无法把图对应到工具结果。
+    let content = json!([
+        tool_result("read_a", json!([image("image/png", "YQ==")])),
+        tool_result("read_b", json!([image("image/png", "Yg==")])),
+        tool_result("read_c", json!([image("image/png", "Yw==")]))
+    ]);
+
+    let (_, images, results) = process_message_content(&content).unwrap();
+
+    assert_eq!(images.len(), 3);
+    assert_eq!(result_text(&results[0]), image_marker("read_a", 1));
+    assert_eq!(result_text(&results[1]), image_marker("read_b", 2));
+    assert_eq!(result_text(&results[2]), image_marker("read_c", 3));
+}
+
+#[test]
+fn orphaned_tool_image_does_not_shift_numbers_of_kept_images() {
+    // 孤立结果的图片被丢弃后，保留下来的结果序号必须等于它在最终 images 里的位置。
+    let req: MessagesRequest = serde_json::from_value(json!({
+        "model": "claude-sonnet-4-6", "max_tokens": 32,
+        "messages": [
+            {"role": "user", "content": "Read the screenshot."},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "read_ok", "name": "Read", "input": {"file_path": "/tmp/ok.png"}}
+            ]},
+            {"role": "user", "content": [
+                tool_result("orphan_read", json!([image("image/png", "b3JwaGFu")])),
+                tool_result("read_ok", json!([image("image/jpeg", "a2VwdA==")]))
+            ]}
+        ]
+    }))
+    .unwrap();
+
+    let state = convert_request_with_chunking(&req, 0)
+        .unwrap()
+        .conversation_state;
+    let current = &state.current_message.user_input_message;
+
+    assert_eq!(current.images.len(), 1);
+    assert_eq!(current.images[0].source.bytes, "a2VwdA==");
+    let results = &current.user_input_message_context.tool_results;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].tool_use_id, "read_ok");
+    assert_eq!(result_text(&results[0]), image_marker("read_ok", 1));
+}
+
+#[test]
+fn merged_history_user_messages_continue_image_numbers() {
+    // 连续的 user 消息合并成一条 Kiro 消息时，序号要接着前一条继续，而不是各自从 1 开始。
+    let messages: Vec<crate::anthropic::types::Message> = serde_json::from_value(json!([
+        {"role": "user", "content": [tool_result("read_a", json!([image("image/png", "YQ==")]))]},
+        {"role": "user", "content": [
+            image("image/png", "dG9w"),
+            tool_result("read_b", json!([image("image/png", "Yg==")]))
+        ]}
+    ]))
+    .unwrap();
+    let refs = messages.iter().collect::<Vec<_>>();
+
+    let merged = super::super::history::merge_user_messages(&refs, "claude-sonnet-4-6")
+        .unwrap()
+        .user_input_message;
+
+    assert_eq!(merged.images.len(), 3);
+    let results = &merged.user_input_message_context.tool_results;
+    assert_eq!(result_text(&results[0]), image_marker("read_a", 1));
+    assert_eq!(result_text(&results[1]), image_marker("read_b", 3));
 }

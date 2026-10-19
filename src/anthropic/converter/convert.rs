@@ -198,17 +198,19 @@ pub(super) fn convert_request_with_chunking(
 
     // 图片与其所属 tool_result 一起接受或丢弃。仅在配对校验过滤了结果时
     // 重建 images；从集合中移除已接受的 ID，也能排除当前消息内的重复结果。
-    let images = if validated_tool_results.len() != tool_results.len() {
+    // 重建时 tool_result 文本也要取重建后的版本：其中的图片序号依赖前面保留了哪些图片。
+    let (images, validated_tool_results) = if validated_tool_results.len() != tool_results.len() {
         let mut accepted_ids: std::collections::HashSet<_> = validated_tool_results
             .iter()
             .map(|result| result.tool_use_id.as_str())
             .collect();
-        process_message_content_with_tool_filter(&last_message.content, |id| {
-            accepted_ids.remove(id)
-        })?
-        .1
+        let (_, images, rebuilt_results) =
+            process_message_content_with_tool_filter(&last_message.content, 0, |id| {
+                accepted_ids.remove(id)
+            })?;
+        (images, rebuilt_results)
     } else {
-        images
+        (images, validated_tool_results)
     };
 
     // 9. 从历史中移除孤立的 tool_use（Kiro API 要求 tool_use 必须有对应的 tool_result）
