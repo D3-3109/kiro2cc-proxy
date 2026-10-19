@@ -558,4 +558,89 @@ mod tests {
             json!([{"role": "user", "content": [{"type": "text", "text": "still here"}]}])
         );
     }
+
+    // ---------- function_call_output 内嵌图片（Codex view_image / 截图类工具） ----------
+
+    fn tool_output_request(output: Value) -> Value {
+        json!({
+            "model": "gpt-5-codex",
+            "input": [
+                {"type": "message", "role": "user", "content": "看一下截图"},
+                {"type": "function_call", "call_id": "call_img", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_img", "output": output},
+            ],
+        })
+    }
+
+    fn tool_result_content(r: &ConvertedResponsesRequest) -> Value {
+        r.anthropic_body["messages"][2]["content"][0]["content"].clone()
+    }
+
+    #[test]
+    fn function_call_output_image_only_becomes_image_block() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image", "image_url": "data:image/png;base64,QUJD"},
+        ])));
+        assert_eq!(
+            tool_result_content(&r),
+            json!([{
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"},
+            }])
+        );
+    }
+
+    #[test]
+    fn function_call_output_mixed_text_and_image_keeps_order() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_text", "text": "before"},
+            {"type": "input_image", "image_url": "data:image/jpeg;base64,REVG"},
+            "after",
+        ])));
+        assert_eq!(
+            tool_result_content(&r),
+            json!([
+                {"type": "text", "text": "before"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "REVG"}},
+                {"type": "text", "text": "after"},
+            ])
+        );
+    }
+
+    #[test]
+    fn function_call_output_remote_image_url_degrades_to_text_placeholder() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image", "image_url": "https://example.com/a.png"},
+        ])));
+        assert_eq!(
+            tool_result_content(&r),
+            json!([{"type": "text", "text": "[image: https://example.com/a.png]"}])
+        );
+    }
+
+    #[test]
+    fn function_call_output_text_only_array_stays_flattened_string() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_text", "text": "a"},
+            {"type": "output_text", "text": "b"},
+            {"output": "c"},
+        ])));
+        assert_eq!(tool_result_content(&r), json!("a\nb\nc"));
+    }
+
+    #[test]
+    fn function_call_output_image_reaches_kiro_images() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image", "image_url": "data:image/png;base64,QUJD"},
+        ])));
+        let anthropic: crate::anthropic::types::MessagesRequest =
+            serde_json::from_value(r.anthropic_body).expect("anthropic body 应可反序列化");
+        let kiro = crate::anthropic::convert_request(&anthropic).expect("转换 Kiro 请求应成功");
+        let current = &kiro.conversation_state.current_message.user_input_message;
+        assert_eq!(current.images.len(), 1, "工具图片应进入 Kiro images");
+        assert_eq!(current.images[0].source.bytes, "QUJD");
+        let results = &current.user_input_message_context.tool_results;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool_use_id, "call_img");
+    }
 }
