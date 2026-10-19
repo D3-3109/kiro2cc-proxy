@@ -88,6 +88,7 @@ mod tests {
     mod schema;
     mod session;
     mod thinking_gpt;
+    mod tool_images;
     mod tools;
     mod websearch;
 }
