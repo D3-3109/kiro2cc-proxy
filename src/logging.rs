@@ -39,12 +39,19 @@ fn build_filter_from(rust_log: Option<&str>, debug: bool) -> EnvFilter {
     filter
 }
 
-/// RUST_LOG 是否含无 target 的裸 trace 指令（全局档已达最详细级别）
+/// RUST_LOG 的有效全局档是否已是 trace（无 target 的裸级别指令里，最后一条生效）
+///
+/// 同 target 的后一条指令替换前一条，所以 `trace,info` 的有效档是 info，
+/// 不能因为字符串里出现过 trace 就跳过追加 debug。
 fn has_bare_trace_directive(rust_log: Option<&str>) -> bool {
-    rust_log.is_some_and(|v| {
-        v.split(',')
-            .any(|part| part.trim().eq_ignore_ascii_case("trace"))
-    })
+    const LEVELS: [&str; 6] = ["trace", "debug", "info", "warn", "error", "off"];
+    rust_log
+        .and_then(|v| {
+            v.split(',')
+                .map(str::trim)
+                .rfind(|part| LEVELS.iter().any(|l| part.eq_ignore_ascii_case(l)))
+        })
+        .is_some_and(|part| part.eq_ignore_ascii_case("trace"))
 }
 
 /// 创建可重载过滤器并返回句柄（由 main 装配到 registry）
@@ -130,6 +137,18 @@ mod tests {
         assert!(!has_bare_trace_directive(Some("trace_utils=info")));
         assert!(!has_bare_trace_directive(Some("")));
         assert!(!has_bare_trace_directive(None));
+        // 同 target 后者覆盖前者：有效全局档以最后一条裸级别指令为准
+        assert!(!has_bare_trace_directive(Some("trace,info")));
+        assert!(!has_bare_trace_directive(Some("trace,off")));
+        assert!(has_bare_trace_directive(Some("info,trace")));
+        assert!(has_bare_trace_directive(Some("info,trace,kiro=debug")));
+    }
+
+    #[test]
+    fn test_build_filter_appends_debug_when_trace_is_overridden() {
+        // RUST_LOG=trace,info 的有效档是 info，开关开启后必须能输出 DEBUG
+        let text = build_filter_from(Some("trace,info"), true).to_string();
+        assert!(text.contains("debug"), "filter = {}", text);
     }
 
     #[test]

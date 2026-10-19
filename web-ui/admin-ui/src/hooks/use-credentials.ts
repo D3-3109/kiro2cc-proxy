@@ -282,9 +282,9 @@ export function useSetDebugLogs() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: setDebugLogs,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['debugLogs'] })
-    },
+    // 后端先热切换再持久化：持久化失败会返回 500 但运行时已变，所以成败都要重新取真实状态，
+    // 并返回 Promise 让 isPending 覆盖刷新过程
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['debugLogs'] }),
   })
 }
 
