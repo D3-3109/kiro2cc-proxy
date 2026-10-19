@@ -67,6 +67,30 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.32".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![Bilingual::new(
+                    "设置页新增 DEBUG 日志开关（debugLogs）：控制台、日志文件与「查看日志」页三处同步输出 DEBUG 级别事件，可热切换并写回 config.json，无需重启；RUST_LOG 指令仍优先，开关只升不降",
+                    "New DEBUG logs switch (debugLogs) in Settings: console, log file and the Logs page output DEBUG events together; hot-toggled and persisted to config.json without a restart. RUST_LOG directives still take precedence and the switch only raises verbosity",
+                )]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复 Claude Code Read 工具返回的图片被静默丢弃（issue #52，感谢 @jayus71 的 PR #53）：tool_result 内嵌图片现在随请求转发给 Kiro；并行读多张图时，图片说明改用整条消息内的全局序号 [Image n attached from tool_result <id>]，让模型能把图对应到工具结果（实测并行读三张图顺序正确率由约 1/6 提升到 5/6）；无法转发的图片（如 SVG）留下占位，不再让模型误以为工具返回了空内容；合并历史消息与过滤孤立 tool_result 后序号保持与最终图片位置一致",
+                        "Fixed images returned by Claude Code's Read tool being silently dropped (issue #52, thanks to @jayus71 for PR #53): images embedded in tool_result are now forwarded to Kiro. When several images are read in parallel, captions use a message-wide ordinal [Image n attached from tool_result <id>] so the model can map each image to its tool result (parallel three-image order accuracy rose from about 1/6 to 5/6 in testing). Images that cannot be forwarded (e.g. SVG) leave a placeholder instead of looking like an empty tool result, and ordinals stay aligned with final image positions after merging history messages and dropping orphaned tool_results",
+                    ),
+                    Bilingual::new(
+                        "修复 OpenAI Responses 端点 function_call_output / custom_tool_call_output 中的图片被丢弃（Codex view_image、截图类工具）：data URL 图片现在进入 Kiro images，远程 URL 与转换失败的图片降级为文本占位，不再产出空内容",
+                        "Fixed images in OpenAI Responses function_call_output / custom_tool_call_output being dropped (Codex view_image and screenshot tools): data URL images now reach Kiro images, while remote URLs and images that fail to convert degrade to text placeholders instead of producing empty content",
+                    ),
+                    Bilingual::new(
+                        "缓存断点记账修正：本地缓存写入与 metering 上报口径解耦，避免后续请求回落本地模拟时读不到前缀；defer_loading 工具移出顶层缓存前缀，改在 tool_reference 引用处展开定义，仅改被引用工具的 schema 时不再误报缓存命中；规范化键做 JSON 转义，避免键 a:1,b 与键 a、b 同哈希。仅在 promptCacheAccounting 开启时影响本地 usage 计量",
+                        "Cache breakpoint accounting fixes: local cache commits are decoupled from metering reporting so later requests falling back to local simulation can still read the prefix; defer_loading tools leave the top-level cache prefix and are expanded at their tool_reference sites, so changing only a referenced tool's schema no longer reports a false cache hit; canonical keys are JSON-escaped so key a:1,b no longer hashes like keys a and b. Only affects local usage accounting when promptCacheAccounting is enabled",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.31".to_string(),
             is_latest: false,
             groups: vec![
