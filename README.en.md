@@ -929,6 +929,7 @@ This project is based on [kiro.rs](https://github.com/hank9999/kiro.rs). Thanks 
 
 Thanks to all the contributors of this project (in no particular order):
 
+- [fhy12130-afk](https://github.com/fhy12130-afk)
 - [kosuke-zhang](https://github.com/kosuke-zhang)
 - [lqzhgood](https://github.com/lqzhgood)
 - [xhsngdsan](https://github.com/xhsngdsan)
