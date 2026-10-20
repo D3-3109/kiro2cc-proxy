@@ -789,6 +789,7 @@ Features:
 - Adjust account priority
 - Check account balance
 - Reset account failure state
+- **Documentation** page: client config generation (Claude Code / Codex CLI / OpenAI SDK / one-click CC Switch import), API reference and troubleshooting (examples auto-filled with the selected API key)
 
 **Admin API** (requires `x-api-key` or `Authorization: Bearer` header):
 

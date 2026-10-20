@@ -140,7 +140,8 @@
     "toastVerifyCancelled": "Verification cancelled",
     "toastVerifyDone": "Verification complete: {{success}}/{{total}} succeeded",
     "updateAvailable": "New version available, click to update",
-    "navTheme": "Theme Settings"
+    "navTheme": "Theme Settings",
+    "navDocs": "Documentation"
   },
   "credentials": {
     "metricPoolLabel": "Account pool",
@@ -907,5 +908,57 @@
       "notice": "Theme applied. Make yourself at home."
     },
     "resultsCount": "{{count}} themes"
+  },
+  "docs": {
+    "eyebrow": "DOCUMENTATION",
+    "heroTitle": "Connect. Build. Go further.",
+    "heroSubtitle": "Client configuration, working examples and API reference, all in one place.",
+    "tabsLabel": "Documentation sections",
+    "osTabsLabel": "Operating system",
+    "toolsLabel": "Client selection",
+    "sectionQuickStart": "Quick start",
+    "sectionDevelopment": "Development",
+    "sectionModelApi": "API reference",
+    "sectionTroubleshooting": "Troubleshooting",
+    "sectionSummary": "Documentation",
+    "sectionSummaries": {
+      "quick-start": "Choose a client, generate its configuration and make your first request.",
+      "development": "From URLs and auth to model mapping and streaming.",
+      "model-api": "Methods, parameters and examples for every public endpoint.",
+      "troubleshooting": "Common errors and the connection checklist."
+    },
+    "steps": {
+      "step1": {
+        "title": "Prepare an account",
+        "detail": "Accounts · Enable an account with the model you need."
+      },
+      "step2": {
+        "title": "Choose a client key",
+        "detail": "API Keys · Create a dedicated key for your client."
+      },
+      "step3": {
+        "title": "Configure & verify",
+        "detail": "Send a test request · Use the cURL below for your first call."
+      }
+    },
+    "selectKey": "API Key",
+    "noKeys": "No keys yet (examples use a placeholder)",
+    "selectKeyFirst": "Select an API key first",
+    "baseUrlLabel": "Base URL",
+    "unixTerminal": "macOS / Linux terminal",
+    "windowsTerminal": "Windows CMD",
+    "ccSwitchDesc": "Launch the CC Switch desktop app and import this service's config automatically; if not installed, copy the link and open it in CC Switch.",
+    "ccSwitchLaunch": "Import via CC Switch",
+    "ccSwitchNotInstalled": "CC Switch not detected — copy the link and import manually",
+    "curlTitle": "cURL verification",
+    "verifyNote": "Seeing the message_stop event or a full JSON means the pipeline works; verify the final model and usage on the Usage page.",
+    "verifyLink": "Connection checks →",
+    "endpointsGroup": "Public endpoints",
+    "tocTitle": "On this page",
+    "searchLabel": "Search documentation",
+    "searchPlaceholder": "Search endpoints, parameters or errors…",
+    "searchClear": "Clear search",
+    "searchCount": "{{count}} results",
+    "searchEmpty": "Try a model, a /v1 path or 429."
   }
 }

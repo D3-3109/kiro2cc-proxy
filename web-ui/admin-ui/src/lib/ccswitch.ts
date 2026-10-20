@@ -54,11 +54,13 @@ export interface CcSwitchTarget {
   apiKey: string
   /** API Key 名称（订单编号），用于区分 cc-switch 里的多张卡片 */
   keyName?: string
+  /** 覆盖默认的 window.location.origin（使用文档页支持手改 Base URL 时传入） */
+  baseUrl?: string
 }
 
 /** 生成 cc-switch 深链接。Base URL 取当前页面 origin */
 export function buildCcSwitchDeeplink(app: CcSwitchApp, target: CcSwitchTarget): string {
-  const origin = window.location.origin
+  const origin = (target.baseUrl?.trim() || window.location.origin).replace(/\/+$/, '')
   const keyName = target.keyName?.trim()
   const name = keyName ? `kiro2cc · ${keyName}` : 'kiro2cc'
 

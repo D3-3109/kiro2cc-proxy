@@ -140,7 +140,8 @@
     "toastVerifyCancelled": "已取消验活",
     "toastVerifyDone": "验活完成：成功 {{success}}/{{total}}",
     "updateAvailable": "有新版本可用，点击前往更新",
-    "navTheme": "主题设置"
+    "navTheme": "主题设置",
+    "navDocs": "使用文档"
   },
   "credentials": {
     "metricPoolLabel": "账号池",
@@ -907,5 +908,57 @@
       "quota": "用量进度",
       "notice": "主题已应用，开启你的专属工作台。"
     }
+  },
+  "docs": {
+    "eyebrow": "使用文档",
+    "heroTitle": "从接入到用好每个接口",
+    "heroSubtitle": "客户端配置、开发示例与接口参考，都从这里开始。",
+    "tabsLabel": "文档分类",
+    "osTabsLabel": "操作系统",
+    "toolsLabel": "客户端选择",
+    "sectionQuickStart": "快速接入",
+    "sectionDevelopment": "开发指南",
+    "sectionModelApi": "接口参考",
+    "sectionTroubleshooting": "排障指南",
+    "sectionSummary": "使用文档",
+    "sectionSummaries": {
+      "quick-start": "选好客户端，生成配置，完成第一次请求。",
+      "development": "从地址与认证到模型映射和流式响应。",
+      "model-api": "全部公开端点的方法、参数与示例。",
+      "troubleshooting": "常见错误与连接排查步骤。"
+    },
+    "steps": {
+      "step1": {
+        "title": "准备可用账号",
+        "detail": "账号管理 · 确认账号已启用且模型可用。"
+      },
+      "step2": {
+        "title": "选择客户端密钥",
+        "detail": "API Keys · 为客户端创建独立访问凭据。"
+      },
+      "step3": {
+        "title": "配置并验证",
+        "detail": "发送验证请求 · 用下方 cURL 完成第一次调用。"
+      }
+    },
+    "selectKey": "API Key",
+    "noKeys": "暂无可用 Key（示例用占位符）",
+    "selectKeyFirst": "请先选择一个 API Key",
+    "baseUrlLabel": "服务地址",
+    "unixTerminal": "macOS / Linux 终端",
+    "windowsTerminal": "Windows CMD",
+    "ccSwitchDesc": "点击按钮唤起 CC Switch 桌面端并自动导入本服务配置；未安装时复制链接后在 CC Switch 中打开。",
+    "ccSwitchLaunch": "唤起 CC Switch 导入",
+    "ccSwitchNotInstalled": "未检测到 CC Switch，请复制链接后手动导入",
+    "curlTitle": "cURL 验证",
+    "verifyNote": "看到 message_stop 事件或完整 JSON 后即链路已通；用量统计页可核对最终模型与用量。",
+    "verifyLink": "连接排查 →",
+    "endpointsGroup": "公开端点",
+    "tocTitle": "本页目录",
+    "searchLabel": "搜索文档",
+    "searchPlaceholder": "搜索接口、参数或错误码…",
+    "searchClear": "清除搜索",
+    "searchCount": "找到 {{count}} 项",
+    "searchEmpty": "试试模型名、/v1 路径或 429。"
   }
 }

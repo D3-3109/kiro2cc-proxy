@@ -810,6 +810,7 @@ Authorization: Bearer your-api-key
 - 调整账号优先级
 - 查看各账号余额
 - 重置账号失败状态
+- 「使用文档」页面：客户端配置生成（Claude Code / Codex CLI / OpenAI SDK / CC Switch 一键导入）、接口参考与排障指南（选中 API Key 后自动填充示例）
 
 **Admin API**（需要 `x-api-key` 或 `Authorization: Bearer` 认证）：
 
