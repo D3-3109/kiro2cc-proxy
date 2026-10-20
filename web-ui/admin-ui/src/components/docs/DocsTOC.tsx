@@ -46,7 +46,7 @@ export default function DocsTOC({
               }`}
             >
               {child.method && (
-                <span className="font-mono text-[9.5px] font-bold text-ink-3">{child.method}</span>
+                <span className="font-mono text-[10px] font-bold text-ink-3">{child.method}</span>
               )}
               <span className="truncate">{child.label}</span>
             </a>

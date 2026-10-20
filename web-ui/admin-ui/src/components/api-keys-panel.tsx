@@ -565,7 +565,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
 
   return (
     <div>
-      {/* 页头（设计稿 .head）：面包屑 + 19px 标题 + 同基线副标题 + 右侧状态标签与文档入口 */}
+      {/* 页头（设计稿 .head）：面包屑 + 19px 标题 + 同基线副标题 + 右侧状态标签 */}
       <PageHead
         crumb={[t('dashboard.navMain'), t('apiKeys.pageTitle')]}
         title={t('apiKeys.pageTitle')}

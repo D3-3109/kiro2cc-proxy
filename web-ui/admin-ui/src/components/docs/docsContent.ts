@@ -18,6 +18,8 @@ export type EndpointSpec = {
   id: string
   method: string
   path: string
+  /** 端点类型徽章（Anthropic 原生 / Claude Code 专用 / OpenAI 兼容 / 通用） */
+  kind: string
   title: string
   description: string
   curl: string
@@ -123,9 +125,13 @@ const MODELS_RESP = `{
   ]
 }`
 
-export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): EndpointSpec[] {
+export function buildEndpointSpecs(
+  baseUrl: string,
+  locale: DocsLocale = 'zh',
+  apiKey = '<API_KEY>',
+): EndpointSpec[] {
   const base = baseUrl.replace(/\/+$/, '')
-  const key = '<API_KEY>'
+  const key = apiKey
   const authHeader = `--header 'Authorization: Bearer ${key}'`
   const common = {
     paramHeaderName: copy(locale, '参数', 'Parameter'),
@@ -134,7 +140,7 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
     paramHeaderDesc: copy(locale, '说明', 'Description'),
     requiredLabel: copy(locale, '必选', 'Required'),
     optionalLabel: copy(locale, '可选', 'Optional'),
-    requestLabel: copy(locale, '请求体', 'Request body'),
+    requestLabel: copy(locale, '标准请求 Payload', 'Standard request payload'),
     responseLabel: copy(locale, '响应', 'Response'),
   }
 
@@ -143,6 +149,7 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
       id: 'api-messages',
       method: 'POST',
       path: '/v1/messages',
+      kind: copy(locale, 'Anthropic 原生', 'Native Anthropic'),
       title: copy(locale, '创建消息（Anthropic 原生）', 'Create a message (native Anthropic)'),
       description: copy(
         locale,
@@ -174,6 +181,7 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
       id: 'api-messages-cc',
       method: 'POST',
       path: '/cc/v1/messages',
+      kind: copy(locale, 'Claude Code 专用', 'Claude Code only'),
       title: copy(locale, '创建消息（Claude Code 专用通道）', 'Create a message (Claude Code channel)'),
       description: copy(
         locale,
@@ -196,6 +204,7 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
       id: 'api-chat-completions',
       method: 'POST',
       path: '/v1/chat/completions',
+      kind: copy(locale, 'OpenAI 兼容', 'OpenAI compatible'),
       title: copy(locale, '对话补全（OpenAI 兼容）', 'Chat completion (OpenAI compatible)'),
       description: copy(
         locale,
@@ -223,6 +232,7 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
       id: 'api-responses',
       method: 'POST',
       path: '/v1/responses',
+      kind: copy(locale, 'OpenAI 兼容', 'OpenAI compatible'),
       title: copy(locale, '创建响应（OpenAI Responses 兼容）', 'Create a response (OpenAI Responses compatible)'),
       description: copy(
         locale,
@@ -249,6 +259,7 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
       id: 'api-models',
       method: 'GET',
       path: '/v1/models',
+      kind: copy(locale, '通用', 'General'),
       title: copy(locale, '模型列表', 'List models'),
       description: copy(
         locale,

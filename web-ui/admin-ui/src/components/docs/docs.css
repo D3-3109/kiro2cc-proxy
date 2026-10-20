@@ -1,17 +1,12 @@
 /* Copyright (c) 2026 Harllan He. Licensed under MIT. */
-/* 使用文档页专属样式：hero / 分区 tabs / 步骤条 / 指南折叠体 / 双栏布局。
-   语义 token（--surface/--ink/--brand 等）由 index.css 亮暗两套主题提供，本文件零硬编码色值。 */
+/* 使用文档页专属样式：hero 文本块 / 分区 tabs / 指南卡片 / 数据表 / 提示块。
+   语义 token（--surface/--ink/--brand 等）由 index.css 亮暗两套主题提供，本文件零硬编码色值。
+   macOS 交通灯三色在 docs-page.tsx 中以内联 style 固定，属已确认的唯一例外。 */
 
-/* —— hero —— */
-.docs-hero {
+/* —— hero 文本块（吸顶容器与布局由 Tailwind 承担） —— */
+.docs-eyebrow {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-.docs-hero .docs-eyebrow {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
@@ -21,7 +16,27 @@
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.docs-hero h2 {
+/* eyebrow 内的服务状态指示：字号/字重回落到正文，仅保留成功色 */
+.docs-eyebrow .docs-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ok);
+}
+.docs-eyebrow .docs-ready-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+/* hero 标题与副标题沿用语义 token，字号由 CSS 承载以确保三主题一致 */
+.docs-hero-title {
   margin: 0;
   font-size: 24px;
   font-weight: 700;
@@ -29,20 +44,13 @@
   line-height: 1.25;
   color: var(--ink);
 }
-.docs-hero p {
+.docs-hero-sub {
   margin: 4px 0 0;
   font-size: 12.5px;
   color: var(--ink-2);
 }
 
-/* —— 工具条：分区 tabs —— */
-.docs-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-}
+/* —— 分区 tabs（计数角标由 Tailwind 承担） —— */
 .docs-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -51,80 +59,30 @@
   background: var(--surface-3);
   padding: 4px;
 }
-.docs-tabs a {
+.docs-tabs a,
+.docs-tabs button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
   padding: 6px 12px;
+  font: inherit;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink-2);
+  cursor: pointer;
   transition: background-color 0.15s, color 0.15s;
 }
-.docs-tabs a:hover {
+.docs-tabs a:hover,
+.docs-tabs button:hover {
   color: var(--ink);
 }
-.docs-tabs a[aria-current='page'] {
+.docs-tabs a[aria-current='page'],
+.docs-tabs button[aria-pressed='true'] {
   background: var(--brand-soft);
   color: var(--brand);
-}
-
-/* —— 双栏布局：内容 + 右侧 TOC —— */
-.docs-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1.5rem;
-}
-@media (min-width: 1024px) {
-  .docs-layout {
-    grid-template-columns: minmax(0, 1fr) 220px;
-  }
-  .docs-sidebar {
-    position: sticky;
-    top: 1rem;
-    align-self: start;
-    max-height: calc(100vh - 2rem);
-    overflow-y: auto;
-  }
-}
-/* 窄屏隐藏侧 TOC（用户已确认剔除移动端目录 Dialog） */
-@media (max-width: 1023px) {
-  .docs-sidebar {
-    display: none;
-  }
-}
-
-/* —— 快速接入：三步引导 —— */
-.docs-steps {
-  display: grid;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-}
-.docs-step {
-  display: flex;
-  gap: 12px;
-  border: 0.5px solid var(--hairline);
-  border-radius: 11px;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  padding: 14px 16px;
-}
-.docs-step > span {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--brand);
-  opacity: 0.65;
-}
-.docs-step strong {
-  font-size: 13px;
-  color: var(--ink);
-}
-.docs-step p {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--ink-2);
 }
 
 /* —— 分区标题 —— */
@@ -143,7 +101,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 1.5rem 0 0.75rem;
+  margin: 0 0 0.75rem;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -158,7 +116,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* —— 指南折叠体 —— */
+/* —— 指南卡片 —— */
 .docs-guide + .docs-guide {
   margin-top: 0.75rem;
 }
@@ -231,6 +189,7 @@
   font-size: 11px;
   font-weight: 600;
   color: var(--ink-3);
+  white-space: nowrap;
 }
 .docs-table-wrap td {
   border-top: 0.5px solid var(--hairline);
@@ -258,10 +217,4 @@
 .docs-callout a {
   font-weight: 600;
   color: var(--brand);
-}
-
-/* —— 代码块间距统一 —— */
-.docs-content .code-panel,
-.docs-guide-body .code-panel {
-  margin: 10px 0;
 }

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // 使用文档页代码块与端点卡片（自 codex2cc EndpointDoc 适配，零依赖纯文本高亮）
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronRight, Copy } from 'lucide-react'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -14,18 +14,30 @@ const CODE_PRE = 'overflow-x-auto p-3 font-mono text-[12px] leading-[1.65] text-
 export const CodeBlock = memo(function CodeBlock({
   label,
   content,
+  showCopy = true,
 }: {
   label?: string
   content: string
+  /** false 时隐藏右上复制按钮（外层窗体已提供统一复制入口） */
+  showCopy?: boolean
 }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
+  const timerRef = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current)
+    },
+    [],
+  )
 
   const handleCopy = async () => {
     try {
       await copyToClipboard(content)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 2000)
+      if (timerRef.current) window.clearTimeout(timerRef.current)
+      timerRef.current = window.setTimeout(() => setCopied(false), 2000)
     } catch {
       // copyToClipboard 内部已做降级；仍失败时静默（复制按钮瞬时反馈不可用时无破坏性后果）
     }
@@ -37,18 +49,20 @@ export const CodeBlock = memo(function CodeBlock({
         {label ? (
           <span className="truncate">{label}</span>
         ) : null}
-        <button
-          type="button"
-          onClick={() => void handleCopy()}
-          aria-label={copied ? t('common.copied') : t('common.copy')}
-          className={`inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 text-[10.5px] font-semibold transition-colors ${
-            copied
-              ? 'bg-ok-soft text-ok'
-              : 'text-ink-3 hover:bg-surface-3 hover:text-ink'
-          } ${label ? '' : 'absolute right-2 top-2 z-10'}`}
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </button>
+        {showCopy && (
+          <button
+            type="button"
+            onClick={() => void handleCopy()}
+            aria-label={copied ? t('common.copied') : t('common.copy')}
+            className={`inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 text-[10.5px] font-semibold transition-colors ${
+              copied
+                ? 'bg-ok-soft text-ok'
+                : 'text-ink-3 hover:bg-surface-3 hover:text-ink'
+            } ${label ? '' : 'absolute right-2 top-2 z-10'}`}
+          >
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          </button>
+        )}
       </div>
       <pre className={CODE_PRE}>
         <code>{content}</code>
@@ -68,11 +82,20 @@ const METHOD_COLORS: Record<string, string> = {
 export function MethodBadge({ method }: { method: string }) {
   return (
     <span
-      className={`inline-flex items-center font-bold rounded-[6px] px-2 py-0.5 text-[10.5px] ${
+      className={`inline-flex h-[22px] items-center rounded-[6px] px-2.5 text-[11px] font-bold ${
         METHOD_COLORS[method] || 'bg-surface-3 text-ink-2'
       }`}
     >
       {method}
+    </span>
+  )
+}
+
+/** 端点类型徽章：数据源为 EndpointSpec.kind */
+export function TypeBadge({ kind }: { kind: string }) {
+  return (
+    <span className="inline-flex h-[22px] items-center rounded-[6px] border-[0.5px] border-hairline-2 bg-surface-2 px-2.5 text-[11px] font-medium text-ink-2">
+      {kind}
     </span>
   )
 }
@@ -97,9 +120,10 @@ export function EndpointDoc({ endpoint, activeId }: { endpoint: EndpointSpec; ac
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-3/60"
+          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-3"
         >
           <MethodBadge method={endpoint.method} />
+          <TypeBadge kind={endpoint.kind} />
           <code className="min-w-0 flex-1 truncate font-mono text-[12.5px] font-semibold text-ink">
             {endpoint.path}
           </code>

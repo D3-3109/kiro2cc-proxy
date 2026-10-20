@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // 使用文档页开发指南与排障指南内容（自 codex2cc docsGuides 适配为 kiro2cc 端点与机制）
+import type { DocsLocale } from './docsContent'
 
 export type DocsSection = 'quick-start' | 'development' | 'model-api' | 'troubleshooting'
 
@@ -8,12 +9,12 @@ export type GuideSpec = {
   section: DocsSection
   title: string
   summary: string
+  /** 状态码胶囊：仅排障分区使用 */
+  statusCode?: number
   paragraphs?: string[]
   table?: { headers: string[]; rows: string[][] }
   examples?: { label: string; content: string }[]
 }
-
-export type DocsLocale = 'zh' | 'en'
 
 export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
   const c = (zh: string, en: string) => (locale === 'zh' ? zh : en)
@@ -38,27 +39,32 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
         ),
       ],
       table: {
-        headers: [c('用途', 'Use'), c('地址 / 请求头', 'URL / header'), c('说明', 'Notes')],
+        headers: [
+          c('调用场景 / 客户端', 'Scenario / client'),
+          c('分发目标地址', 'Destination URL'),
+          c('认证 Header / 机制', 'Auth header / mechanism'),
+          c('说明与特性', 'Notes & features'),
+        ],
         rows: [
           [
             'Claude Code',
             `${base}`,
+            'Authorization: Bearer sk-...',
             c(
               '填入 ANTHROPIC_BASE_URL 环境变量，客户端自动追加 /v1/messages。',
               'Put this into the ANTHROPIC_BASE_URL env var; the client appends /v1/messages itself.',
             ),
           ],
           [
-            'Claude Code（长会话）',
+            c('Claude Code（长会话）', 'Claude Code (long session)'),
             `${base}/cc`,
-            c(
-              '300s 全局截止时间，适配长会话不卡死。',
-              '300s global deadline for long sessions.',
-            ),
+            'Authorization: Bearer sk-...',
+            c('300s 全局截止时间，适配长会话不卡死。', '300s global deadline for long sessions.'),
           ],
           [
             'OpenAI SDK',
             `${base}/v1`,
+            'Authorization: Bearer sk-...',
             c(
               'SDK 在 Base URL 后追加 /chat/completions 等资源路径。',
               'The SDK appends resource paths such as /chat/completions.',
@@ -66,11 +72,9 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
           ],
           [
             c('公共 API', 'Public API'),
-            'Authorization: Bearer sk-...',
-            c(
-              'Messages 端点也接受 x-api-key。',
-              'The Messages endpoints also accept x-api-key.',
-            ),
+            `${base}/v1/messages`,
+            'x-api-key: sk-...',
+            c('Messages 端点也接受 x-api-key。', 'The Messages endpoints also accept x-api-key.'),
           ],
         ],
       },
@@ -97,7 +101,7 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
         headers: [
           c('请求模型名', 'Requested name'),
           c('路由目标', 'Routed to'),
-          c('说明', 'Notes'),
+          c('思考逻辑与代际约束', 'Thinking & generation constraints'),
         ],
         rows: [
           [
@@ -123,8 +127,8 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
       section: 'development',
       title: c('流式响应', 'Streaming responses'),
       summary: c(
-        '三个消息端点都支持 SSE 流式输出。',
-        'All three message endpoints support SSE streaming.',
+        'Anthropic 与 OpenAI 兼容端点均支持 SSE 流式输出。',
+        'Both the Anthropic and OpenAI-compatible endpoints support SSE streaming.',
       ),
       paragraphs: [
         c(
@@ -159,6 +163,7 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
     {
       id: 'error-429',
       section: 'troubleshooting',
+      statusCode: 429,
       title: c('429 与限流桶', '429 and rate-limit buckets'),
       summary: c(
         '上游 4 个端点对应 4 个独立限流桶。',
@@ -178,6 +183,7 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
     {
       id: 'error-401',
       section: 'troubleshooting',
+      statusCode: 401,
       title: c('401 与认证失败', '401 and auth failures'),
       summary: c(
         '子 Key 无效、过期或额度耗尽。',
@@ -195,22 +201,85 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
       ],
     },
     {
+      id: 'error-5xx',
+      section: 'troubleshooting',
+      statusCode: 500,
+      title: c('5xx 与上游异常', '5xx and upstream failures'),
+      summary: c(
+        '上游超时、账号失效，或多账号全部失败。',
+        'Upstream timeouts, dead accounts, or every account failing.',
+      ),
+      paragraphs: [
+        c(
+          '单个请求最多对每个凭据重试 3 次、跨账号合计最多 9 次；普通请求 180s 超时，compact 请求 1000s。全部失败时才会把上游错误透传给客户端。',
+          'A single request retries each credential up to 3 times and across accounts up to 9 times in total; normal requests time out at 180s and compact requests at 1000s. Only when everything fails is the upstream error surfaced to the client.',
+        ),
+        c(
+          '持续 5xx 时：到账号管理页查看凭据状态与失败日志，确认至少一个账号可用；检查账号代理是否可达；必要时降低并发（全局 50 / 单账号 20）。',
+          'On sustained 5xx: check credential state and failure logs on the Accounts page, confirm at least one account is usable, verify the account proxy is reachable, and lower concurrency if needed (global 50 / per account 20).',
+        ),
+      ],
+    },
+    {
       id: 'connection-check',
       section: 'troubleshooting',
-      title: c('连接排查步骤', 'Connection checklist'),
+      title: c('五步闭环连通性排查流程', 'Five-step connectivity checklist'),
       summary: c(
         '从服务在线到生成可用的五步排查。',
         'Five steps from service-up to working generation.',
       ),
-      paragraphs: [
-        c(
-          '按下述顺序排查：① 管理后台能打开且侧栏显示版本号 → 服务在线；② 用快速接入页的 cURL 示例（选一个有效子 Key）发一次 /v1/messages → 看到 message_stop 或完整 JSON → 链路通；③ 仍 401 → 检查 Key；④ 429 → 见限流桶条目；⑤ 200 但内容异常 → 到「查看日志」开 DEBUG 日志复现，再到使用日志核对最终模型与用量。',
-          'Troubleshoot in order: ① the admin panel opens and the sidebar shows a version → service up; ② send /v1/messages once with the cURL example from Quick start (pick a valid sub key) → seeing message_stop or full JSON → the pipeline works; ③ still 401 → check the key; ④ 429 → see the rate-limit entry; ⑤ 200 but odd content → turn on DEBUG logs in Log Viewer, reproduce, then verify the final model and usage in Usage.',
-        ),
-      ],
+      table: {
+        headers: [
+          c('排查步骤', 'Step'),
+          c('操作与检查点', 'Action & checkpoint'),
+          c('正常预期指标', 'Expected result'),
+        ],
+        rows: [
+          [
+            c('服务在线', 'Service up'),
+            c(
+              '打开管理后台，确认侧栏版本号与状态点。',
+              'Open the admin panel and check the sidebar version and status dot.',
+            ),
+            c('页面正常加载，版本号可见。', 'Page loads and the version is visible.'),
+          ],
+          [
+            c('子 Key 可用', 'Key usable'),
+            c(
+              'API Keys 页核对 Key 状态、有效期与额度。',
+              'Check key state, expiry and quota on the API Keys page.',
+            ),
+            c('状态为启用，无过期或限额告警。', 'Enabled, with no expiry or quota warnings.'),
+          ],
+          [
+            c('链路连通', 'Pipeline reachable'),
+            c(
+              '用快速接入页的 cURL 示例发一次 /v1/messages。',
+              'Send one /v1/messages request with the cURL example from Quick start.',
+            ),
+            c('返回 message_stop 或完整 JSON。', 'A message_stop event or complete JSON comes back.'),
+          ],
+          [
+            c('认证通过', 'Auth accepted'),
+            c(
+              '核对 Authorization: Bearer 或 x-api-key 请求头；命中 429 见「429 与限流桶」条目。',
+              'Verify the Authorization: Bearer or x-api-key header; on 429 see the rate-limit entry.',
+            ),
+            c('无 401，响应内含 usage。', 'No 401 and the response carries usage.'),
+          ],
+          [
+            c('内容正确', 'Output correct'),
+            c(
+              '内容异常时到「查看日志」开启 DEBUG 日志复现；再到使用日志核对最终模型、用量与耗时。',
+              'On odd output, enable DEBUG logs in Log Viewer and reproduce; then confirm final model, usage and latency on the Usage page.',
+            ),
+            c('模型映射符合预期，token 计数正常。', 'Model mapping matches and token counts look sane.'),
+          ],
+        ],
+      },
       examples: [
         {
-          label: '排查用最小请求（stream=false）',
+          label: c('排查用最小请求（stream=false）', 'Minimal request (stream=false)'),
           content: `curl --request POST \\
   --url ${base}/v1/messages \\
   --header 'Authorization: Bearer sk-...' \\
