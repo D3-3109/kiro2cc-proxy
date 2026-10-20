@@ -42,10 +42,10 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
         rows: [
           [
             'Claude Code',
-            'ANTHROPIC_BASE_URL',
+            `${base}`,
             c(
-              '客户端自动追加 /v1/messages。',
-              'The client appends /v1/messages itself.',
+              '填入 ANTHROPIC_BASE_URL 环境变量，客户端自动追加 /v1/messages。',
+              'Put this into the ANTHROPIC_BASE_URL env var; the client appends /v1/messages itself.',
             ),
           ],
           [
@@ -89,8 +89,8 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
           'A model name containing sonnet / opus / haiku / gpt keywords routes to the corresponding Kiro model; the version number (4.5 / 4.6 / 4.7 / 4.8 / 5) picks the generation, with opus falling back to 4.6 when unspecified. A thinking suffix enables extended thinking automatically.',
         ),
         c(
-          'max_tokens 按模型代际有约束：下限 1024 对全部 Claude 代际生效，上限按代际分 128K / 64K 档；GPT 系模型跳过 additionalModelRequestFields 构建逻辑。/v1/models 返回账号池实际可用的模型列表，含显示名与倍率。',
-          'max_tokens is constrained per generation: the 1024 floor applies to every Claude generation with 128K / 64K ceilings by tier; GPT-family models skip the additionalModelRequestFields build. /v1/models lists the models actually available in the account pool with display names and rate multipliers.',
+          'max_tokens 按模型代际有约束：下限 1024 对全部 Claude 代际生效，上限按代际分 128K / 64K 档；GPT 系模型跳过 additionalModelRequestFields 构建逻辑。',
+          'max_tokens is constrained per generation: the 1024 floor applies to every Claude generation with 128K / 64K ceilings by tier; GPT-family models skip the additionalModelRequestFields build.',
         ),
       ],
       table: {

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
+  ArrowLeft,
   BookOpen,
   ExternalLink,
   LifeBuoy,
@@ -23,6 +24,20 @@ import '@/components/docs/docs.css'
 
 type QuickToolTab = 'claude-code' | 'codex-cli' | 'openai-sdk' | 'cc-switch'
 type OsTab = 'unix' | 'windows'
+
+/** 解析服务地址：非空时必须是合法的 http(s) 绝对地址且不带 query/fragment，返回 URL 或 null */
+function parseBaseUrl(input: string): URL | null {
+  const trimmed = input.trim()
+  if (!trimmed) return null
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (url.search || url.hash) return null
+    return url
+  } catch {
+    return null
+  }
+}
 
 /** 静态兜底模型名（用户已确认剔除模型下拉；示例统一用此值） */
 const FALLBACK_MODEL = 'claude-sonnet-4-5'
@@ -66,12 +81,12 @@ function OsTabs({ active, onChange }: { active: OsTab; onChange: (v: OsTab) => v
   )
 }
 
-export function DocsPage() {
+export function DocsPage({ onBack }: { onBack?: () => void }) {
   const { t, i18n } = useTranslation()
   const locale = (i18n.language === 'en' ? 'en' : 'zh') as 'zh' | 'en'
   const { data: apiKeys } = useApiKeys()
 
-  const [baseUrl, setBaseUrl] = useState(window.location.origin)
+  const [baseUrlInput, setBaseUrlInput] = useState(window.location.origin)
   const [selectedKeyId, setSelectedKeyId] = useState<number | null>(null)
   const [activeToolTab, setActiveToolTab] = useState<QuickToolTab>('claude-code')
   const [claudeOs, setClaudeOs] = useState<OsTab>('unix')
@@ -96,6 +111,14 @@ export function DocsPage() {
 
   const selectedKey = apiKeys?.find((k) => k.id === selectedKeyId) ?? null
   const apiKey = selectedKey?.key ?? '<API_KEY>'
+
+  // 生成器统一用派生地址：经 URL 规范化（空格/控制字符已编码）+ 去尾斜杠；
+  // 空值/非法输入回退页面 origin，保证示例永远可复制
+  const parsedBaseUrl = parseBaseUrl(baseUrlInput)
+  const baseUrlError = parsedBaseUrl === null && baseUrlInput.trim() !== ''
+  const baseUrl = parsedBaseUrl
+    ? `${parsedBaseUrl.origin}${parsedBaseUrl.pathname}`.replace(/\/+$/, '')
+    : window.location.origin
 
   const guides = useMemo(() => buildGuides(baseUrl, locale), [baseUrl, locale])
   const endpoints = useMemo(() => buildEndpointSpecs(baseUrl, locale), [baseUrl, locale])
@@ -132,8 +155,14 @@ export function DocsPage() {
   // 无 fragment 的普通入口不滚动，避免进入文档页即跳过 hero
   useEffect(() => {
     if (!hash) return
+    // 分区级目标（tab 点击 / #分区 直达）回到页面顶部：hero + tabs + 分区标题整体可见，
+    // 按锚点偏移滚动会把 hero 截掉；指南/接口等条目级目标仍按锚点定位
+    if (target.id === target.section) {
+      window.scrollTo({ top: 0 })
+      return
+    }
     document.getElementById(target.id)?.scrollIntoView({ block: 'start' })
-  }, [target.id, hash])
+  }, [target.id, target.section, hash])
 
   const tocItems = useMemo<DocsTOCItem[]>(
     () => [
@@ -213,9 +242,30 @@ print(resp.choices[0].message.content)`
             <BookOpen className="size-3.5" />
             KIRO2CC / {t('docs.eyebrow')}
           </div>
-          <h2>{t('docs.heroTitle')}</h2>
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label={t('common.back')}
+                className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            )}
+            <h2>{t('docs.heroTitle')}</h2>
+          </div>
           <p>{t('docs.heroSubtitle')}</p>
         </div>
+        <a
+          href="https://github.com/TsinHzl/kiro2cc-proxy#readme"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group inline-flex h-[31px] shrink-0 items-center gap-1.5 rounded-[7px] px-[11px] text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
+        >
+          <ExternalLink className="h-3.5 w-3.5 text-ink-3 transition-colors group-hover:text-ink-2" />
+          GitHub README
+        </a>
       </header>
 
       <div className="docs-toolbar">
@@ -225,6 +275,13 @@ print(resp.choices[0].message.content)`
               key={s.id}
               href={`#${s.id}`}
               aria-current={activeSection === s.id ? 'page' : undefined}
+              onClick={(e) => {
+                // 同 hash 重复点击不触发 hashchange，原生 fragment 滚动会截掉 hero；手动回顶部
+                if (activeSection === s.id) {
+                  e.preventDefault()
+                  window.scrollTo({ top: 0 })
+                }
+              }}
             >
               <s.icon className="size-4" />
               {s.label}
@@ -258,32 +315,47 @@ print(resp.choices[0].message.content)`
                 ))}
               </div>
 
-              <div className="docs-callout" style={{ marginTop: 0 }}>
-                <label className="mr-2 font-semibold">{t('docs.selectKey')}</label>
-                <select
-                  value={selectedKeyId ?? ''}
-                  onChange={(e) => setSelectedKeyId(e.target.value ? Number(e.target.value) : null)}
-                  className="rounded-[7px] border-[0.5px] border-hairline-2 bg-surface-2 px-2 py-1 text-[12px]"
-                  aria-label={t('docs.selectKey')}
-                >
-                  {apiKeys && apiKeys.length > 0 ? (
-                    apiKeys.map((k) => (
-                      <option key={k.id} value={k.id}>
-                        {k.name}（{k.key.slice(0, 7)}...{k.key.slice(-4)}）
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">{t('docs.noKeys')}</option>
-                  )}
-                </select>
-                <span className="ml-2 text-ink-3">{t('docs.baseUrlLabel')}</span>
-                <input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  className="ml-1 w-[240px] rounded-[7px] border-[0.5px] border-hairline-2 bg-surface-2 px-2 py-1 font-mono text-[12px]"
-                  aria-label={t('docs.baseUrlLabel')}
-                />
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[10px] border-[0.5px] border-hairline bg-surface px-4 py-2.5 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">API Key</span>
+                  <select
+                    value={selectedKeyId ?? ''}
+                    onChange={(e) => setSelectedKeyId(e.target.value ? Number(e.target.value) : null)}
+                    className="rounded-[6px] border-[0.5px] border-hairline-2 bg-surface-2 px-2 py-1 text-[12px] text-ink"
+                    aria-label={t('docs.selectKey')}
+                  >
+                    {apiKeys && apiKeys.length > 0 ? (
+                      apiKeys.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name}（{k.key.slice(0, 7)}...{k.key.slice(-4)}）
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">{t('docs.noKeys')}</option>
+                    )}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">{t('docs.baseUrlLabel')}</span>
+                  <input
+                    value={baseUrlInput}
+                    onChange={(e) => setBaseUrlInput(e.target.value)}
+                    aria-invalid={!!baseUrlError}
+                    aria-describedby={baseUrlError ? 'docs-baseurl-error' : undefined}
+                    className={`w-[220px] rounded-[6px] border-[0.5px] px-2 py-1 font-mono text-[12px] ${
+                      baseUrlError
+                        ? 'border-danger bg-danger-soft text-ink'
+                        : 'border-hairline-2 bg-surface-2 text-ink'
+                    }`}
+                    aria-label={t('docs.baseUrlLabel')}
+                  />
+                </div>
               </div>
+              {baseUrlError && (
+                <p id="docs-baseurl-error" role="alert" className="-mt-1 text-[11.5px] text-danger">
+                  {t('docs.baseUrlInvalid')}
+                </p>
+              )}
 
               <div className="mt-4">
                 <div className="docs-tabs mb-3" role="tablist" aria-label={t('docs.toolsLabel')}>

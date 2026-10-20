@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState, useEffect, useMemo, useRef } from 'react'
-import {Server, Key, Settings, BarChart2, BookOpen, ScrollText, Boxes, Palette} from 'lucide-react'
+import {Server, Key, Settings, BarChart2, ScrollText, Boxes, Palette} from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -662,7 +662,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
         { key: 'apikeys', label: 'API Keys', icon: Key, count: apiKeys && apiKeys.length > 0 ? apiKeys.length : undefined, active: activeTab === 'apikeys', onClick: () => { setActiveTab('apikeys'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'daily', label: t('dashboard.navDailyStats'), icon: BarChart2, count: undefined, active: dailyView !== null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView('list'); setDailyFromSidebar(true); setDailyRange('today'); setDailyCustomRange(null); setDailyDetailFromSummary(false) } },
         { key: 'models', label: t('dashboard.navModels'), icon: Boxes, count: undefined, active: activeTab === 'models', onClick: () => { setActiveTab('models'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
-        { key: 'docs', label: t('dashboard.navDocs'), icon: BookOpen, count: undefined, active: activeTab === 'docs', onClick: () => { setActiveTab('docs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
       ],
     },
     {
@@ -697,7 +696,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         {activeTab === 'logs' ? (
           <LogViewerPage />
         ) : activeTab === 'docs' ? (
-          <DocsPage />
+          <DocsPage onBack={() => setActiveTab('credentials')} />
         ) : activeTab === 'theme' ? (
           <ThemeSettingsPage />
         ) : activeTab === 'settings' ? (
@@ -799,6 +798,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           cumulativeFailures={cumulativeFailures}
           cumulativeFailureRate={cumulativeFailureRate}
           onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false); setDailyRange('today'); setDailyCustomRange(null); setDailyDetailFromSummary(false) }}
+          onOpenDocs={() => { setActiveTab('docs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) }}
         />
 
         {/* 凭据列表（自本文件拆出，纯代码搬移） */}

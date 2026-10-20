@@ -114,12 +114,11 @@ const MODELS_RESP = `{
     {
       "id": "claude-sonnet-4-5",
       "object": "model",
-      "created": 1700000000,
+      "created": 1730304000,
       "owned_by": "anthropic",
       "display_name": "Claude Sonnet 4.5",
-      "type": "claude",
-      "max_tokens": 65536,
-      "rate_multiplier": 1.0
+      "type": "chat",
+      "max_tokens": 64000
     }
   ]
 }`
@@ -253,8 +252,8 @@ export function buildEndpointSpecs(baseUrl: string, locale: DocsLocale = 'zh'): 
       title: copy(locale, '模型列表', 'List models'),
       description: copy(
         locale,
-        'OpenAI 格式的模型列表。展示当前账号池实际可用的模型 ID、显示名与倍率。开启 modelsOfficialAliases 后会追加官方连字符别名（如 claude-opus-4.6 → claude-opus-4-6）。',
-        'OpenAI-format model list showing the model IDs, display names and rate multipliers actually available in the account pool. With modelsOfficialAliases on, official hyphenated aliases are appended (e.g. claude-opus-4.6 → claude-opus-4-6).',
+        'OpenAI 格式的模型列表，返回服务提供的模型 ID 与显示名（列表有缓存，上游刷新失败时回退内置模型表）。开启 modelsOfficialAliases 后会追加官方连字符别名（如 claude-opus-4.6 → claude-opus-4-6）。',
+        'OpenAI-format model list returning the model IDs and display names this service offers (the list is cached; when the upstream refresh fails it falls back to a built-in model table). With modelsOfficialAliases on, official hyphenated aliases are appended (e.g. claude-opus-4.6 → claude-opus-4-6).',
       ),
       parameters: undefined,
       curl: `curl --url ${base}/v1/models \\

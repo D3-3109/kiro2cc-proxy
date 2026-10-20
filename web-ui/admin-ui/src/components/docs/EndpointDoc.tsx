@@ -64,11 +64,11 @@ const METHOD_COLORS: Record<string, string> = {
   DELETE: 'bg-danger-soft text-danger',
 }
 
-/** HTTP 方法徽章（小号用于 TOC） */
-export function MethodBadge({ method, sm }: { method: string; sm?: boolean }) {
+/** HTTP 方法徽章 */
+export function MethodBadge({ method }: { method: string }) {
   return (
     <span
-      className={`inline-flex items-center font-bold ${sm ? 'rounded-[4px] px-1.5 py-0.5 text-[9.5px]' : 'rounded-[6px] px-2 py-0.5 text-[10.5px]'} ${
+      className={`inline-flex items-center font-bold rounded-[6px] px-2 py-0.5 text-[10.5px] ${
         METHOD_COLORS[method] || 'bg-surface-3 text-ink-2'
       }`}
     >
@@ -82,9 +82,13 @@ const TD_BASE = 'border-b-[0.5px] border-hairline px-2.5 py-1.5 align-top text-[
 /** 折叠端点卡片：方法徽章 + 路径 + 描述 + 参数表 + 请求/响应示例 + cURL */
 export function EndpointDoc({ endpoint, activeId }: { endpoint: EndpointSpec; activeId: string }) {
   const [expanded, setExpanded] = useState(activeId === endpoint.id)
+  const [prevActiveId, setPrevActiveId] = useState(activeId)
 
-  // hash 直达该端点时强制展开（activeId 变化驱动，与 codex2cc 行为一致）
-  if (activeId === endpoint.id && !expanded) setExpanded(true)
+  // hash 导航切入该端点的瞬间展开一次；之后允许手动折叠（再次导航到本端点会重新展开）
+  if (activeId !== prevActiveId) {
+    setPrevActiveId(activeId)
+    if (activeId === endpoint.id) setExpanded(true)
+  }
 
   return (
     <article id={endpoint.id} className="scroll-mt-24">

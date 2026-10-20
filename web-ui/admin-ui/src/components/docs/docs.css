@@ -48,7 +48,7 @@
   flex-wrap: wrap;
   gap: 4px;
   border-radius: 10px;
-  background: var(--surface-2);
+  background: var(--surface-3);
   padding: 4px;
 }
 .docs-tabs a {
@@ -64,12 +64,10 @@
 }
 .docs-tabs a:hover {
   color: var(--ink);
-  background: var(--surface-3);
 }
 .docs-tabs a[aria-current='page'] {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 /* —— 双栏布局：内容 + 右侧 TOC —— */

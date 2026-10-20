@@ -58,7 +58,7 @@ export interface CcSwitchTarget {
   baseUrl?: string
 }
 
-/** 生成 cc-switch 深链接。Base URL 取当前页面 origin */
+/** 生成 cc-switch 深链接。Base URL 优先取 target.baseUrl（去空白），未传或为空时回退页面 origin，末尾斜杠统一去除 */
 export function buildCcSwitchDeeplink(app: CcSwitchApp, target: CcSwitchTarget): string {
   const origin = (target.baseUrl?.trim() || window.location.origin).replace(/\/+$/, '')
   const keyName = target.keyName?.trim()
