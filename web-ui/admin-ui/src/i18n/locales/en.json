@@ -920,7 +920,6 @@
     "sectionDevelopment": "Development",
     "sectionModelApi": "API reference",
     "sectionTroubleshooting": "Troubleshooting",
-    "sectionSummary": "Documentation",
     "sectionSummaries": {
       "quick-start": "Choose a client, generate its configuration and make your first request.",
       "development": "From URLs and auth to model mapping and streaming.",
@@ -954,11 +953,6 @@
     "verifyNote": "Seeing the message_stop event or a full JSON means the pipeline works; verify the final model and usage on the Usage page.",
     "verifyLink": "Connection checks →",
     "endpointsGroup": "Public endpoints",
-    "tocTitle": "On this page",
-    "searchLabel": "Search documentation",
-    "searchPlaceholder": "Search endpoints, parameters or errors…",
-    "searchClear": "Clear search",
-    "searchCount": "{{count}} results",
-    "searchEmpty": "Try a model, a /v1 path or 429."
+    "tocTitle": "On this page"
   }
 }

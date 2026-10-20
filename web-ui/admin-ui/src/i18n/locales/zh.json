@@ -920,7 +920,6 @@
     "sectionDevelopment": "开发指南",
     "sectionModelApi": "接口参考",
     "sectionTroubleshooting": "排障指南",
-    "sectionSummary": "使用文档",
     "sectionSummaries": {
       "quick-start": "选好客户端，生成配置，完成第一次请求。",
       "development": "从地址与认证到模型映射和流式响应。",
@@ -954,11 +953,6 @@
     "verifyNote": "看到 message_stop 事件或完整 JSON 后即链路已通；用量统计页可核对最终模型与用量。",
     "verifyLink": "连接排查 →",
     "endpointsGroup": "公开端点",
-    "tocTitle": "本页目录",
-    "searchLabel": "搜索文档",
-    "searchPlaceholder": "搜索接口、参数或错误码…",
-    "searchClear": "清除搜索",
-    "searchCount": "找到 {{count}} 项",
-    "searchEmpty": "试试模型名、/v1 路径或 429。"
+    "tocTitle": "本页目录"
   }
 }

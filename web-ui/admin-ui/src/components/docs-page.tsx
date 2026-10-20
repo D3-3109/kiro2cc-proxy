@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-// 使用文档页（自 codex2cc Docs.tsx 适配）：hero + 分区 tabs + 搜索 + 左内容/右 TOC +
+// 使用文档页（自 codex2cc Docs.tsx 适配）：hero + 分区 tabs + 左内容/右 TOC +
 // hash 路由 + API Key 填充 + 四客户端配置生成器（Claude Code / Codex CLI / OpenAI SDK / CC Switch）
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,15 +8,13 @@ import {
   BookOpen,
   ExternalLink,
   LifeBuoy,
-  Search,
   Server,
   Sparkles,
   Wrench,
-  X,
 } from 'lucide-react'
 import { useApiKeys } from '@/hooks/use-credentials'
 import { buildCcSwitchDeeplink, importToCcSwitch } from '@/lib/ccswitch'
-import { resolveDocsTarget, searchDocEntries, type DocEntry } from '@/components/docs/docsNavigation'
+import { resolveDocsTarget, type DocEntry } from '@/components/docs/docsNavigation'
 import { buildEndpointSpecs } from '@/components/docs/docsContent'
 import { buildGuides, type DocsSection } from '@/components/docs/docsGuides'
 import { CodeBlock, EndpointDoc } from '@/components/docs/EndpointDoc'
@@ -68,76 +66,6 @@ function OsTabs({ active, onChange }: { active: OsTab; onChange: (v: OsTab) => v
   )
 }
 
-/** 文档搜索框（聚焦且有词时展开结果浮层） */
-function DocsSearch({ entries }: { entries: DocEntry[] }) {
-  const { t } = useTranslation()
-  const [query, setQuery] = useState('')
-  const [focused, setFocused] = useState(false)
-  const results = searchDocEntries(query, entries)
-
-  return (
-    <div
-      className="docs-search"
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) setFocused(false)
-      }}
-    >
-      <Search className="size-4" />
-      <input
-        type="search"
-        aria-label={t('docs.searchLabel')}
-        placeholder={t('docs.searchPlaceholder')}
-        value={query}
-        onFocus={() => setFocused(true)}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            setQuery('')
-            setFocused(false)
-          }
-        }}
-      />
-      {query && (
-        <button
-          type="button"
-          aria-label={t('docs.searchClear')}
-          className="docs-search-clear"
-          onClick={() => setQuery('')}
-        >
-          <X className="size-4" />
-        </button>
-      )}
-      {focused && query.trim() && (
-        <div className="docs-search-results">
-          <div className="docs-search-count" role="status">
-            {t('docs.searchCount', { count: results.length })}
-          </div>
-          {results.length ? (
-            results.map((entry) => (
-              <a
-                key={entry.id}
-                href={`#${entry.id}`}
-                onClick={() => {
-                  setQuery('')
-                  setFocused(false)
-                }}
-              >
-                <span>
-                  <strong>{entry.title}</strong>
-                  <small>{entry.summary}</small>
-                </span>
-                <ExternalLink className="size-4 shrink-0" />
-              </a>
-            ))
-          ) : (
-            <p>{t('docs.searchEmpty')}</p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export function DocsPage() {
   const { t, i18n } = useTranslation()
   const locale = (i18n.language === 'en' ? 'en' : 'zh') as 'zh' | 'en'
@@ -184,17 +112,16 @@ export function DocsPage() {
 
   const entries = useMemo<DocEntry[]>(
     () => [
-      ...sections.map((s) => ({ id: s.id, section: s.id, title: s.label, summary: t('docs.sectionSummary') })),
-      ...guides.map((g) => ({ id: g.id, section: g.section, title: g.title, summary: g.summary })),
+      ...sections.map((s) => ({ id: s.id, section: s.id, title: s.label })),
+      ...guides.map((g) => ({ id: g.id, section: g.section, title: g.title })),
       ...endpoints.map((e) => ({
         id: e.id,
         section: 'model-api',
         title: e.path,
-        summary: e.title,
         method: e.method,
       })),
     ],
-    [sections, guides, endpoints, t],
+    [sections, guides, endpoints],
   )
 
   const target = useMemo(() => resolveDocsTarget(hash, entries), [hash, entries])
@@ -279,7 +206,7 @@ print(resp.choices[0].message.content)`
   }
 
   return (
-    <div className="docs-page">
+    <div>
       <header className="docs-hero">
         <div>
           <div className="docs-eyebrow">
@@ -304,7 +231,6 @@ print(resp.choices[0].message.content)`
             </a>
           ))}
         </nav>
-        <DocsSearch entries={entries} />
       </div>
 
       <div className="docs-layout">

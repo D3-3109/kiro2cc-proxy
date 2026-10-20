@@ -1,11 +1,6 @@
 /* Copyright (c) 2026 Harllan He. Licensed under MIT. */
-/* 使用文档页专属样式：hero / 分区 tabs / 搜索 / 步骤条 / 指南折叠体 / 双栏布局。
+/* 使用文档页专属样式：hero / 分区 tabs / 步骤条 / 指南折叠体 / 双栏布局。
    语义 token（--surface/--ink/--brand 等）由 index.css 亮暗两套主题提供，本文件零硬编码色值。 */
-
-.docs-page {
-  margin-inline: auto;
-  max-width: 1240px;
-}
 
 /* —— hero —— */
 .docs-hero {
@@ -40,7 +35,7 @@
   color: var(--ink-2);
 }
 
-/* —— 工具条：分区 tabs + 搜索 —— */
+/* —— 工具条：分区 tabs —— */
 .docs-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -75,106 +70,6 @@
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow-sm);
-}
-
-/* —— 搜索 —— */
-.docs-search {
-  position: relative;
-  margin-left: auto;
-  min-width: 220px;
-}
-.docs-search > svg {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  transform: translateY(-50%);
-  color: var(--ink-3);
-}
-.docs-search input {
-  height: 34px;
-  width: 100%;
-  border: 0.5px solid var(--hairline-2);
-  border-radius: 9px;
-  background: var(--surface);
-  padding-left: 32px;
-  padding-right: 30px;
-  font-size: 12.5px;
-  color: var(--ink);
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.docs-search input::placeholder {
-  color: var(--ink-3);
-}
-.docs-search input:focus-visible {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
-}
-.docs-search .docs-search-clear {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  padding: 3px;
-  color: var(--ink-3);
-}
-.docs-search .docs-search-clear:hover {
-  color: var(--ink);
-  background: var(--surface-3);
-}
-.docs-search-results {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 40;
-  width: min(420px, 90vw);
-  max-height: 380px;
-  overflow-y: auto;
-  border: 0.5px solid var(--hairline-2);
-  border-radius: 11px;
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
-  padding: 6px;
-}
-.docs-search-count {
-  padding: 6px 8px 4px;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--ink-3);
-}
-.docs-search-results a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-radius: 8px;
-  padding: 7px 8px;
-  color: var(--ink-2);
-}
-.docs-search-results a:hover {
-  background: var(--surface-3);
-  color: var(--ink);
-}
-.docs-search-results a strong {
-  display: block;
-  font-size: 12px;
-  color: var(--ink);
-}
-.docs-search-results a small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--ink-3);
-}
-.docs-search-results p {
-  padding: 12px 10px;
-  font-size: 12px;
-  color: var(--ink-3);
 }
 
 /* —— 双栏布局：内容 + 右侧 TOC —— */

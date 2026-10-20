@@ -662,12 +662,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
         { key: 'apikeys', label: 'API Keys', icon: Key, count: apiKeys && apiKeys.length > 0 ? apiKeys.length : undefined, active: activeTab === 'apikeys', onClick: () => { setActiveTab('apikeys'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'daily', label: t('dashboard.navDailyStats'), icon: BarChart2, count: undefined, active: dailyView !== null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView('list'); setDailyFromSidebar(true); setDailyRange('today'); setDailyCustomRange(null); setDailyDetailFromSummary(false) } },
         { key: 'models', label: t('dashboard.navModels'), icon: Boxes, count: undefined, active: activeTab === 'models', onClick: () => { setActiveTab('models'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
+        { key: 'docs', label: t('dashboard.navDocs'), icon: BookOpen, count: undefined, active: activeTab === 'docs', onClick: () => { setActiveTab('docs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
       ],
     },
     {
       title: t('dashboard.navSystem'),
       items: [
-        { key: 'docs', label: t('dashboard.navDocs'), icon: BookOpen, count: undefined, active: activeTab === 'docs', onClick: () => { setActiveTab('docs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'logs', label: t('dashboard.navLogs'), icon: ScrollText, count: undefined, active: activeTab === 'logs', onClick: () => { setActiveTab('logs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'theme', label: t('dashboard.navTheme'), icon: Palette, count: undefined, active: activeTab === 'theme', onClick: () => { setActiveTab('theme'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'settings', label: t('dashboard.navSettings'), icon: Settings, count: undefined, active: activeTab === 'settings', onClick: () => { setActiveTab('settings'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
