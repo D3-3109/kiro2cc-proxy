@@ -45,7 +45,68 @@ pub struct CredentialDaySummary {
     pub total_cache_read_tokens: u64,
 }
 
+/// 指定账号全部留存记录（受 MAX_RECORDS_PER_KEY 裁剪约束）的用量汇总
+///
+/// 与该页「总请求数」同口径：只统计当前仍留在明细缓冲里的记录，
+/// 不含已被裁剪的历史。费用为估算 USD，Credits 真实用量优先、缺失按模型回退估算。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialUsageSummary {
+    pub credential_id: u64,
+    pub total_requests: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cost: f64,
+    pub total_credits: f64,
+    /// 节省的 credits 总量（仅含有 credits_used 的记录）
+    pub total_credits_saved: f64,
+    /// 累计 cache 命中的输入 tokens（None 按 0 计入）
+    pub total_cache_read_tokens: u64,
+}
+
 impl UsageTracker {
+    /// 按账号聚合全部留存记录（不限日期）。
+    ///
+    /// 无记录时返回零值汇总（不报错），与 `get_today_summary_for_credential` 一致。
+    pub fn get_summary_for_credential(&self, credential_id: u64) -> CredentialUsageSummary {
+        let mut requests: u64 = 0;
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        let mut cache_read_tokens: u64 = 0;
+        let mut cost: f64 = 0.0;
+        let mut credits: f64 = 0.0;
+        let mut credits_saved: f64 = 0.0;
+
+        let records = self.records.read();
+        for r in records.iter() {
+            if r.credential_id != Some(credential_id) {
+                continue;
+            }
+            requests += 1;
+            input_tokens = input_tokens.saturating_add(r.input_tokens.max(0) as u64);
+            output_tokens = output_tokens.saturating_add(r.output_tokens.max(0) as u64);
+            cache_read_tokens = cache_read_tokens
+                .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
+            cost += r.estimated_cost;
+            let k_ref = get_k_ref(&r.model);
+            credits += r.credits_used.unwrap_or(r.estimated_cost * k_ref);
+            if let Some(cu) = r.credits_used {
+                credits_saved += r.estimated_cost * k_ref - cu;
+            }
+        }
+
+        CredentialUsageSummary {
+            credential_id,
+            total_requests: requests,
+            total_input_tokens: input_tokens,
+            total_output_tokens: output_tokens,
+            total_cache_read_tokens: cache_read_tokens,
+            total_cost: cost,
+            total_credits: credits,
+            total_credits_saved: credits_saved,
+        }
+    }
+
     /// 按 CST（UTC+8）当前日期聚合指定 credential 的用量。
     ///
     /// 返回结构包含今日的请求数、输入/输出 token、估算费用、credits 用量及节省值。

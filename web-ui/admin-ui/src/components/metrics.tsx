@@ -10,15 +10,30 @@ const BAR_COLS_5 = '1.1fr 1.35fr 1fr 1.25fr 1.1fr'
 const BAR_COLS_3 = '1fr 1.3fr 1fr'
 const BAR_COLS_4 = '1fr 1fr 1fr 1fr'
 const BAR_COLS_7 = 'repeat(7, minmax(136px, 1fr))'
+const BAR_COLS_8 = 'repeat(8, minmax(124px, 1fr))'
 
-/** 7 列紧凑模式：由 MetricsBar 下发，缩小内边距与字号 */
+/** 7 列及以上紧凑模式：由 MetricsBar 下发，缩小内边距与字号 */
 const CompactContext = createContext(false)
 
 /** 指标条外壳（方案1 .unified-card-bar）；非等宽 fr 列走内联 style */
-export function MetricsBar({ cols = 4, children }: { cols?: 3 | 4 | 5 | 7; children: ReactNode }) {
+export function MetricsBar({
+  cols = 4,
+  children,
+}: {
+  cols?: 3 | 4 | 5 | 7 | 8
+  children: ReactNode
+}) {
   const template =
-    cols === 7 ? BAR_COLS_7 : cols === 5 ? BAR_COLS_5 : cols === 3 ? BAR_COLS_3 : BAR_COLS_4
-  const compact = cols === 7
+    cols === 8
+      ? BAR_COLS_8
+      : cols === 7
+        ? BAR_COLS_7
+        : cols === 5
+          ? BAR_COLS_5
+          : cols === 3
+            ? BAR_COLS_3
+            : BAR_COLS_4
+  const compact = cols >= 7
   return (
     <CompactContext.Provider value={compact}>
       <section
@@ -106,6 +121,7 @@ export function MetricValue({
     <div className="flex items-baseline gap-1.5">
       <span
         className={`${compact ? 'text-[20px]' : 'text-[28px]'} font-bold leading-[1.1] tracking-[-0.02em] tabular-nums ${valueClass}`}
+        title={value}
       >
         {value}
       </span>

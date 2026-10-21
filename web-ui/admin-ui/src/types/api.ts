@@ -285,6 +285,18 @@ export interface DailySummary {
   totalCacheReadTokens: number  // 累计 cache 命中的输入 tokens
 }
 
+// 单账号全部留存记录的用量汇总（后端 /credentials/:id/usage/summary，不限日期）
+export interface CredentialUsageSummary {
+  credentialId: number
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number
+  totalCredits: number
+  totalCreditsSaved?: number
+  totalCacheReadTokens: number
+}
+
 // 单账号在某 CST 日期的用量汇总（后端 /credentials/:id/usage/today）
 export interface CredentialDaySummary {
   date: string           // "2026-06-26" CST (UTC+8)
