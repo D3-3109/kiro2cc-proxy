@@ -67,6 +67,26 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.33".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![Bilingual::new(
+                    "admin-ui 新增「使用文档」页：按设计稿重写为 sticky hero + 计数角标分区 tabs + STEP 01/02/03 三卡流转 + Mac 窗体代码工作台，内置快速接入、开发指南、接口参考、排障指南四大分区，支持 hash 深链、TOC 滚动跟随、API Key 自动填充与 CC Switch 一键导入；账号管理页与 API Keys 页的 GitHub README 外链改为站内文档入口",
+                    "New Usage Docs page in admin-ui: rewritten to match the design with a sticky hero, count-badged section tabs, a STEP 01/02/03 flow, and a Mac-style code workbench. It ships Quick Start, Development, API Reference and Troubleshooting sections with hash deep links, scroll-following TOC, API key auto-fill and one-click CC Switch import; the GitHub README links on the Accounts and API Keys pages now point to this in-app page",
+                )]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "文档页 Codex CLI 配置补齐 env_key = \"KIRO_API_KEY\" 且 .env 变量名同步，此前照抄页面配置首次请求会因不带密钥返回 401；接口参考的示例命令改用已选中的实际 API Key，不再固定 <API_KEY> 占位符；未选择 Key 时 CC Switch 卡片改为纯提示，不再把提示文案当链接复制",
+                        "Docs page Codex CLI config now includes env_key = \"KIRO_API_KEY\" with a matching .env variable name — copying the previous snippet returned 401 on the first request for lack of a key. API Reference examples use the selected key instead of a fixed <API_KEY> placeholder, and the CC Switch card shows plain text instead of making the hint copyable when no key is selected",
+                    ),
+                    Bilingual::new(
+                        "文档页细节修正：hash 跳转后的 TOC 高亮锁定改用定时器状态，不再在渲染期读取时钟，并修复清空 fragment 后高亮永久失效；代码块复制定时器补清理，避免连续点击堆叠与卸载后 setState；客户端切换改用 aria-pressed 按钮修正无障碍语义；排障示例标题补英文翻译，端点数量描述与端口展示修正",
+                        "Docs page fixes: the post-hash-jump TOC highlight lock now uses a timer-backed state instead of reading the clock during render, and no longer gets stuck after the fragment is cleared; the code block copy timer is cleaned up to avoid stacked timeouts and setState after unmount; client tabs use aria-pressed buttons with correct semantics; troubleshooting example labels are translated, and the endpoint count wording and port display are corrected",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.32".to_string(),
             is_latest: false,
             groups: vec![
