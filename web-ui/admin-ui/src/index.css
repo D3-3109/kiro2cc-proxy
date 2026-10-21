@@ -181,6 +181,12 @@
     width: 6px;
     height: 6px;
   }
+  /* Firefox 不支持 ::-webkit-scrollbar，单独声明细滚动条；
+     DialogContent 的负边距对齐依赖槽位约 6px，缺失时 Firefox 卡片会明显内缩 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-2) transparent;
+  }
   ::-webkit-scrollbar-track {
     background: transparent;
   }

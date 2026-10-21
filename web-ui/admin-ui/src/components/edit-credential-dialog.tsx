@@ -179,7 +179,10 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
-          <div className="space-y-5 overflow-y-auto flex-1 pr-1 py-1">
+          {/* 负右边距抵掉部分弹窗内边距，使卡片右缘与关闭按钮右缘对齐
+              （滚动条槽位为 6px 时，两者同距外框 17px）；原 pr-1 一并去掉，否则卡片会再内缩 4px。
+              scrollbar-gutter 保证内容未溢出时也预留槽位 → 卡片不随滚动条出现/消失而跳动 */}
+          <div className="-mr-1.5 space-y-5 overflow-y-auto flex-1 py-1 [scrollbar-gutter:stable] sm:-mr-3.5">
             {/* 核心凭据 */}
             <Section icon={KeyRound} title={t('credentials.sectionCore')}>
               {/* 昵称是本地备注名而非账号固有信息，允许反复编辑 */}
@@ -395,7 +398,8 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
             </Section>
           </div>
 
-          <DialogFooter className="pt-4">
+          {/* 页脚无滚动条槽位，负边距取 8px 让按钮右缘与卡片、关闭按钮三者对齐 */}
+          <DialogFooter className="pt-4 sm:-mr-2">
             <Button
               type="button"
               variant="outline"
