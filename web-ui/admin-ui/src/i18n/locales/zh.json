@@ -909,6 +909,8 @@
     }
   },
   "docs": {
+    "eyebrow": "使用文档",
+    "heroTitle": "从接入到用好每个接口",
     "heroSubtitle": "客户端配置、开发示例与接口参考，都从这里开始。",
     "tabsLabel": "文档分类",
     "osTabsLabel": "操作系统",
