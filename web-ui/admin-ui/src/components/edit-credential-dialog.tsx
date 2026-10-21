@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-import { useState, useEffect, useRef } from 'react'
+import { useState, useLayoutEffect } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import {
@@ -26,6 +26,20 @@ interface EditCredentialDialogProps {
   credential: CredentialStatusItem
 }
 
+/** 打开时初始值快照：credentialId 标识归属账号，供渲染守卫判断快照是否已就绪 */
+interface Snapshot {
+  credentialId: number
+  authRegion: string
+  apiRegion: string
+  nickname: string
+  email: string
+  clientId: string
+  profileArn: string
+  machineId: string
+  proxyUrl: string
+  loginSource: string
+}
+
 export function EditCredentialDialog({ open, onOpenChange, credential }: EditCredentialDialogProps) {
   const { t } = useTranslation()
   const [authRegion, setAuthRegion] = useState('')
@@ -48,18 +62,17 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
   // 两个端点串行提交，任一进行中即锁表单
   const isPending = updatePending || priorityPending
 
-  /** 各可编辑字段的打开时初始值快照。
-   *  列表每 30s 自动刷新（TanStack Query 生成新引用），提交 diff 若直接与 credential 比对，
-   *  会在用户编辑中途后台恰逢字段后端值变化时误判「有变更」——以打开瞬间的快照为准。 */
-  const initial = useRef({
-    authRegion: '', apiRegion: '', nickname: '', email: '', clientId: '',
-    profileArn: '', machineId: '', proxyUrl: '', loginSource: '',
-  })
+  /** 打开时初始值快照；null = 快照不存在（弹窗关闭或尚未写入）。用 state 而非 ref：
+   *  locked 派生与表单首帧渲染都依赖它，渲染期读 ref.current 是 React 明确的反模式。
+   *  列表每 30s 自动刷新（TanStack Query 生成新引用），提交 diff 若直接与 credential
+   *  比对，会在用户编辑中途后台恰逢字段后端值变化时误判「有变更」——以打开瞬间的快照为准。 */
+  const [initial, setInitial] = useState<Snapshot | null>(null)
 
   // 仅在对话框打开时按当前凭据初始化表单：已锁定的有值字段只读展示，
   // 其余字段（含已锁定的无值字段）保持可编辑。依赖取 credential.id 而非整个 credential 对象 ——
   // 列表每 30s 自动刷新会为数据变动的行生成新引用，依赖整个对象会在编辑中途静默重置表单。
-  useEffect(() => {
+  // 用 useLayoutEffect 而非 useEffect：快照写入先于 paint，守卫帧不会被绘制成空窗
+  useLayoutEffect(() => {
     if (open) {
       const authRegion = credential.authRegion || ''
       const apiRegion = credential.apiRegion || ''
@@ -70,10 +83,11 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
       const machineId = credential.machineId || ''
       const proxyUrl = credential.proxyUrl || ''
       const loginSource = normalizeLoginSource(credential.provider) ?? ''
-      initial.current = {
+      setInitial({
+        credentialId: credential.id,
         authRegion, apiRegion, nickname, email, clientId,
         profileArn, machineId, proxyUrl, loginSource,
-      }
+      })
       setAuthRegion(authRegion)
       setApiRegion(apiRegion)
       setNickname(nickname)
@@ -87,11 +101,25 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
       setProxyPassword('')
       setPriority(String(credential.priority))
       setLoginSourceValue(loginSource)
+    } else {
+      // 关闭即作废快照：同账号紧接着重开时守卫依然生效，不会显示上一会话的旧值
+      setInitial(null)
     }
   }, [open, credential.id])
 
+  // 快照未就绪（弹窗关闭或刚打开、effect 尚未写入）只渲染 Dialog 骨架，不得向下派生 locked：
+  // 弹窗在账号表格每行常驻挂载，关闭态 initial 为 null，若继续执行 `!!initial.email`
+  // 会对 null 取属性抛 TypeError 致整页白屏。打开态 useLayoutEffect 在 paint 前写入
+  // 快照，骨架帧不会暴露。守卫位于全部 hooks 之后，不破坏 hooks 顺序
+  if (initial === null || initial.credentialId !== credential.id) {
+    return <Dialog open={open} onOpenChange={onOpenChange} />
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    // 守卫保证表单仅在快照就绪后渲染，此分支理论不可达；防御性检查以收窄快照类型
+    if (initial === null || initial.credentialId !== credential.id) return
 
     // 优先级不在 UpdateCredentialRequest 里，走独立端点；先校验避免半途失败
     const priorityChanged = priority !== String(credential.priority)
@@ -100,23 +128,23 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
       return
     }
 
-    // 构建只包含有变更的字段。判据是与打开时初始快照（initial.current）比对：
+    // 构建只包含有变更的字段。判据是与打开时初始快照（initial）比对：
     // 「有值即锁定」字段在此永不出现在 data（渲染层只读、值恒等于快照，比对天然不成立）；
     // 无值补录字段留空时与快照相等，同样不提交
     const data: Record<string, string> = {}
-    if (authRegion !== initial.current.authRegion) data.authRegion = authRegion
-    if (apiRegion !== initial.current.apiRegion) data.apiRegion = apiRegion
-    if (nickname !== initial.current.nickname) data.nickname = nickname
-    if (email !== initial.current.email) data.email = email
-    if (clientId !== initial.current.clientId) data.clientId = clientId
+    if (authRegion !== initial.authRegion) data.authRegion = authRegion
+    if (apiRegion !== initial.apiRegion) data.apiRegion = apiRegion
+    if (nickname !== initial.nickname) data.nickname = nickname
+    if (email !== initial.email) data.email = email
+    if (clientId !== initial.clientId) data.clientId = clientId
     if (clientSecret !== '') data.clientSecret = clientSecret
-    if (profileArn !== initial.current.profileArn) data.profileArn = profileArn
-    if (machineId !== initial.current.machineId) data.machineId = machineId
-    if (proxyUrl !== initial.current.proxyUrl) data.proxyUrl = proxyUrl
+    if (profileArn !== initial.profileArn) data.profileArn = profileArn
+    if (machineId !== initial.machineId) data.machineId = machineId
+    if (proxyUrl !== initial.proxyUrl) data.proxyUrl = proxyUrl
     // 代理地址被清空时同步清除认证信息：后端对 username/password 是「不传不修改、
     // 传空串即清除」语义，只清地址而不清账密会持久化出「无代理但残留凭据」的脏数据。
     // 代理 URL 恒可编辑，清空即删除代理
-    if (proxyUrl === '' && initial.current.proxyUrl !== '') {
+    if (proxyUrl === '' && initial.proxyUrl !== '') {
       data.proxyUsername = ''
       data.proxyPassword = ''
     } else {
@@ -125,7 +153,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
     }
     // 登录来源：仅 social 账号且当前无值（未锁定）可改；空串表示清除。
     // 不写 authMethod —— 后端把它也算作身份变更，会白清 subscription_title
-    if (isSocial && loginSourceValue !== initial.current.loginSource) data.provider = loginSourceValue
+    if (isSocial && loginSourceValue !== initial.loginSource) data.provider = loginSourceValue
 
     if (!priorityChanged && Object.keys(data).length === 0) {
       toast.info(t('credentials.toastNoFieldsToUpdate'))
@@ -152,16 +180,16 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
   const isIdc = credential.authMethod === 'idc'
   // 仅 social 账号的 provider 是「登录来源」；external_idp 的 provider 存的是 IdP 名称，不可被此处覆盖
   const isSocial = credential.authMethod === 'social'
-  // 有值即锁定的只读字段集合。判据与提交 diff 同源（initial.current 打开时快照）而非实时 credential：
+  // 有值即锁定的只读字段集合。判据与提交 diff 同源（initial 打开时快照）而非实时 credential：
   // 列表 30s 刷新会让实时值中途翻转锁定态，出现「展示已锁定但提交仍覆盖该字段」的不一致
   const lockNote = t('credentials.lockedFieldNote')
   const locked = {
-    email: !!initial.current.email,
-    loginSource: isSocial && !!initial.current.loginSource,
-    authRegion: !!initial.current.authRegion,
-    clientId: !!initial.current.clientId,
-    profileArn: !!initial.current.profileArn,
-    machineId: !!initial.current.machineId,
+    email: !!initial.email,
+    loginSource: isSocial && !!initial.loginSource,
+    authRegion: !!initial.authRegion,
+    clientId: !!initial.clientId,
+    profileArn: !!initial.profileArn,
+    machineId: !!initial.machineId,
   }
 
   return (
@@ -179,10 +207,10 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
-          {/* 负右边距抵掉部分弹窗内边距，使卡片右缘与关闭按钮右缘对齐
-              （滚动条槽位为 6px 时，两者同距外框 17px）；原 pr-1 一并去掉，否则卡片会再内缩 4px。
-              scrollbar-gutter 保证内容未溢出时也预留槽位 → 卡片不随滚动条出现/消失而跳动 */}
-          <div className="-mr-1.5 space-y-5 overflow-y-auto flex-1 py-1 [scrollbar-gutter:stable] sm:-mr-3.5">
+          {/* 卡片右缘对齐 X 图标右缘：图标距弹窗右边框 = right-4(16) + p-0.5(2) + border(1) = 19px。
+              弹窗内边距 p-4 / sm:p-6，故外边距取 mr-0.5 / sm:-mr-1.5 时卡片恰好落在 19px。
+              滚动条整体隐藏（无槽位），滚动仍可用，各平台对齐口径一致 */}
+          <div className="mr-0.5 space-y-5 overflow-y-auto flex-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mr-1.5">
             {/* 核心凭据 */}
             <Section icon={KeyRound} title={t('credentials.sectionCore')}>
               {/* 昵称是本地备注名而非账号固有信息，允许反复编辑 */}
@@ -398,8 +426,8 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
             </Section>
           </div>
 
-          {/* 页脚无滚动条槽位，负边距取 8px 让按钮右缘与卡片、关闭按钮三者对齐 */}
-          <DialogFooter className="pt-4 sm:-mr-2">
+          {/* 与卡片同口径：按钮右缘同样落在 X 图标右缘 19px 处 */}
+          <DialogFooter className="mr-0.5 pt-4 sm:-mr-1.5">
             <Button
               type="button"
               variant="outline"

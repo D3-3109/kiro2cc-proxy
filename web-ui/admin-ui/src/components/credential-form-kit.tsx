@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { FIELD_BOX } from '@/components/ui/input'
@@ -58,10 +58,19 @@ export function ReadOnlyField({
   /** 悬停完整值（默认 value 本身） */
   title?: string
 }) {
+  const fieldId = useId()
   return (
     <div>
-      {label && <div className={`${FIELD_LABEL} ${FIELD_LABEL_SPACING}`}>{label}</div>}
-      <div className={mono ? `${READONLY_BOX} font-mono` : READONLY_BOX} title={title ?? value}>
+      {label && (
+        <div id={`${fieldId}-label`} className={`${FIELD_LABEL} ${FIELD_LABEL_SPACING}`}>{label}</div>
+      )}
+      {/* role="group" 让 aria-labelledby 在通用 div 上生效：读屏进入时先播报标签再播报值 */}
+      <div
+        className={mono ? `${READONLY_BOX} font-mono` : READONLY_BOX}
+        title={title ?? value}
+        role="group"
+        aria-labelledby={label ? `${fieldId}-label` : undefined}
+      >
         <span className="truncate">{value}</span>
         {lockNote && (
           <span className="ml-auto flex-none text-[10px] text-ink-3">{lockNote}</span>

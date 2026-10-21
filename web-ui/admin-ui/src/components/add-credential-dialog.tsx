@@ -122,8 +122,8 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
-          {/* 与编辑弹窗同款：卡片右缘对齐关闭按钮右缘（前提同为 6px 滚动条槽位） */}
-          <div className="-mr-1.5 space-y-5 overflow-y-auto flex-1 py-1 [scrollbar-gutter:stable] sm:-mr-3.5">
+          {/* 与编辑弹窗同款：卡片右缘对齐 X 图标右缘（19px），滚动条隐藏、滚动仍可用 */}
+          <div className="mr-0.5 space-y-5 overflow-y-auto flex-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mr-1.5">
             {/* 核心凭据 */}
             <Section icon={KeyRound} title={t('credentials.sectionCore')}>
               <Field
@@ -334,8 +334,8 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
             </Section>
           </div>
 
-          {/* 同编辑弹窗：按钮右缘与卡片、关闭按钮三者对齐 */}
-          <DialogFooter className="pt-4 sm:-mr-2">
+          {/* 同编辑弹窗：按钮右缘与卡片、X 图标三者对齐（19px） */}
+          <DialogFooter className="mr-0.5 pt-4 sm:-mr-1.5">
             <Button
               type="button"
               variant="outline"

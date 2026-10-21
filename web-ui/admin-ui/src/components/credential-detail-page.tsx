@@ -40,6 +40,7 @@ const TAG =
 export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailPageProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
+  const [refreshing, setRefreshing] = useState(false)
 
   const { data: credentialsData } = useCredentials()
   const { data: recordsData, isLoading, refetch } = useCredentialUsageRecords(credentialId, page, PAGE_SIZE)
@@ -76,15 +77,23 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
   const hasUsageSummary = usageSummary !== undefined
 
   // refetch 默认不抛异常，失败只体现在返回结果上，须显式检查（与 API Key 详情页同口径）。
-  // 明细与两个汇总查询一并刷新，避免同屏数据时间点不一致。
+  // 明细与两个汇总查询一并刷新，避免同屏数据时间点不一致；refreshing 重入锁与
+  // daily-detail / daily-stats 两页同口径，防止进行期间重复触发并发请求
   const handleRefresh = async () => {
-    const results = await Promise.all([refetch(), summaryQuery.refetch(), todayQuery.refetch()])
-    const failed = results.find((result) => result.isError)
-    if (failed) {
-      toast.error(extractErrorMessage(failed.error))
-      return
+    setRefreshing(true)
+    try {
+      const results = await Promise.all([refetch(), summaryQuery.refetch(), todayQuery.refetch()])
+      const failed = results.find((result) => result.isError)
+      if (failed) {
+        toast.error(extractErrorMessage(failed.error))
+        return
+      }
+      toast.success(t('apiKeys.toastLogRefreshed'))
+    } catch (error) {
+      toast.error(extractErrorMessage(error))
+    } finally {
+      setRefreshing(false)
     }
-    toast.success(t('apiKeys.toastLogRefreshed'))
   }
 
   const savedTrailing = (amount: number) =>
@@ -110,8 +119,8 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
                 {t(visual.labelKey)}
               </span>
             )}
-            <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
-              <RotateCw className={isLoading ? 'animate-spin' : ''} />
+            <Button variant="outline" onClick={handleRefresh} disabled={isLoading || refreshing}>
+              <RotateCw className={refreshing ? 'animate-spin' : ''} />
               {t('common.refresh')}
             </Button>
           </>
