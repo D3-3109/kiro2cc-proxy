@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,8 +9,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { localeTag } from '@/lib/locale'
-import type { DailySummary } from '@/types/api'
+import { FootSep, Metric, MetricFoot, MetricValue, MetricsBar } from '@/components/metrics'
+import { formatCost, recordCredits } from '@/components/usage-log-table'
+import { formatCompactToken, formatTokenCount, localeTag } from '@/lib/locale'
+import type { DailySummary, UsageRecord } from '@/types/api'
 
 /** 固定档区间天数（每日统计汇总页与使用日志页共用档位） */
 export const RANGE_DAYS: Record<'7' | '14' | '30', number> = { '7': 7, '14': 14, '30': 30 }
@@ -19,6 +21,143 @@ export const RANGE_DAYS: Record<'7' | '14' | '30', number> = { '7': 7, '14': 14,
 export interface CustomRange {
   from: string
   to: string
+}
+
+/** Token 展示：不小于 100 万时改用紧凑缩写，避免窄列溢出 */
+const tokenText = (n: number) => (n >= 1e6 ? formatCompactToken(n) : formatTokenCount(n))
+
+/** 紧凑脚注文本：在 flex 脚注行内独立截断并带省略号 */
+function FootText({ children, title }: { children: ReactNode; title?: string }) {
+  return (
+    <span className="min-w-0 truncate" title={title}>
+      {children}
+    </span>
+  )
+}
+
+/**
+ * 七项单行指标条：前 4 项为 CST 闭区间 [from, to] 的日报总计（全部留存记录，不受分页与截断影响），
+ * 后 3 项为当前页明细汇总。
+ */
+export function UsageMetricsBar({
+  daily,
+  from,
+  to,
+  isDailyLoading,
+  isDailyError,
+  records,
+  totalRecords,
+  page,
+  totalPages,
+}: {
+  daily: DailySummary[] | undefined
+  from: string
+  to: string
+  isDailyLoading: boolean
+  isDailyError: boolean
+  records: UsageRecord[]
+  totalRecords: number
+  page: number
+  totalPages: number
+}) {
+  const { t } = useTranslation()
+  const totals = (daily ?? [])
+    .filter((day) => from <= day.date && day.date <= to)
+    .reduce(
+      (sum, day) => ({
+        requests: sum.requests + day.totalRequests,
+        cost: sum.cost + day.totalCost,
+        credits: sum.credits + day.totalCredits,
+        tokens: sum.tokens + day.totalInputTokens + day.totalOutputTokens,
+      }),
+      { requests: 0, cost: 0, credits: 0, tokens: 0 },
+    )
+  const hasDaily = daily !== undefined
+  const pageCost = records.reduce((s, r) => s + r.estimatedCost, 0)
+  const pageCredits = records.reduce((s, r) => s + recordCredits(r), 0)
+  const pageSaved = records.reduce((s, r) => s + (r.creditsSaved ?? 0), 0)
+  const pageTokens = records.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0)
+  const pageInput = records.reduce((s, r) => s + r.inputTokens, 0)
+  const pageCacheRead = records.reduce((s, r) => s + (r.cacheReadInputTokens ?? 0), 0)
+  const cacheShare = pageInput > 0 ? (pageCacheRead / pageInput) * 100 : 0
+  const avgCost = records.length > 0 ? pageCost / records.length : 0
+  const note = isDailyError
+    ? t(hasDaily ? 'dailyStats.totalsRefreshFailed' : 'common.loadFailed')
+    : isDailyLoading
+      ? t('common.loading')
+      : t('dailyStats.totalsRetainedNote')
+
+  return (
+    <div className="shrink-0" aria-busy={isDailyLoading}>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-[11px] text-ink-3">
+        <span role={isDailyError ? 'alert' : undefined}>{note}</span>
+        <span className="font-mono tabular-nums">
+          {from === to ? from : `${from} — ${to}`} · UTC+8
+        </span>
+      </div>
+      <MetricsBar cols={7}>
+        <Metric label={t('common.statTotalRequests')}>
+          <MetricValue value={(hasDaily ? totals.requests : totalRecords).toLocaleString(localeTag())} />
+          <MetricFoot className="min-w-0">
+            <FootText>{t('common.pageInfoSimple', { current: page, total: totalPages })}</FootText>
+          </MetricFoot>
+        </Metric>
+        <Metric label={t('dailyStats.metricTotalCostLabel')}>
+          <MetricValue value={hasDaily ? formatCost(totals.cost) : '—'} />
+          <MetricFoot className="min-w-0">
+            <FootText title={t('dailyStats.totalCostHint')}>{t('dailyStats.totalCostHint')}</FootText>
+          </MetricFoot>
+        </Metric>
+        <Metric label={t('dailyStats.metricTotalCreditsLabel')}>
+          <MetricValue
+            value={hasDaily ? totals.credits.toFixed(4) : '—'}
+            unit={t('dailyStats.unitCredits')}
+          />
+          <MetricFoot className="min-w-0">
+            <FootText title={t('dailyStats.totalCreditsHint')}>{t('dailyStats.totalCreditsHint')}</FootText>
+          </MetricFoot>
+        </Metric>
+        <Metric label={t('dailyStats.metricTotalTokensLabel')}>
+          <MetricValue value={hasDaily ? tokenText(totals.tokens) : '—'} />
+          <MetricFoot className="min-w-0">
+            <FootText title={t('dailyStats.totalTokensHint')}>{t('dailyStats.totalTokensHint')}</FootText>
+          </MetricFoot>
+        </Metric>
+        <Metric label={t('common.pageCost')}>
+          <MetricValue value={formatCost(pageCost)} />
+          <MetricFoot className="min-w-0">
+            <FootText>
+              {t('dailyStats.detailAvgCost')}{' '}
+              <b className="font-semibold text-ink-2">{formatCost(avgCost)}</b>
+            </FootText>
+          </MetricFoot>
+        </Metric>
+        <Metric label={t('common.pageCredits')}>
+          <MetricValue value={pageCredits.toFixed(4)} unit={t('dailyStats.unitCredits')} />
+          <MetricFoot className="min-w-0">
+            {pageSaved > 0 ? (
+              <span className="min-w-0 truncate text-ok">
+                {t('common.savedPrefix', { amount: pageSaved.toFixed(4) })}
+              </span>
+            ) : (
+              <FootText>{t('dailyStats.detailNoSaving')}</FootText>
+            )}
+          </MetricFoot>
+        </Metric>
+        <Metric label={t('dailyStats.metricPageTokensLabel')}>
+          <MetricValue value={tokenText(pageTokens)} />
+          <MetricFoot className="min-w-0">
+            <FootText>
+              {t('dailyStats.metricCacheRead')}{' '}
+              <b className="font-semibold text-ok">{formatCompactToken(pageCacheRead)}</b>
+            </FootText>
+            <FootSep />
+            <span className="shrink-0">{cacheShare.toFixed(1)}%</span>
+          </MetricFoot>
+        </Metric>
+      </MetricsBar>
+    </div>
+  )
 }
 
 const DAY_MS = 86_400_000

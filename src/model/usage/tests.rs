@@ -535,6 +535,14 @@ mod tests {
             last.records[99].created_at,
             base + chrono::Duration::milliseconds(5)
         ); // 末页末条 = 截断后最旧（i=5，恰被截掉最早 5 条）
+
+        let daily = tracker.get_records_paged_by_date("2026-10-02", 1, 100, &HashMap::new());
+        assert_eq!(daily.total, 2000);
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].total_requests, 10005);
+        assert_eq!(summaries[0].total_input_tokens, 1_000_500);
+        assert_eq!(summaries[0].total_output_tokens, 100_050);
         cleanup_usage_path(&path);
     }
 
@@ -741,6 +749,7 @@ mod tests {
     async fn test_daily_summaries_cache_fields() {
         let path = temp_usage_path("daily_cache_fields");
         let tracker = UsageTracker::load(&path).unwrap();
+        assert!(tracker.get_daily_summaries().is_empty());
         // 两条记录：(input=1000, cacheRead=800) 与 (input=500, cacheRead=None)
         tracker.record(
             1,
@@ -766,7 +775,10 @@ mod tests {
         let s = &summaries[0];
         assert_eq!(s.total_requests, 2);
         assert_eq!(s.total_input_tokens, 1500);
+        assert_eq!(s.total_output_tokens, 150);
         assert_eq!(s.total_cache_read_tokens, 800);
+        let json = serde_json::to_value(s).unwrap();
+        assert_eq!(json["totalOutputTokens"], 150);
 
         // 凭证维度：cacheRead None 按 0 计入
         tracker.record(
@@ -784,6 +796,45 @@ mod tests {
         assert_eq!(cred.total_input_tokens, 200);
         assert_eq!(cred.total_cache_read_tokens, 0);
 
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_daily_summaries_cross_cst_midnight() {
+        let path = temp_usage_path("daily_summaries_midnight");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_record_at(&tracker, utc_at("2026-10-01T15:59:59Z"));
+        inject_record_at(&tracker, utc_at("2026-10-01T16:00:00Z"));
+
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].date, "2026-10-02");
+        assert_eq!(summaries[1].date, "2026-10-01");
+        for summary in &summaries {
+            assert_eq!(summary.total_requests, 1);
+            assert_eq!(summary.total_input_tokens, 100);
+            assert_eq!(summary.total_output_tokens, 10);
+        }
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_daily_summaries_clamp_negative_output_tokens() {
+        let path = temp_usage_path("daily_summaries_negative_output");
+        let tracker = UsageTracker::load(&path).unwrap();
+        for output in [-10, 10] {
+            tracker.record(
+                1,
+                "claude-opus-4.6".to_string(),
+                100,
+                output,
+                RecordOptions::default(),
+            );
+        }
+
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].total_output_tokens, 10);
         cleanup_usage_path(&path);
     }
 }

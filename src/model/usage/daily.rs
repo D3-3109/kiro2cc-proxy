@@ -23,6 +23,7 @@ pub struct DailySummary {
     pub total_credits_saved: f64,
     /// 累计输入 tokens（含 cache 命中部分）
     pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
     /// 累计 cache 命中的输入 tokens（None 按 0 计入）
     pub total_cache_read_tokens: u64,
 }
@@ -116,6 +117,7 @@ impl UsageTracker {
             credits: f64,
             saved: f64,
             inputs: u64,
+            outputs: u64,
             cache_reads: u64,
         }
         let mut map: BTreeMap<String, DayAgg> = BTreeMap::new();
@@ -135,6 +137,7 @@ impl UsageTracker {
                 entry.saved += r.estimated_cost * get_k_ref(&r.model) - cu;
             }
             entry.inputs = entry.inputs.saturating_add(r.input_tokens.max(0) as u64);
+            entry.outputs = entry.outputs.saturating_add(r.output_tokens.max(0) as u64);
             entry.cache_reads = entry
                 .cache_reads
                 .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
@@ -148,6 +151,7 @@ impl UsageTracker {
                 total_credits: agg.credits,
                 total_credits_saved: agg.saved,
                 total_input_tokens: agg.inputs,
+                total_output_tokens: agg.outputs,
                 total_cache_read_tokens: agg.cache_reads,
             })
             .collect();

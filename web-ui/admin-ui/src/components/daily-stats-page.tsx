@@ -5,17 +5,16 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { BarChart3, CalendarDays, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { CustomRangeDialog, RANGE_DAYS, cstDateString, type CustomRange } from '@/components/daily-shared'
-import { FootSep, Metric, MetricAside, MetricFoot, MetricValue, MetricsBar, Ring } from '@/components/metrics'
+import { CustomRangeDialog, RANGE_DAYS, UsageMetricsBar, cstDateString, type CustomRange } from '@/components/daily-shared'
 import { ModelAggPanel } from '@/components/model-agg-panel'
 import { PageHead } from '@/components/page-head'
 import { PANEL, PANEL_FOOT, PANEL_TITLE, Pager } from '@/components/table-kit'
 import { Segmented } from '@/components/toolbar'
-import { UsageLogTable, formatCost, recordCredits } from '@/components/usage-log-table'
+import { UsageLogTable } from '@/components/usage-log-table'
 import { useDailyUsage, useDailyUsageRecords, useUsageRecordsByRange } from '@/hooks/use-credentials'
 import { useIpGeo } from '@/hooks/use-ip-geo'
-import { formatTokenCount, localeTag } from '@/lib/locale'
 import { extractErrorMessage } from '@/lib/utils'
+import type { DailySummary } from '@/types/api'
 
 interface DailyStatsPageProps {
   onBack: () => void
@@ -44,8 +43,9 @@ export function DailyStatsPage({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   // 保持无条件挂载：60s 轮询触发重渲染驱动今日视图跨午夜滚动日期（不依赖区间模式被选中）
-  const { isLoading } = useDailyUsage()
+  const { data: dailyUsage, isLoading, isError } = useDailyUsage()
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const isFixedRange = range === '7' || range === '14' || range === '30'
   const todayCst = cstDateString(0)
@@ -82,6 +82,15 @@ export function DailyStatsPage({
       return
     }
     toast.success(t('dailyStats.toastRefreshed'))
+  }
+
+  const handleRefreshClick = async () => {
+    setRefreshing(true)
+    try {
+      await handleRefresh()
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   return (
@@ -123,8 +132,8 @@ export function DailyStatsPage({
               <BarChart3 aria-hidden="true" />
               {t('dailyStats.navSummaryButton')}
             </Button>
-            <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
-              <RotateCw className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
+            <Button variant="outline" onClick={handleRefreshClick} disabled={refreshing}>
+              <RotateCw className={refreshing ? 'animate-spin' : ''} aria-hidden="true" />
               {t('common.refresh')}
             </Button>
           </>
@@ -133,13 +142,23 @@ export function DailyStatsPage({
 
       {/* 三态均为明细记录表：今日 / 自定义区间 / 最近 N 天固定区间（与自定义区间呈现一致） */}
       {range === 'today' ? (
-        <TodayRecordsView />
+        <TodayRecordsView daily={dailyUsage} dailyLoading={isLoading} dailyError={isError} />
       ) : range === 'custom' && customRange ? (
-        <CustomRangeRecordsView range={customRange} />
+        <CustomRangeRecordsView
+          range={customRange}
+          daily={dailyUsage}
+          dailyLoading={isLoading}
+          dailyError={isError}
+        />
       ) : fixedRangeObj ? (
-        <CustomRangeRecordsView range={fixedRangeObj} />
+        <CustomRangeRecordsView
+          range={fixedRangeObj}
+          daily={dailyUsage}
+          dailyLoading={isLoading}
+          dailyError={isError}
+        />
       ) : (
-        <TodayRecordsView />
+        <TodayRecordsView daily={dailyUsage} dailyLoading={isLoading} dailyError={isError} />
       )}
 
       <CustomRangeDialog
@@ -156,6 +175,13 @@ export function DailyStatsPage({
   )
 }
 
+/** 父页下发的日报查询状态（总计取自日报，与明细分页独立） */
+interface DailyTotalsProps {
+  daily: DailySummary[] | undefined
+  dailyLoading: boolean
+  dailyError: boolean
+}
+
 /** 今日明细视图的分页大小（与单日明细页一致） */
 const TODAY_PAGE_SIZE = 100
 
@@ -169,7 +195,7 @@ const TODAY_PAGE_SIZE = 100
  * - 与 DailyDetailPage 的差异：无独立 PageHead/面包屑（tab 内嵌在本页），
  *   复用其明细表体 UsageLogTable
  */
-function TodayRecordsView() {
+function TodayRecordsView({ daily, dailyLoading, dailyError }: DailyTotalsProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const todayCst = cstDateString(0)
@@ -189,63 +215,19 @@ function TodayRecordsView() {
   const pageIps = records.map((r) => r.clientIp).filter((ip): ip is string => !!ip)
   const geoMap = useIpGeo(pageIps)
 
-  const pageCost = records.reduce((s, r) => s + r.estimatedCost, 0)
-  const pageCredits = records.reduce((s, r) => s + recordCredits(r), 0)
-  const pageSaved = records.reduce((s, r) => s + (r.creditsSaved ?? 0), 0)
-  const pageInput = records.reduce((s, r) => s + r.inputTokens, 0)
-  const pageOutput = records.reduce((s, r) => s + r.outputTokens, 0)
-  const pageCacheRead = records.reduce((s, r) => s + (r.cacheReadInputTokens ?? 0), 0)
-  const cacheShare = pageInput > 0 ? (pageCacheRead / pageInput) * 100 : 0
-  const avgCost = records.length > 0 ? pageCost / records.length : 0
-
   return (
     <div className="flex min-h-[calc(100vh-56px)] flex-col">
-      <MetricsBar>
-        <Metric label={t('common.statTotalRequests')}>
-          <MetricValue value={totalRecords.toLocaleString(localeTag())} />
-          <MetricFoot className="truncate">
-            <span>{t('dailyStats.metricPageOf', { shown: records.length, total: totalRecords })}</span>
-            <FootSep />
-            <span>{t('common.pageInfoSimple', { current: page, total: totalPages })}</span>
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('common.pageCost')}>
-          <MetricValue value={formatCost(pageCost)} />
-          <MetricFoot className="truncate">
-            <span>
-              {t('dailyStats.detailAvgCost')} <b className="font-semibold text-ink-2">{formatCost(avgCost)}</b>
-            </span>
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('common.pageCredits')}>
-          <MetricValue value={pageCredits.toFixed(4)} unit={t('dailyStats.unitCredits')} />
-          <MetricFoot className="truncate">
-            {pageSaved > 0 ? (
-              <span className="text-ok">{t('common.savedPrefix', { amount: pageSaved.toFixed(4) })}</span>
-            ) : (
-              <span>{t('dailyStats.detailNoSaving')}</span>
-            )}
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('dailyStats.metricPageTokensLabel')}>
-          <MetricValue value={formatTokenCount(pageInput + pageOutput)} />
-          {/* pr 给 .m-aside 的 42px 环形图让位 */}
-          <MetricFoot className="truncate pr-[62px]">
-            <span>
-              {t('dailyStats.metricCacheRead')}{' '}
-              <b className="font-semibold text-ok">{formatTokenCount(pageCacheRead)}</b>
-            </span>
-            <FootSep />
-            <span>{cacheShare.toFixed(1)}%</span>
-          </MetricFoot>
-          <MetricAside>
-            <Ring percent={cacheShare} tone="stroke-ok" size={42} />
-          </MetricAside>
-        </Metric>
-      </MetricsBar>
+      <UsageMetricsBar
+        daily={daily}
+        from={todayCst}
+        to={todayCst}
+        isDailyLoading={dailyLoading}
+        isDailyError={dailyError}
+        records={records}
+        totalRecords={totalRecords}
+        page={page}
+        totalPages={totalPages}
+      />
 
       {/* 按模型分组（当前页）：与详情页同款可折叠面板 */}
       <ModelAggPanel records={records} />
@@ -288,7 +270,12 @@ const RANGE_MAX_TOTAL = 10_000
 const RANGE_PAGE_SIZE = 100
 
 /** 「自定义」tab 主体：已应用区间的请求明细记录表（结构与今日视图同构） */
-function CustomRangeRecordsView({ range }: { range: CustomRange }) {
+function CustomRangeRecordsView({
+  range,
+  daily,
+  dailyLoading,
+  dailyError,
+}: { range: CustomRange } & DailyTotalsProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
 
@@ -315,63 +302,19 @@ function CustomRangeRecordsView({ range }: { range: CustomRange }) {
   const pageIps = records.map((r) => r.clientIp).filter((ip): ip is string => !!ip)
   const geoMap = useIpGeo(pageIps)
 
-  const pageCost = records.reduce((s, r) => s + r.estimatedCost, 0)
-  const pageCredits = records.reduce((s, r) => s + recordCredits(r), 0)
-  const pageSaved = records.reduce((s, r) => s + (r.creditsSaved ?? 0), 0)
-  const pageInput = records.reduce((s, r) => s + r.inputTokens, 0)
-  const pageOutput = records.reduce((s, r) => s + r.outputTokens, 0)
-  const pageCacheRead = records.reduce((s, r) => s + (r.cacheReadInputTokens ?? 0), 0)
-  const cacheShare = pageInput > 0 ? (pageCacheRead / pageInput) * 100 : 0
-  const avgCost = records.length > 0 ? pageCost / records.length : 0
-
   return (
     <div className="flex min-h-[calc(100vh-56px)] flex-col">
-      <MetricsBar>
-        <Metric label={t('common.statTotalRequests')}>
-          <MetricValue value={totalRecords.toLocaleString(localeTag())} />
-          <MetricFoot className="truncate">
-            <span>{t('dailyStats.metricPageOf', { shown: records.length, total: totalRecords })}</span>
-            <FootSep />
-            <span>{t('common.pageInfoSimple', { current: page, total: totalPages })}</span>
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('common.pageCost')}>
-          <MetricValue value={formatCost(pageCost)} />
-          <MetricFoot className="truncate">
-            <span>
-              {t('dailyStats.detailAvgCost')} <b className="font-semibold text-ink-2">{formatCost(avgCost)}</b>
-            </span>
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('common.pageCredits')}>
-          <MetricValue value={pageCredits.toFixed(4)} unit={t('dailyStats.unitCredits')} />
-          <MetricFoot className="truncate">
-            {pageSaved > 0 ? (
-              <span className="text-ok">{t('common.savedPrefix', { amount: pageSaved.toFixed(4) })}</span>
-            ) : (
-              <span>{t('dailyStats.detailNoSaving')}</span>
-            )}
-          </MetricFoot>
-        </Metric>
-
-        <Metric label={t('dailyStats.metricPageTokensLabel')}>
-          <MetricValue value={formatTokenCount(pageInput + pageOutput)} />
-          {/* pr 给 .m-aside 的 42px 环形图让位 */}
-          <MetricFoot className="truncate pr-[62px]">
-            <span>
-              {t('dailyStats.metricCacheRead')}{' '}
-              <b className="font-semibold text-ok">{formatTokenCount(pageCacheRead)}</b>
-            </span>
-            <FootSep />
-            <span>{cacheShare.toFixed(1)}%</span>
-          </MetricFoot>
-          <MetricAside>
-            <Ring percent={cacheShare} tone="stroke-ok" size={42} />
-          </MetricAside>
-        </Metric>
-      </MetricsBar>
+      <UsageMetricsBar
+        daily={daily}
+        from={range.from}
+        to={range.to}
+        isDailyLoading={dailyLoading}
+        isDailyError={dailyError}
+        records={records}
+        totalRecords={totalRecords}
+        page={page}
+        totalPages={totalPages}
+      />
 
       {/* 按模型分组（当前页）：与详情页同款可折叠面板 */}
       <ModelAggPanel records={records} />

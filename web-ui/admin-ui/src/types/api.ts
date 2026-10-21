@@ -275,6 +275,7 @@ export interface DailySummary {
   totalCredits: number
   totalCreditsSaved?: number
   totalInputTokens: number      // 累计输入 tokens（含 cache 命中部分）
+  totalOutputTokens: number
   totalCacheReadTokens: number  // 累计 cache 命中的输入 tokens
 }
 
