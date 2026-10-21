@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 /**
@@ -7,16 +8,16 @@ import { useTranslation } from 'react-i18next'
  *
  * 分区卡片说明：settings-panel.tsx 的 .set-card 用 border-transparent bg-surface shadow-hair，
  * 依赖页面底色 --background 与卡片 --surface 的色差 + 投影区分层级。弹窗背景本身就是
- * bg-surface，照搬会让卡片边界完全消失，故这里保留其圆角/内边距语义，把层级改由
- * hairline 描边提供（见 SECTION_CARD）。
+ * bg-surface，照搬会让卡片边界完全消失，故层级改由 surface-2 底色与 hairline 描边
+ * 双通道提供（见 SECTION_CARD）。
  */
 
 /** 分区标题（对齐设计稿 .set-cap） */
 export const SECTION_CAP =
   'flex items-center gap-1.5 px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[.08em] text-ink-3'
 
-/** 分区卡片：弹窗内是 bg-surface 之上再叠 bg-surface，边界只由 hairline 描边提供 */
-export const SECTION_CARD = 'rounded-lg border-[0.5px] border-hairline bg-surface p-4'
+/** 分区卡片：surface-2 底色与弹窗 bg-surface 拉开层次，hairline 描边兜底 */
+export const SECTION_CARD = 'rounded-lg border-[0.5px] border-hairline bg-surface-2 p-4'
 
 /** 字段标签 */
 export const FIELD_LABEL = 'block text-[11.5px] font-medium text-ink-2'
@@ -67,11 +68,22 @@ export function Field({
   )
 }
 
-/** 分组：分区标题 + 描边卡片 */
-export function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
+/** 分组：分区标题（可选语义图标）+ 卡片 */
+export function Section({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon?: LucideIcon
+  title: ReactNode
+  children: ReactNode
+}) {
   return (
     <section>
-      <div className={SECTION_CAP}>{title}</div>
+      <div className={SECTION_CAP}>
+        {Icon && <Icon className="size-3" aria-hidden="true" />}
+        {title}
+      </div>
       <div className={SECTION_CARD}>
         <div className={FIELD_GROUP}>{children}</div>
       </div>

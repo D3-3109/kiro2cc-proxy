@@ -7,8 +7,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { Globe, KeyRound, Pencil, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -132,17 +134,20 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{t('credentials.editDialogTitle', { id: credential.id })}</DialogTitle>
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-[34px] shrink-0 place-items-center rounded-[9px] bg-brand-soft text-brand">
+              <Pencil className="size-4" aria-hidden="true" />
+            </span>
+            <DialogTitle>{t('credentials.editDialogTitle', { id: credential.id })}</DialogTitle>
+          </div>
+          {/* 副标题承载原滚动区顶部的 editHintOnlyChanged 提示，语义不变且始终可见 */}
+          <DialogDescription>{t('credentials.editHintOnlyChanged')}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
           <div className="space-y-5 overflow-y-auto flex-1 pr-1 py-1">
-            <p className="text-[11px] leading-[1.55] text-ink-3">
-              {t('credentials.editHintOnlyChanged')}
-            </p>
-
             {/* 核心凭据 */}
-            <Section title={t('credentials.sectionCore')}>
+            <Section icon={KeyRound} title={t('credentials.sectionCore')}>
               <Field label={t('credentials.nicknameLabel')} htmlFor="nickname">
                 <Input
                   id="nickname"
@@ -185,7 +190,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
             </Section>
 
             {/* 身份与区域 */}
-            <Section title={t('credentials.sectionIdentityRegion')}>
+            <Section icon={Globe} title={t('credentials.sectionIdentityRegion')}>
               <Field label={t('credentials.regionConfigLabel')} hint={t('credentials.regionHintEdit')}>
                 <div className="grid grid-cols-2 gap-2">
                   <Input
@@ -246,7 +251,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
             </Section>
 
             {/* 运行与网络 */}
-            <Section title={t('credentials.sectionRuntimeNetwork')}>
+            <Section icon={Settings2} title={t('credentials.sectionRuntimeNetwork')}>
               <Field
                 label={t('credentials.priorityFieldLabel')}
                 htmlFor="priority"

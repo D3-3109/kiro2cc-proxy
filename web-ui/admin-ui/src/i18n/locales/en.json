@@ -243,6 +243,7 @@
     "groupByModel": "Grouped by Model (Current Page)",
     "colCredits": "Kiro Credits",
     "addDialogTitle": "Add Account",
+    "addDialogSubtitle": "Enter the Refresh Token to connect a Kiro account",
     "editDialogTitle": "Edit Account #{{id}}",
     "refreshTokenLabel": "Refresh Token",
     "refreshTokenPlaceholder": "Enter Refresh Token",

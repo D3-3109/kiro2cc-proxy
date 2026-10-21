@@ -9,14 +9,17 @@ export const FIELD_BOX =
 const FIELD_CONTROL =
   'bg-transparent outline-none placeholder:text-ink-3 disabled:cursor-not-allowed'
 
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
   /** 右侧单位标签（设计稿 .field .u）；传入时输入框包一层外壳，className 落在内层 input */
   unit?: React.ReactNode
+  /** 左侧前缀（通常为图标）；与 unit 共用同一外壳分支，不传时与无前缀行为一致。
+   *  原生 <input prefix> 是字符串属性（待废弃的输入提示），此处覆写为节点类型并从透传中排除 */
+  prefix?: React.ReactNode
 }
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, unit, ...props }, ref) => {
-    if (unit) {
+  ({ className, type, unit, prefix, ...props }, ref) => {
+    if (unit || prefix) {
       return (
         <div
           className={cn(
@@ -25,13 +28,14 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             'flex w-full items-center gap-2 focus-within:border-brand has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50'
           )}
         >
+          {prefix && <span className="shrink-0 text-ink-3">{prefix}</span>}
           <input
             type={type}
             className={cn(FIELD_CONTROL, 'min-w-0 flex-1', className)}
             ref={ref}
             {...props}
           />
-          <span className="shrink-0 text-[11px] text-ink-3">{unit}</span>
+          {unit && <span className="shrink-0 text-[11px] text-ink-3">{unit}</span>}
         </div>
       )
     }

@@ -243,6 +243,7 @@
     "groupByModel": "按模型分组（当前页）",
     "colCredits": "Kiro Credits",
     "addDialogTitle": "添加账号",
+    "addDialogSubtitle": "填入 Kiro 账号的 Refresh Token 即可接入",
     "editDialogTitle": "编辑账号 #{{id}}",
     "refreshTokenLabel": "Refresh Token",
     "refreshTokenPlaceholder": "请输入 Refresh Token",

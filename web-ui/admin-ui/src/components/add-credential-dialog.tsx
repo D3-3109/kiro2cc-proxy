@@ -7,14 +7,16 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { Globe, KeyRound, Settings2, UserRoundPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Field, Section } from '@/components/credential-form-kit'
 import { useAddCredential } from '@/hooks/use-credentials'
-import { extractErrorMessage } from '@/lib/utils'
+import { cn, extractErrorMessage } from '@/lib/utils'
 import { normalizeLoginSource } from '@/lib/account-state'
 
 interface AddCredentialDialogProps {
@@ -110,13 +112,19 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{t('credentials.addDialogTitle')}</DialogTitle>
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-[34px] shrink-0 place-items-center rounded-[9px] bg-brand-soft text-brand">
+              <UserRoundPlus className="size-4" aria-hidden="true" />
+            </span>
+            <DialogTitle>{t('credentials.addDialogTitle')}</DialogTitle>
+          </div>
+          <DialogDescription>{t('credentials.addDialogSubtitle')}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
           <div className="space-y-5 overflow-y-auto flex-1 pr-1 py-1">
             {/* 核心凭据 */}
-            <Section title={t('credentials.sectionCore')}>
+            <Section icon={KeyRound} title={t('credentials.sectionCore')}>
               <Field
                 label={t('credentials.refreshTokenLabel')}
                 htmlFor="refreshToken"
@@ -125,6 +133,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
                 <Input
                   id="refreshToken"
                   type="password"
+                  prefix={<KeyRound className="size-[13px]" />}
                   placeholder={t('credentials.refreshTokenPlaceholder')}
                   value={refreshToken}
                   onChange={(e) => setRefreshToken(e.target.value)}
@@ -143,16 +152,34 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
                 />
               </Field>
 
-              <Field label={t('credentials.authMethodLabel')} htmlFor="authMethod">
-                <Select
-                  id="authMethod"
-                  value={authMethod}
-                  onChange={(e) => setAuthMethod(e.target.value as AuthMethod)}
-                  disabled={isPending}
+              {/* group 分段器无单一控件可关联，label 不出 htmlFor，可访问名称由下方 aria-label 承载 */}
+              <Field label={t('credentials.authMethodLabel')}>
+                <div
+                  className="grid grid-cols-2 gap-2"
+                  role="group"
+                  aria-label={t('credentials.authMethodLabel')}
                 >
-                  <option value="social">Social</option>
-                  <option value="idc">IdC/Builder-ID/IAM</option>
-                </Select>
+                  {(['social', 'idc'] as const).map((m) => {
+                    const on = authMethod === m
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={isPending}
+                        onClick={() => setAuthMethod(m)}
+                        className={cn(
+                          'flex h-[31px] items-center justify-center gap-1.5 rounded-[7px] border-[0.5px] text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:pointer-events-none disabled:opacity-50',
+                          on
+                            ? 'border-brand bg-brand-soft font-semibold text-brand'
+                            : 'border-hairline-2 bg-surface font-medium text-ink-2 hover:text-ink'
+                        )}
+                      >
+                        {t(`credentials.authMethod_${m}`)}
+                      </button>
+                    )
+                  })}
+                </div>
               </Field>
 
               {/* 登录来源（仅 social 需要；IdC 的 BuilderId 由 authMethod 推断） */}
@@ -173,7 +200,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
             </Section>
 
             {/* 身份与区域 */}
-            <Section title={t('credentials.sectionIdentityRegion')}>
+            <Section icon={Globe} title={t('credentials.sectionIdentityRegion')}>
               <Field label={t('credentials.regionConfigLabel')} hint={t('credentials.regionHintAdd')}>
                 <div className="grid grid-cols-2 gap-2">
                   <Input
@@ -242,7 +269,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
             </Section>
 
             {/* 运行与网络 */}
-            <Section title={t('credentials.sectionRuntimeNetwork')}>
+            <Section icon={Settings2} title={t('credentials.sectionRuntimeNetwork')}>
               <Field
                 label={t('credentials.priorityFieldLabel')}
                 htmlFor="priority"
