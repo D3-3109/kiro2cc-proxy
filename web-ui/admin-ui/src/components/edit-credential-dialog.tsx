@@ -56,8 +56,8 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
     profileArn: '', machineId: '', proxyUrl: '', loginSource: '',
   })
 
-  // 仅在对话框打开时按当前凭据初始化表单：有值字段直出真实值（渲染层锁定只读），
-  // 无值字段留空待补录。依赖取 credential.id 而非整个 credential 对象 ——
+  // 仅在对话框打开时按当前凭据初始化表单：已锁定的有值字段只读展示，
+  // 其余字段（含已锁定的无值字段）保持可编辑。依赖取 credential.id 而非整个 credential 对象 ——
   // 列表每 30s 自动刷新会为数据变动的行生成新引用，依赖整个对象会在编辑中途静默重置表单。
   useEffect(() => {
     if (open) {
@@ -113,8 +113,9 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
     if (profileArn !== initial.current.profileArn) data.profileArn = profileArn
     if (machineId !== initial.current.machineId) data.machineId = machineId
     if (proxyUrl !== initial.current.proxyUrl) data.proxyUrl = proxyUrl
-    // 代理地址被清空时同步清除认证信息：后端对 username/password 是「留空不修改」语义，
-    // 只清地址会持久化出「无代理但残留凭据」的脏数据。仅无值（可编辑）代理能走到清空分支
+    // 代理地址被清空时同步清除认证信息：后端对 username/password 是「不传不修改、
+    // 传空串即清除」语义，只清地址而不清账密会持久化出「无代理但残留凭据」的脏数据。
+    // 代理 URL 恒可编辑，清空即删除代理
     if (proxyUrl === '' && initial.current.proxyUrl !== '') {
       data.proxyUsername = ''
       data.proxyPassword = ''
@@ -155,15 +156,12 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
   // 列表 30s 刷新会让实时值中途翻转锁定态，出现「展示已锁定但提交仍覆盖该字段」的不一致
   const lockNote = t('credentials.lockedFieldNote')
   const locked = {
-    nickname: !!initial.current.nickname,
     email: !!initial.current.email,
     loginSource: isSocial && !!initial.current.loginSource,
     authRegion: !!initial.current.authRegion,
-    apiRegion: !!initial.current.apiRegion,
     clientId: !!initial.current.clientId,
     profileArn: !!initial.current.profileArn,
     machineId: !!initial.current.machineId,
-    proxyUrl: !!initial.current.proxyUrl,
   }
 
   return (
@@ -184,23 +182,16 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
           <div className="space-y-5 overflow-y-auto flex-1 pr-1 py-1">
             {/* 核心凭据 */}
             <Section icon={KeyRound} title={t('credentials.sectionCore')}>
-              {locked.nickname ? (
-                <ReadOnlyField
-                  label={t('credentials.nicknameLabel')}
+              {/* 昵称是本地备注名而非账号固有信息，允许反复编辑 */}
+              <Field label={t('credentials.nicknameLabel')} htmlFor="nickname">
+                <Input
+                  id="nickname"
+                  placeholder={t('credentials.nicknamePlaceholder')}
                   value={nickname}
-                  lockNote={lockNote}
+                  onChange={(e) => setNickname(e.target.value)}
+                  disabled={isPending}
                 />
-              ) : (
-                <Field label={t('credentials.nicknameLabel')} htmlFor="nickname">
-                  <Input
-                    id="nickname"
-                    placeholder={t('credentials.nicknamePlaceholder')}
-                    value={nickname}
-                    onChange={(e) => setNickname(e.target.value)}
-                    disabled={isPending}
-                  />
-                </Field>
-              )}
+              </Field>
 
               {locked.email ? (
                 <ReadOnlyField
@@ -251,46 +242,13 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
 
             {/* 身份与区域 */}
             <Section icon={Globe} title={t('credentials.sectionIdentityRegion')}>
-              <Field
-                label={t('credentials.regionConfigLabel')}
-                hint={locked.authRegion || locked.apiRegion ? undefined : t('credentials.regionHintEdit')}
-              >
-                {locked.authRegion && locked.apiRegion ? (
-                  // 双值齐备：单行只读（对齐余额弹窗 regionCombinedLabel 展示形态）
-                  <ReadOnlyField
-                    value={`${authRegion} / ${apiRegion}`}
-                    mono
-                    lockNote={lockNote}
-                    label={t('credentials.regionCombinedLabel')}
-                  />
-                ) : locked.authRegion || locked.apiRegion ? (
-                  // 仅一侧有值：有值侧只读、空侧保持可编辑
-                  <div className="grid grid-cols-2 gap-2">
-                    {locked.authRegion ? (
-                      <ReadOnlyField value={authRegion} mono lockNote={lockNote} label="" title={authRegion} />
-                    ) : (
-                      <Input
-                        id="authRegion"
-                        placeholder={t('credentials.authRegionPlaceholder')}
-                        value={authRegion}
-                        onChange={(e) => setAuthRegion(e.target.value)}
-                        disabled={isPending}
-                      />
-                    )}
-                    {locked.apiRegion ? (
-                      <ReadOnlyField value={apiRegion} mono lockNote={lockNote} label="" title={apiRegion} />
-                    ) : (
-                      <Input
-                        id="apiRegion"
-                        placeholder={t('credentials.apiRegionPlaceholder')}
-                        value={apiRegion}
-                        onChange={(e) => setApiRegion(e.target.value)}
-                        disabled={isPending}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
+              <Field label={t('credentials.regionConfigLabel')} hint={t('credentials.regionHintEdit')}>
+                {/* Auth Region 影响 token 刷新，有值即锁定；API Region 可反复编辑。
+                    只读侧省略 label（由外层 Field 统一承载），两侧框体同为 31px 同顶对齐 */}
+                <div className="grid grid-cols-2 gap-2">
+                  {locked.authRegion ? (
+                    <ReadOnlyField value={authRegion} mono lockNote={lockNote} />
+                  ) : (
                     <Input
                       id="authRegion"
                       placeholder={t('credentials.authRegionPlaceholder')}
@@ -298,15 +256,15 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
                       onChange={(e) => setAuthRegion(e.target.value)}
                       disabled={isPending}
                     />
-                    <Input
-                      id="apiRegion"
-                      placeholder={t('credentials.apiRegionPlaceholder')}
-                      value={apiRegion}
-                      onChange={(e) => setApiRegion(e.target.value)}
-                      disabled={isPending}
-                    />
-                  </div>
-                )}
+                  )}
+                  <Input
+                    id="apiRegion"
+                    placeholder={t('credentials.apiRegionPlaceholder')}
+                    value={apiRegion}
+                    onChange={(e) => setApiRegion(e.target.value)}
+                    disabled={isPending}
+                  />
+                </div>
               </Field>
 
               {/* IdC 字段：clientId 有值锁定；clientSecret 永不下发，恒可编辑（留空不修改） */}
@@ -407,25 +365,16 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
                 </Field>
               )}
 
-              {locked.proxyUrl ? (
-                /* 代理已配置：URL 锁定只读；账密永不下发，仍可补充/轮换（留空不修改） */
-                <ReadOnlyField
-                  label={t('credentials.proxyConfigLabel')}
+              {/* 代理是可反复调整的运行参数，URL 恒可编辑；账密留空不修改 */}
+              <Field label={t('credentials.proxyConfigLabel')} htmlFor="proxyUrl">
+                <Input
+                  id="proxyUrl"
+                  placeholder={t('credentials.proxyUrlPlaceholderEdit')}
                   value={proxyUrl}
-                  mono
-                  lockNote={lockNote}
+                  onChange={(e) => setProxyUrl(e.target.value)}
+                  disabled={isPending}
                 />
-              ) : (
-                <Field label={t('credentials.proxyConfigLabel')} htmlFor="proxyUrl">
-                  <Input
-                    id="proxyUrl"
-                    placeholder={t('credentials.proxyUrlPlaceholderEdit')}
-                    value={proxyUrl}
-                    onChange={(e) => setProxyUrl(e.target.value)}
-                    disabled={isPending}
-                  />
-                </Field>
-              )}
+              </Field>
               <div className="grid grid-cols-2 gap-2">
                 <Input
                   id="proxyUsername"

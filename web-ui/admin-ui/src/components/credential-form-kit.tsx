@@ -2,6 +2,8 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { FIELD_BOX } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 /**
  * 凭据表单（添加 / 编辑账号弹窗）共享视觉基元 —— 单点定义，两处只 import 不复制。
@@ -34,9 +36,9 @@ export const FIELD_HINT_SPACING = 'mt-1.5'
 /** 组内字段纵向间距 */
 export const FIELD_GROUP = 'space-y-4'
 
-/** 只读字段壳：与 FIELD_BOX 等高对齐，纯文本直出（视觉对齐 balance-dialog 的 InfoRow） */
-const READONLY_BOX =
-  'flex h-[31px] items-center gap-1.5 truncate rounded-[7px] border-[0.5px] border-transparent bg-surface px-2.5 text-[12px] text-ink-2'
+/** 只读字段壳：直接复用 Input 的 FIELD_BOX（尺寸/底色/描边同源，不会漂移），
+ *  只叠加只读所需的排版差异 —— 文字降为 ink-2，truncate 单行省略 */
+const READONLY_BOX = cn(FIELD_BOX, 'flex items-center gap-1.5 truncate text-ink-2')
 
 /** 只读字段：账号已有值的锁定态。value 为空串时不该被用到——调用方须以有值为渲染前提 */
 export function ReadOnlyField({
@@ -46,7 +48,8 @@ export function ReadOnlyField({
   mono,
   title,
 }: {
-  label: ReactNode
+  /** 字段标签；与可编辑 Input 并排、由外层 Field 统一承载标签时省略，避免空容器撑出高度使两侧错位 */
+  label?: ReactNode
   value: string
   /** 锁定说明徽标（如「已锁定」），贴右展示 */
   lockNote?: string
@@ -57,7 +60,7 @@ export function ReadOnlyField({
 }) {
   return (
     <div>
-      <div className={`${FIELD_LABEL} ${FIELD_LABEL_SPACING}`}>{label}</div>
+      {label && <div className={`${FIELD_LABEL} ${FIELD_LABEL_SPACING}`}>{label}</div>}
       <div className={mono ? `${READONLY_BOX} font-mono` : READONLY_BOX} title={title ?? value}>
         <span className="truncate">{value}</span>
         {lockNote && (
