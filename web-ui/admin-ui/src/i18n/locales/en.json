@@ -245,6 +245,7 @@
     "addDialogTitle": "Add Account",
     "addDialogSubtitle": "Enter the Refresh Token to connect a Kiro account",
     "editDialogTitle": "Edit Account #{{id}}",
+    "lockedFieldNote": "Locked",
     "refreshTokenLabel": "Refresh Token",
     "refreshTokenPlaceholder": "Enter Refresh Token",
     "emailLabel": "Username / Email",

@@ -34,6 +34,40 @@ export const FIELD_HINT_SPACING = 'mt-1.5'
 /** 组内字段纵向间距 */
 export const FIELD_GROUP = 'space-y-4'
 
+/** 只读字段壳：与 FIELD_BOX 等高对齐，纯文本直出（视觉对齐 balance-dialog 的 InfoRow） */
+const READONLY_BOX =
+  'flex h-[31px] items-center gap-1.5 truncate rounded-[7px] border-[0.5px] border-transparent bg-surface px-2.5 text-[12px] text-ink-2'
+
+/** 只读字段：账号已有值的锁定态。value 为空串时不该被用到——调用方须以有值为渲染前提 */
+export function ReadOnlyField({
+  label,
+  value,
+  lockNote,
+  mono,
+  title,
+}: {
+  label: ReactNode
+  value: string
+  /** 锁定说明徽标（如「已锁定」），贴右展示 */
+  lockNote?: string
+  /** 值域为标识符/ARN 时用等宽字体 */
+  mono?: boolean
+  /** 悬停完整值（默认 value 本身） */
+  title?: string
+}) {
+  return (
+    <div>
+      <div className={`${FIELD_LABEL} ${FIELD_LABEL_SPACING}`}>{label}</div>
+      <div className={mono ? `${READONLY_BOX} font-mono` : READONLY_BOX} title={title ?? value}>
+        <span className="truncate">{value}</span>
+        {lockNote && (
+          <span className="ml-auto flex-none text-[10px] text-ink-3">{lockNote}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** 单个字段块：标签 + 控件 + 可选说明。不用容器 gap，间距由 label/hint 各自 margin 提供 */
 export function Field({
   label,

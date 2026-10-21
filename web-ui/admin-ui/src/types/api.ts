@@ -17,6 +17,12 @@ export interface CredentialStatusItem {
   expiresAt: string | null
   authMethod: string | null
   hasProfileArn: boolean
+  /** OIDC Client ID（IdC / external_idp；非机密，编辑弹窗只读展示） */
+  clientId?: string
+  /** Profile ARN（非机密，编辑弹窗只读展示） */
+  profileArn?: string
+  /** 账号级 Machine ID（非机密，编辑弹窗只读展示） */
+  machineId?: string
   email?: string
   nickname?: string
   /** 登录来源 / IdP 标识（social 账号为 Google / GitHub；external_idp 为 AzureAD 等） */
