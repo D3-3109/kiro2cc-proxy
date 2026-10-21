@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 /** 输入框外观（设计稿 .field）：31px 高 / 7px 圆角 / surface-2 底 / hairline-2 边
  *  聚焦态与禁用降权由两个分支各自补齐 —— 必须落在承载边框/背景的那一层上 */
-const FIELD_BOX =
+export const FIELD_BOX =
   'h-[31px] rounded-[7px] border-[0.5px] border-hairline-2 bg-surface-2 px-2.5 text-[12px] text-ink transition-colors'
 /** 输入控件本体：去边框去背景，交由 FIELD_BOX 承载视觉 */
 const FIELD_CONTROL =

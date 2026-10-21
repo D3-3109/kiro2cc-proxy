@@ -11,6 +11,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Field, Section } from '@/components/credential-form-kit'
 import { useSetPriority, useUpdateCredential } from '@/hooks/use-credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import { normalizeLoginSource } from '@/lib/account-state'
@@ -134,167 +136,175 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
-          <div className="space-y-4 py-4 overflow-y-auto flex-1 pr-1">
-            <p className="text-xs text-muted-foreground">
+          <div className="space-y-5 overflow-y-auto flex-1 pr-1 py-1">
+            <p className="text-[11px] leading-[1.55] text-ink-3">
               {t('credentials.editHintOnlyChanged')}
             </p>
 
-            {/* 昵称 */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.nicknameLabel')}</label>
-              <Input
-                placeholder={t('credentials.nicknamePlaceholder')}
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                disabled={isPending}
-              />
-            </div>
-
-            {/* 用户名/邮箱 */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.emailLabel')}</label>
-              <Input
-                placeholder={t('credentials.emailPlaceholderEdit')}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={isPending}
-              />
-            </div>
-
-            {/* 优先级（独立端点）：旧卡片的行内编辑入口在新表格中收敛到此处 */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.priorityFieldLabel')}</label>
-              <Input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                placeholder={t('credentials.priorityPlaceholder')}
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                disabled={isPending}
-              />
-              <p className="text-xs text-muted-foreground">{t('credentials.priorityHint')}</p>
-            </div>
-
-            {/* 登录来源（仅 social；IdC 的 BuilderId 由 authMethod 推断、external_idp 的 provider 为 IdP 名称，二者均不可改） */}
-            {isSocial && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t('credentials.loginSourceLabel')}</label>
-                <select
-                  value={loginSourceValue}
-                  onChange={(e) => setLoginSourceValue(e.target.value)}
+            {/* 核心凭据 */}
+            <Section title={t('credentials.sectionCore')}>
+              <Field label={t('credentials.nicknameLabel')} htmlFor="nickname">
+                <Input
+                  id="nickname"
+                  placeholder={t('credentials.nicknamePlaceholder')}
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
                   disabled={isPending}
-                  className="h-[31px] w-full rounded-[7px] border-[0.5px] border-hairline-2 bg-surface-2 px-2.5 text-[12px] text-ink outline-none transition-colors focus:border-brand disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </Field>
+
+              <Field label={t('credentials.emailLabel')} htmlFor="email">
+                <Input
+                  id="email"
+                  placeholder={t('credentials.emailPlaceholderEdit')}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={isPending}
+                />
+              </Field>
+
+              {/* 登录来源（仅 social；IdC 的 BuilderId 由 authMethod 推断、external_idp 的 provider 为 IdP 名称，二者均不可改） */}
+              {isSocial && (
+                <Field
+                  label={t('credentials.loginSourceLabel')}
+                  htmlFor="loginSource"
+                  hint={t('credentials.loginSourceHintEdit')}
                 >
-                  <option value="">{t('credentials.loginSourceUnspecified')}</option>
-                  <option value="Google">Google</option>
-                  <option value="GitHub">GitHub</option>
-                </select>
-                <p className="text-xs text-muted-foreground">{t('credentials.loginSourceHintEdit')}</p>
-              </div>
-            )}
+                  <Select
+                    id="loginSource"
+                    value={loginSourceValue}
+                    onChange={(e) => setLoginSourceValue(e.target.value)}
+                    disabled={isPending}
+                  >
+                    <option value="">{t('credentials.loginSourceUnspecified')}</option>
+                    <option value="Google">Google</option>
+                    <option value="GitHub">GitHub</option>
+                  </Select>
+                </Field>
+              )}
+            </Section>
 
-            {/* Region 配置 */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.regionConfigLabel')}</label>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder={t('credentials.authRegionPlaceholder')}
-                  value={authRegion}
-                  onChange={(e) => setAuthRegion(e.target.value)}
-                  disabled={isPending}
-                />
-                <Input
-                  placeholder={t('credentials.apiRegionPlaceholder')}
-                  value={apiRegion}
-                  onChange={(e) => setApiRegion(e.target.value)}
-                  disabled={isPending}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {t('credentials.regionHintEdit')}
-              </p>
-            </div>
-
-            {/* IdC 字段 */}
-            {isIdc && (
-              <>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">{t('credentials.clientIdLabel')}</label>
+            {/* 身份与区域 */}
+            <Section title={t('credentials.sectionIdentityRegion')}>
+              <Field label={t('credentials.regionConfigLabel')} hint={t('credentials.regionHintEdit')}>
+                <div className="grid grid-cols-2 gap-2">
                   <Input
-                    placeholder={t('credentials.leaveBlankNoChange')}
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
+                    id="authRegion"
+                    placeholder={t('credentials.authRegionPlaceholder')}
+                    value={authRegion}
+                    onChange={(e) => setAuthRegion(e.target.value)}
+                    disabled={isPending}
+                  />
+                  <Input
+                    id="apiRegion"
+                    placeholder={t('credentials.apiRegionPlaceholder')}
+                    value={apiRegion}
+                    onChange={(e) => setApiRegion(e.target.value)}
                     disabled={isPending}
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">{t('credentials.clientSecretLabel')}</label>
+              </Field>
+
+              {/* IdC 字段 */}
+              {isIdc && (
+                <>
+                  <Field label={t('credentials.clientIdLabel')} htmlFor="clientId">
+                    <Input
+                      id="clientId"
+                      placeholder={t('credentials.leaveBlankNoChange')}
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                      disabled={isPending}
+                    />
+                  </Field>
+                  <Field label={t('credentials.clientSecretLabel')} htmlFor="clientSecret">
+                    <Input
+                      id="clientSecret"
+                      type="password"
+                      placeholder={t('credentials.leaveBlankNoChange')}
+                      value={clientSecret}
+                      onChange={(e) => setClientSecret(e.target.value)}
+                      disabled={isPending}
+                    />
+                  </Field>
+                </>
+              )}
+
+              <Field
+                label={t('credentials.profileArnLabel')}
+                htmlFor="profileArn"
+                hint={t('credentials.profileArnHintEdit')}
+              >
+                <Input
+                  id="profileArn"
+                  placeholder={credential.hasProfileArn ? t('credentials.profileArnConfiguredPlaceholder') : t('credentials.leaveBlankNoChange')}
+                  value={profileArn}
+                  onChange={(e) => setProfileArn(e.target.value)}
+                  disabled={isPending}
+                />
+              </Field>
+            </Section>
+
+            {/* 运行与网络 */}
+            <Section title={t('credentials.sectionRuntimeNetwork')}>
+              <Field
+                label={t('credentials.priorityFieldLabel')}
+                htmlFor="priority"
+                hint={t('credentials.priorityHint')}
+              >
+                <Input
+                  id="priority"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder={t('credentials.priorityPlaceholder')}
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                  disabled={isPending}
+                />
+              </Field>
+
+              <Field label={t('credentials.machineIdLabel')} htmlFor="machineId">
+                <Input
+                  id="machineId"
+                  placeholder={t('credentials.leaveBlankNoChange')}
+                  value={machineId}
+                  onChange={(e) => setMachineId(e.target.value)}
+                  disabled={isPending}
+                />
+              </Field>
+
+              <Field label={t('credentials.proxyConfigLabel')} htmlFor="proxyUrl">
+                <Input
+                  id="proxyUrl"
+                  placeholder={t('credentials.proxyUrlPlaceholderEdit')}
+                  value={proxyUrl}
+                  onChange={(e) => setProxyUrl(e.target.value)}
+                  disabled={isPending}
+                />
+                <div className="grid grid-cols-2 gap-2 mt-2">
                   <Input
+                    id="proxyUsername"
+                    placeholder={t('credentials.proxyUsernamePlaceholder')}
+                    value={proxyUsername}
+                    onChange={(e) => setProxyUsername(e.target.value)}
+                    disabled={isPending}
+                  />
+                  <Input
+                    id="proxyPassword"
                     type="password"
-                    placeholder={t('credentials.leaveBlankNoChange')}
-                    value={clientSecret}
-                    onChange={(e) => setClientSecret(e.target.value)}
+                    placeholder={t('credentials.proxyPasswordPlaceholder')}
+                    value={proxyPassword}
+                    onChange={(e) => setProxyPassword(e.target.value)}
                     disabled={isPending}
                   />
                 </div>
-              </>
-            )}
-
-            {/* Profile ARN */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.profileArnLabel')}</label>
-              <Input
-                placeholder={credential.hasProfileArn ? t('credentials.profileArnConfiguredPlaceholder') : t('credentials.leaveBlankNoChange')}
-                value={profileArn}
-                onChange={(e) => setProfileArn(e.target.value)}
-                disabled={isPending}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('credentials.profileArnHintEdit')}
-              </p>
-            </div>
-
-            {/* Machine ID */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.machineIdLabel')}</label>
-              <Input
-                placeholder={t('credentials.leaveBlankNoChange')}
-                value={machineId}
-                onChange={(e) => setMachineId(e.target.value)}
-                disabled={isPending}
-              />
-            </div>
-
-            {/* 代理配置 */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('credentials.proxyConfigLabel')}</label>
-              <Input
-                placeholder={t('credentials.proxyUrlPlaceholderEdit')}
-                value={proxyUrl}
-                onChange={(e) => setProxyUrl(e.target.value)}
-                disabled={isPending}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  placeholder={t('credentials.proxyUsernamePlaceholder')}
-                  value={proxyUsername}
-                  onChange={(e) => setProxyUsername(e.target.value)}
-                  disabled={isPending}
-                />
-                <Input
-                  type="password"
-                  placeholder={t('credentials.proxyPasswordPlaceholder')}
-                  value={proxyPassword}
-                  onChange={(e) => setProxyPassword(e.target.value)}
-                  disabled={isPending}
-                />
-              </div>
-            </div>
+              </Field>
+            </Section>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="pt-4">
             <Button
               type="button"
               variant="outline"
