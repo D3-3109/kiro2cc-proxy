@@ -1,12 +1,10 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-// 使用文档页（自 codex2cc Docs.tsx 适配）：sticky hero + 计数 tabs + 三步流转卡 +
+// 使用文档页（自 codex2cc Docs.tsx 适配）：PageHead 页头 + 计数 tabs + 三步流转卡 +
 // Mac 窗体工作台 + 左内容/右 TOC + hash 路由 + API Key 填充 + 客户端配置生成器
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
-  ArrowLeft,
-  BookOpen,
   Check,
   Copy,
   ExternalLink,
@@ -17,6 +15,7 @@ import {
   Terminal,
   Wrench,
 } from 'lucide-react'
+import { PageHead } from '@/components/page-head'
 import { useApiKeys, useServerInfo } from '@/hooks/use-credentials'
 import { copyToClipboard } from '@/lib/clipboard'
 import { buildCcSwitchDeeplink, importToCcSwitch } from '@/lib/ccswitch'
@@ -414,46 +413,34 @@ print(resp.choices[0].message.content)`
 
   return (
     <div>
-      <header className="sticky top-0 z-20 -mx-9 border-b-[0.5px] border-hairline bg-background px-9 pb-3 pt-7">
-        <div className="flex items-end justify-between gap-4">
-          <div className="min-w-0">
-            <div className="docs-eyebrow">
-              <BookOpen className="size-3.5" />
-              KIRO2CC / {t('docs.eyebrow')}
-              <span className="docs-ready">
-                <span className="docs-ready-dot" aria-hidden="true" />
+      <header className="sticky top-0 z-20 -mx-9 bg-background px-9 pt-7">
+        <PageHead
+          onBack={onBack}
+          crumb={[t('dashboard.navMain'), t('dashboard.navDocs')]}
+          title={t('dashboard.navDocs')}
+          note={t('docs.heroSubtitle')}
+          actions={
+            <>
+              <span className="inline-flex h-[31px] items-center gap-[5px] whitespace-nowrap rounded-[7px] border border-transparent bg-ok-soft px-[11px] text-[12px] font-semibold text-ok">
+                <span className="size-[5px] flex-none rounded-full bg-ok" aria-hidden="true" />
                 {t('docs.readyLabel')}
                 {port ? `:${port}` : ''}
               </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {onBack && (
-                <button
-                  type="button"
-                  onClick={onBack}
-                  aria-label={t('common.back')}
-                  className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </button>
-              )}
-              <h2 className="docs-hero-title">{t('docs.heroTitle')}</h2>
-            </div>
-            <p className="docs-hero-sub">{t('docs.heroSubtitle')}</p>
-          </div>
-          <a
-            href="https://github.com/TsinHzl/kiro2cc-proxy#readme"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex h-[31px] shrink-0 items-center gap-1.5 rounded-[7px] px-[11px] text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
-          >
-            <ExternalLink className="h-3.5 w-3.5 text-ink-3 transition-colors group-hover:text-ink-2" />
-            GitHub README
-          </a>
-        </div>
+              <a
+                href="https://github.com/TsinHzl/kiro2cc-proxy#readme"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group inline-flex h-[31px] shrink-0 items-center gap-1.5 rounded-[7px] px-[11px] text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                <ExternalLink className="h-3.5 w-3.5 text-ink-3 transition-colors group-hover:text-ink-2" />
+                GitHub README
+              </a>
+            </>
+          }
+        />
       </header>
 
-      <nav className="docs-tabs mt-4" aria-label={t('docs.tabsLabel')}>
+      <nav className="docs-tabs" aria-label={t('docs.tabsLabel')}>
         {sections.map((s) => (
           <a
             key={s.id}

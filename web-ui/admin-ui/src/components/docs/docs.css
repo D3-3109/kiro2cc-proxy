@@ -1,54 +1,8 @@
 /* Copyright (c) 2026 Harllan He. Licensed under MIT. */
-/* 使用文档页专属样式：hero 文本块 / 分区 tabs / 指南卡片 / 数据表 / 提示块。
+/* 使用文档页专属样式：分区 tabs / 指南卡片 / 数据表 / 提示块。
+   页头由 PageHead 组件承担（与其他面板一致的面包屑页头）。
    语义 token（--surface/--ink/--brand 等）由 index.css 亮暗两套主题提供，本文件零硬编码色值。
    macOS 交通灯三色在 docs-page.tsx 中以内联 style 固定，属已确认的唯一例外。 */
-
-/* —— hero 文本块（吸顶容器与布局由 Tailwind 承担） —— */
-.docs-eyebrow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-/* eyebrow 内的服务状态指示：字号/字重回落到正文，仅保留成功色 */
-.docs-eyebrow .docs-ready {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: 4px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--ok);
-}
-.docs-eyebrow .docs-ready-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--ok);
-}
-
-/* hero 标题与副标题沿用语义 token，字号由 CSS 承载以确保三主题一致 */
-.docs-hero-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--ink);
-}
-.docs-hero-sub {
-  margin: 4px 0 0;
-  font-size: 12.5px;
-  color: var(--ink-2);
-}
 
 /* —— 分区 tabs（计数角标由 Tailwind 承担） —— */
 .docs-tabs {

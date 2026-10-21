@@ -909,8 +909,6 @@
     "resultsCount": "{{count}} themes"
   },
   "docs": {
-    "eyebrow": "DOCUMENTATION",
-    "heroTitle": "Connect. Build. Go further.",
     "heroSubtitle": "Client configuration, working examples and API reference, all in one place.",
     "tabsLabel": "Documentation sections",
     "osTabsLabel": "Operating system",
