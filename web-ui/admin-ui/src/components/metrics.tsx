@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-import { useId, type ReactNode } from 'react'
+import { createContext, useContext, useId, type ReactNode } from 'react'
 
 /**
  * 方案1「现代化一体式通栏卡片条 (Unified Modern Card Bar)」视觉原语。
@@ -9,17 +9,40 @@ import { useId, type ReactNode } from 'react'
 const BAR_COLS_5 = '1.1fr 1.35fr 1fr 1.25fr 1.1fr'
 const BAR_COLS_3 = '1fr 1.3fr 1fr'
 const BAR_COLS_4 = '1fr 1fr 1fr 1fr'
+const BAR_COLS_7 = 'repeat(7, minmax(136px, 1fr))'
+const BAR_COLS_8 = 'repeat(8, minmax(124px, 1fr))'
+
+/** 7 列及以上紧凑模式：由 MetricsBar 下发，缩小内边距与字号 */
+const CompactContext = createContext(false)
 
 /** 指标条外壳（方案1 .unified-card-bar）；非等宽 fr 列走内联 style */
-export function MetricsBar({ cols = 4, children }: { cols?: 3 | 4 | 5; children: ReactNode }) {
-  const template = cols === 5 ? BAR_COLS_5 : cols === 3 ? BAR_COLS_3 : BAR_COLS_4
+export function MetricsBar({
+  cols = 4,
+  children,
+}: {
+  cols?: 3 | 4 | 5 | 7 | 8
+  children: ReactNode
+}) {
+  const template =
+    cols === 8
+      ? BAR_COLS_8
+      : cols === 7
+        ? BAR_COLS_7
+        : cols === 5
+          ? BAR_COLS_5
+          : cols === 3
+            ? BAR_COLS_3
+            : BAR_COLS_4
+  const compact = cols >= 7
   return (
-    <section
-      className="grid shrink-0 overflow-hidden rounded-[16px] border border-transparent bg-surface shadow-hair [&>*:last-child_.metric-divider]:hidden"
-      style={{ gridTemplateColumns: template }}
-    >
-      {children}
-    </section>
+    <CompactContext.Provider value={compact}>
+      <section
+        className={`grid shrink-0 ${compact ? 'overflow-x-auto' : 'overflow-hidden'} rounded-[16px] border border-transparent bg-surface shadow-hair [&>*:last-child_.metric-divider]:hidden`}
+        style={{ gridTemplateColumns: template }}
+      >
+        {children}
+      </section>
+    </CompactContext.Provider>
   )
 }
 
@@ -35,12 +58,13 @@ export function Metric({
   onClick?: () => void
   children: ReactNode
 }) {
-  const shell = 'relative flex flex-col justify-between px-6 py-3.5 text-left'
+  const compact = useContext(CompactContext)
+  const shell = `relative flex flex-col justify-between ${compact ? 'min-w-0 px-4 py-3' : 'px-6 py-3.5'} text-left`
   const inner = (
     <>
       {/* cell-header：icon 在 label 左侧，space-between 对齐 */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink-2">
+        <div className={`flex items-center gap-1.5 font-medium text-ink-2 ${compact ? 'text-[12px]' : 'text-[13px]'}`}>
           {icon && <span className="text-ink-3 [&>svg]:h-[14px] [&>svg]:w-[14px]">{icon}</span>}
           {label}
         </div>
@@ -82,7 +106,7 @@ export function MetricValue({
   unit,
   trailing,
   valueClass = '',
-  unitClass = 'text-[13px] font-medium text-ink-3',
+  unitClass,
 }: {
   value: string
   unit?: string
@@ -90,14 +114,18 @@ export function MetricValue({
   valueClass?: string
   unitClass?: string
 }) {
+  const compact = useContext(CompactContext)
+  const unitCls =
+    unitClass ?? (compact ? 'text-[11px] font-medium text-ink-3' : 'text-[13px] font-medium text-ink-3')
   return (
     <div className="flex items-baseline gap-1.5">
       <span
-        className={`text-[28px] font-bold leading-[1.1] tracking-[-0.02em] tabular-nums ${valueClass}`}
+        className={`${compact ? 'text-[20px]' : 'text-[28px]'} font-bold leading-[1.1] tracking-[-0.02em] tabular-nums ${valueClass}`}
+        title={value}
       >
         {value}
       </span>
-      {unit && <span className={unitClass}>{unit}</span>}
+      {unit && <span className={unitCls}>{unit}</span>}
       {trailing}
     </div>
   )
@@ -105,7 +133,12 @@ export function MetricValue({
 
 /** 脚注行（12px，对齐截图） */
 export function MetricFoot({ className = '', children }: { className?: string; children: ReactNode }) {
-  return <div className={`flex items-center gap-2 text-[12px] text-ink-3 ${className}`}>{children}</div>
+  const compact = useContext(CompactContext)
+  return (
+    <div className={`flex items-center gap-2 ${compact ? 'text-[11px]' : 'text-[12px]'} text-ink-3 ${className}`}>
+      {children}
+    </div>
+  )
 }
 
 /** 脚注分隔 */

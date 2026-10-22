@@ -348,6 +348,39 @@ mod tests {
             .with_timezone(&chrono::Utc)
     }
 
+    /// 注入归属指定账号、指定时间戳的记录（用于验证「不限日期」聚合确实跨日累加，
+    /// 以及账号隔离）。固定 100 输入 / 10 输出 token，便于断言行数。
+    fn inject_credential_record_at(
+        tracker: &UsageTracker,
+        credential_id: u64,
+        created_at: chrono::DateTime<chrono::Utc>,
+        estimated_cost: f64,
+        credits_used: Option<f64>,
+    ) {
+        let record = crate::model::usage::UsageRecord {
+            api_key_id: 1,
+            credential_id: Some(credential_id),
+            model: "claude-opus-4.6".to_string(),
+            input_tokens: 100,
+            output_tokens: 10,
+            estimated_cost,
+            credits_used,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_creation_5m_input_tokens: 0,
+            cache_creation_1h_input_tokens: 0,
+            created_at,
+            client_ip: None,
+            effort: None,
+            first_token_ms: None,
+            duration_ms: None,
+            thinking_token_count: None,
+            is_stream: None,
+            user_agent: None,
+        };
+        tracker.records.write().push(record);
+    }
+
     /// date_range：from == to 时区间版与单日版结果等价（单日版已改为区间版薄包装，
     /// 此测试锁住等价性防回归）。
     /// 等价性前提：结果未触及截断上限——单日版截断 2000 / 区间版截断 10000，
@@ -535,6 +568,14 @@ mod tests {
             last.records[99].created_at,
             base + chrono::Duration::milliseconds(5)
         ); // 末页末条 = 截断后最旧（i=5，恰被截掉最早 5 条）
+
+        let daily = tracker.get_records_paged_by_date("2026-10-02", 1, 100, &HashMap::new());
+        assert_eq!(daily.total, 2000);
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].total_requests, 10005);
+        assert_eq!(summaries[0].total_input_tokens, 1_000_500);
+        assert_eq!(summaries[0].total_output_tokens, 100_050);
         cleanup_usage_path(&path);
     }
 
@@ -741,6 +782,7 @@ mod tests {
     async fn test_daily_summaries_cache_fields() {
         let path = temp_usage_path("daily_cache_fields");
         let tracker = UsageTracker::load(&path).unwrap();
+        assert!(tracker.get_daily_summaries().is_empty());
         // 两条记录：(input=1000, cacheRead=800) 与 (input=500, cacheRead=None)
         tracker.record(
             1,
@@ -766,7 +808,10 @@ mod tests {
         let s = &summaries[0];
         assert_eq!(s.total_requests, 2);
         assert_eq!(s.total_input_tokens, 1500);
+        assert_eq!(s.total_output_tokens, 150);
         assert_eq!(s.total_cache_read_tokens, 800);
+        let json = serde_json::to_value(s).unwrap();
+        assert_eq!(json["totalOutputTokens"], 150);
 
         // 凭证维度：cacheRead None 按 0 计入
         tracker.record(
@@ -784,6 +829,133 @@ mod tests {
         assert_eq!(cred.total_input_tokens, 200);
         assert_eq!(cred.total_cache_read_tokens, 0);
 
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_daily_summaries_cross_cst_midnight() {
+        let path = temp_usage_path("daily_summaries_midnight");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_record_at(&tracker, utc_at("2026-10-01T15:59:59Z"));
+        inject_record_at(&tracker, utc_at("2026-10-01T16:00:00Z"));
+
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].date, "2026-10-02");
+        assert_eq!(summaries[1].date, "2026-10-01");
+        for summary in &summaries {
+            assert_eq!(summary.total_requests, 1);
+            assert_eq!(summary.total_input_tokens, 100);
+            assert_eq!(summary.total_output_tokens, 10);
+        }
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_daily_summaries_clamp_negative_output_tokens() {
+        let path = temp_usage_path("daily_summaries_negative_output");
+        let tracker = UsageTracker::load(&path).unwrap();
+        for output in [-10, 10] {
+            tracker.record(
+                1,
+                "claude-opus-4.6".to_string(),
+                100,
+                output,
+                RecordOptions::default(),
+            );
+        }
+
+        let summaries = tracker.get_daily_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].total_output_tokens, 10);
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_summary_for_credential_covers_all_dates_and_isolates_accounts() {
+        let path = temp_usage_path("cred_summary_all_dates");
+        let tracker = UsageTracker::load(&path).unwrap();
+        // 跨两个 CST 自然日：UTC 10-01 15:30 → CST 10-01 23:30；UTC 10-01 16:30 → CST 10-02 00:30
+        inject_credential_record_at(&tracker, 7, utc_at("2026-10-01T15:30:00Z"), 1.0, Some(1.5));
+        inject_credential_record_at(&tracker, 7, utc_at("2026-10-01T16:30:00Z"), 2.0, None);
+        // 其他账号：过滤失效时 cost / credits_saved / tokens 都会被污染
+        inject_credential_record_at(
+            &tracker,
+            8,
+            utc_at("2026-10-01T16:30:00Z"),
+            100.0,
+            Some(0.0),
+        );
+
+        let summary = tracker.get_summary_for_credential(7);
+
+        assert_eq!(summary.credential_id, 7);
+        // 跨日累加：若实现误按「今日」过滤，这里只会有 0 或 1 条
+        assert_eq!(summary.total_requests, 2);
+        assert_eq!(summary.total_input_tokens, 200);
+        assert_eq!(summary.total_output_tokens, 20);
+        assert!((summary.total_cost - 3.0).abs() < 1e-9);
+        // 第二笔无 credits_used，按 estimated_cost * k_ref 回退计入总 credits
+        let fallback = 2.0 * get_k_ref("claude-opus-4.6");
+        assert!((summary.total_credits - (1.5 + fallback)).abs() < 1e-9);
+        // 节省额只来自账号 7 的第一笔，账号 8 的记录被排除
+        let expected_saved = get_k_ref("claude-opus-4.6") - 1.5;
+        assert!((summary.total_credits_saved - expected_saved).abs() < 1e-9);
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_summary_for_credential_zero_when_no_records() {
+        let path = temp_usage_path("cred_summary_empty");
+        let tracker = UsageTracker::load(&path).unwrap();
+
+        let summary = tracker.get_summary_for_credential(42);
+
+        assert_eq!(summary.credential_id, 42);
+        assert_eq!(summary.total_requests, 0);
+        assert_eq!(summary.total_input_tokens, 0);
+        assert_eq!(summary.total_output_tokens, 0);
+        assert_eq!(summary.total_cache_read_tokens, 0);
+        assert_eq!(summary.total_cost, 0.0);
+        assert_eq!(summary.total_credits, 0.0);
+        assert_eq!(summary.total_credits_saved, 0.0);
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_summary_for_credential_clamps_negative_tokens() {
+        let path = temp_usage_path("cred_summary_neg");
+        let tracker = UsageTracker::load(&path).unwrap();
+        tracker.record(
+            1,
+            "claude-sonnet-4.6".to_string(),
+            -100,
+            -50,
+            RecordOptions {
+                credential_id: Some(7),
+                ..Default::default()
+            },
+        );
+
+        let summary = tracker.get_summary_for_credential(7);
+
+        assert_eq!(summary.total_input_tokens, 0);
+        assert_eq!(summary.total_output_tokens, 0);
+        assert_eq!(summary.total_requests, 1);
+        cleanup_usage_path(&path);
+    }
+
+    #[tokio::test]
+    async fn test_summary_for_credential_accumulates_credits_saved_only_with_real_credits() {
+        let path = temp_usage_path("cred_summary_saved");
+        let tracker = UsageTracker::load(&path).unwrap();
+        inject_credential_record_at(&tracker, 7, utc_at("2026-10-01T02:00:00Z"), 1.0, Some(0.5));
+        inject_credential_record_at(&tracker, 7, utc_at("2026-10-02T02:00:00Z"), 2.0, None);
+
+        let summary = tracker.get_summary_for_credential(7);
+
+        // 只有带 credits_used 的记录贡献节省额；回退估算的记录不参与
+        assert!((summary.total_credits_saved - (get_k_ref("claude-opus-4.6") - 0.5)).abs() < 1e-9);
         cleanup_usage_path(&path);
     }
 }

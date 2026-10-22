@@ -18,6 +18,7 @@ import type {
   UsageRecordsResponse,
   DailySummary,
   CredentialDaySummary,
+  CredentialUsageSummary,
   ThrottleLogsResponse,
   FailureLogsResponse,
   ModelsResponse,
@@ -279,6 +280,16 @@ export async function getCredentialUsageRecords(
   const { data } = await api.get<UsageRecordsResponse>(
     `/credentials/${id}/usage/records`,
     { params: { page, page_size: pageSize } }
+  )
+  return data
+}
+
+// 获取单账号全部留存记录的用量汇总（不限日期）
+export async function getCredentialUsageSummary(
+  id: number
+): Promise<CredentialUsageSummary> {
+  const { data } = await api.get<CredentialUsageSummary>(
+    `/credentials/${id}/usage/summary`
   )
   return data
 }

@@ -181,6 +181,11 @@
     width: 6px;
     height: 6px;
   }
+  /* Firefox 不支持 ::-webkit-scrollbar，单独声明细滚动条以统一两端视觉 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-2) transparent;
+  }
   ::-webkit-scrollbar-track {
     background: transparent;
   }

@@ -39,6 +39,15 @@ pub struct CredentialStatusItem {
     pub auth_method: Option<String>,
     /// 是否有 Profile ARN
     pub has_profile_arn: bool,
+    /// OIDC Client ID（非机密；编辑弹窗只读展示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Profile ARN（非机密；编辑弹窗只读展示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_arn: Option<String>,
+    /// 账号级 Machine ID（非机密；编辑弹窗只读展示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<String>,
     /// refreshToken 的 SHA-256 哈希（用于前端重复检测）
     pub refresh_token_hash: Option<String>,
     /// 用户邮箱（用于前端显示）
@@ -177,6 +186,9 @@ mod tests {
             expires_at: None,
             auth_method: Some("social".to_string()),
             has_profile_arn: true,
+            client_id: None,
+            profile_arn: None,
+            machine_id: None,
             refresh_token_hash: None,
             email: None,
             nickname: None,
@@ -209,6 +221,26 @@ mod tests {
         assert_eq!(json["apiRegion"], "us-west-2");
     }
 
+    /// Client ID / Profile ARN / Machine ID（均非机密）需随状态列表下发，
+    /// 编辑弹窗「有值即锁定」只读展示依赖这三个字段
+    #[test]
+    fn credential_status_item_serializes_idc_fields_for_edit_lock() {
+        let mut item = sample_status_item();
+        item.client_id = Some("client-id".to_string());
+        item.profile_arn = Some("arn:aws:codewhisperer:us-east-1:123:profile/abc".to_string());
+        item.machine_id = Some("0a1b2c3d".repeat(8));
+
+        let json = serde_json::to_value(&item).unwrap();
+
+        assert_eq!(json["clientId"], "client-id");
+        assert!(
+            json["profileArn"]
+                .as_str()
+                .is_some_and(|v| v.starts_with("arn:aws:"))
+        );
+        assert_eq!(json["machineId"], "0a1b2c3d".repeat(8));
+    }
+
     /// 未配置时省略字段而非输出 null，保持与结构体既有可选字段一致的下发形状
     #[test]
     fn credential_status_item_omits_empty_provider_and_regions() {
@@ -217,6 +249,9 @@ mod tests {
         assert!(json.get("provider").is_none());
         assert!(json.get("authRegion").is_none());
         assert!(json.get("apiRegion").is_none());
+        assert!(json.get("clientId").is_none());
+        assert!(json.get("profileArn").is_none());
+        assert!(json.get("machineId").is_none());
     }
 
     #[test]

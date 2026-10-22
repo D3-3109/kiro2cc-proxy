@@ -35,6 +35,7 @@ import {
   setAuthKeys,
   getKeyUsageRecords,
   getCredentialUsageRecords,
+  getCredentialUsageSummary,
   getCredentialTodaySummary,
   getDailyUsage,
   getDailyUsageRecords,
@@ -378,6 +379,16 @@ export function useCredentialUsageRecords(id: number, page: number, pageSize = 5
     queryKey: ['credentialUsageRecords', id, page, pageSize],
     queryFn: () => getCredentialUsageRecords(id, page, pageSize),
     enabled: id > 0,
+  })
+}
+
+// 查询单账号全部留存记录的用量汇总（60s 自动刷新）
+export function useCredentialUsageSummary(id: number) {
+  return useQuery({
+    queryKey: ['credentialUsageSummary', id],
+    queryFn: () => getCredentialUsageSummary(id),
+    enabled: id > 0,
+    refetchInterval: 60000,
   })
 }
 
