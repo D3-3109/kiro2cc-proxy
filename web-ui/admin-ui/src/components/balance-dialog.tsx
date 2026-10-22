@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Progress, QuotaPercentBadge, quotaTone } from '@/components/ui/progress'
-import { useCredentialBalance } from '@/hooks/use-credentials'
+import { useCredentialBalance, useCredentialTodaySummary, useCredentialUsageSummary } from '@/hooks/use-credentials'
 import { ACCOUNT_STATE_VISUAL, deriveAccountState, loginSource } from '@/lib/account-state'
 import { parseError, getSubscriptionColor } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -91,9 +91,57 @@ function CopyButton({ text, title }: { text: string; title: string }) {
   )
 }
 
+/** 使用统计卡片内的单组指标矩阵（累计 / 今日共用），value 为 null/undefined 时显示占位符 */
+function UsageStatsRow({
+  label,
+  stats,
+}: {
+  label: string
+  stats:
+    | {
+        totalRequests: number
+        totalInputTokens: number
+        totalOutputTokens: number
+        totalCost: number
+      }
+    | null
+    | undefined
+}) {
+  const { t } = useTranslation()
+  // 本地化口径与组件内 formatNumber 保持一致（千分位 + 2 位小数）
+  const formatInt = (n: number) => n.toLocaleString(localeTag())
+  const formatCost = (n: number) => n.toLocaleString(localeTag(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const metrics: Array<{ label: string; value: string }> = [
+    { label: t('credentials.usageStatsRequests'), value: stats ? formatInt(stats.totalRequests) : '--' },
+    { label: t('credentials.usageStatsInputTokens'), value: stats ? formatInt(stats.totalInputTokens) : '--' },
+    { label: t('credentials.usageStatsOutputTokens'), value: stats ? formatInt(stats.totalOutputTokens) : '--' },
+    { label: t('credentials.usageStatsCost'), value: stats ? `$${formatCost(stats.totalCost)}` : '--' },
+  ]
+
+  return (
+    <div>
+      <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wider text-ink-3">{label}</div>
+      <div className="grid grid-cols-4 divide-x-[0.5px] divide-hairline text-center">
+        {metrics.map((m) => (
+          <div key={m.label} className="min-w-0 px-1">
+            <div className="truncate text-[10px] text-ink-3">{m.label}</div>
+            <div className="truncate font-mono text-[12.5px] font-semibold text-ink" title={m.value}>
+              {m.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function BalanceDialog({ credentialId, credential, open, onOpenChange }: BalanceDialogProps) {
   const { t } = useTranslation()
   const { data: balance, isLoading, error } = useCredentialBalance(credentialId)
+  // 使用统计：复用账号详情页同款 hooks（60s 自动刷新），失败时卡片内显示占位符；
+  // hooks 内部 enabled: id > 0，credentialId 为 null 时传 0 仅作哨兵，不会发起请求
+  const { data: usageSummary } = useCredentialUsageSummary(credentialId ?? 0)
+  const { data: usageToday } = useCredentialTodaySummary(credentialId ?? 0)
 
   const formatTimestamp = (timestamp: number | null) => {
     if (!timestamp) return t('credentials.unknown')
@@ -384,6 +432,29 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
               <div className="truncate pt-1 text-[11px] text-ink-3">
                 <span>{t('credentials.lastUsedAtLabel')}: </span>
                 <span className="font-mono text-ink-2">{formatIso(credential.lastUsedAt)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* 阶梯五：使用统计（累计 / 今日），接口失败时占位符降级 */}
+          {credential && (
+            <div className="space-y-3 rounded-lg border border-transparent bg-surface-2 p-3.5">
+              <CardHeader
+                label={t('credentials.usageStatsTitle')}
+                icon={
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
+                  </svg>
+                }
+              />
+
+              <div className="space-y-3 rounded-lg border border-transparent bg-surface p-3">
+                <UsageStatsRow label={t('credentials.usageStatsTotal')} stats={usageSummary} />
+                <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
+                  <UsageStatsRow label={t('credentials.usageStatsToday')} stats={usageToday} />
+                </div>
               </div>
             </div>
           )}
