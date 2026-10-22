@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 //! Handler 错误处理：构造 prompt_too_long 提示、将 Kiro/provider 错误映射为带上下文的 Anthropic 错误响应、解析请求体为 MessagesRequest。
 
-use crate::anthropic::stream::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
+use crate::anthropic::stream::{CLIENT_ASSUMED_CONTEXT_WINDOW, SseEvent, scale_for_client};
 use crate::anthropic::types::{ErrorResponse, MessagesRequest};
 
 use crate::kiro::token_manager::QUOTA_EXHAUSTED_ALL_MARKER;
@@ -25,11 +25,49 @@ pub(crate) fn format_prompt_too_long(estimated_input_tokens: i32, model: &str) -
     )
 }
 
+/// Provider 错误分类结果：HTTP 错误响应与流内 error 事件共用，保证两条路径口径一致
+struct ProviderErrorClass {
+    status: StatusCode,
+    error_type: &'static str,
+    message: String,
+}
+
 pub(crate) fn map_provider_error_with_context(
     err: Error,
     model: &str,
     estimated_input_tokens: i32,
 ) -> Response {
+    let class = classify_provider_error(&err, model, estimated_input_tokens);
+    let body = Json(ErrorResponse::new(class.error_type, class.message));
+
+    // 429 带 Retry-After，交由客户端内置退避接管
+    if class.status == StatusCode::TOO_MANY_REQUESTS {
+        return (class.status, [(header::RETRY_AFTER, "5")], body).into_response();
+    }
+    (class.status, body).into_response()
+}
+
+/// SSE 响应头已下发后（HTTP 状态码已是 200）上游才失败：同口径分类，以流内 error 事件告知客户端
+pub(crate) fn provider_error_sse_event(
+    err: &Error,
+    model: &str,
+    estimated_input_tokens: i32,
+) -> SseEvent {
+    let class = classify_provider_error(err, model, estimated_input_tokens);
+    SseEvent::new(
+        "error",
+        serde_json::json!({
+            "type": "error",
+            "error": { "type": class.error_type, "message": class.message }
+        }),
+    )
+}
+
+fn classify_provider_error(
+    err: &Error,
+    model: &str,
+    estimated_input_tokens: i32,
+) -> ProviderErrorClass {
     let err_str = err.to_string();
 
     // 上下文窗口满了（对话历史累积超出模型上下文窗口限制）
@@ -45,27 +83,21 @@ pub(crate) fn map_provider_error_with_context(
         // 官方格式才有机会被识别为「压缩后重试」。两个数字统一用客户端展示口径
         // （N 经 scale_for_client 缩放、M 取客户端假设的 200K 窗口），与同一会话中
         // usage 字段的口径一致，客户端自算 Ctx% 不会与这段文案矛盾。
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse::new(
-                "invalid_request_error",
-                format_prompt_too_long(estimated_input_tokens, model),
-            )),
-        )
-            .into_response();
+        return ProviderErrorClass {
+            status: StatusCode::BAD_REQUEST,
+            error_type: "invalid_request_error",
+            message: format_prompt_too_long(estimated_input_tokens, model),
+        };
     }
 
     // 单次输入太长（请求体本身超出上游限制）
     if err_str.contains("Input is too long") {
         tracing::warn!(error = %err, "上游拒绝请求：输入过长（不应重试）");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse::new(
-                "invalid_request_error",
-                "Input is too long. Reduce the size of your messages.",
-            )),
-        )
-            .into_response();
+        return ProviderErrorClass {
+            status: StatusCode::BAD_REQUEST,
+            error_type: "invalid_request_error",
+            message: "Input is too long. Reduce the size of your messages.".to_string(),
+        };
     }
     // 额度耗尽（402）：range 内所有（模型过滤后）账号本月额度均已用尽。
     // 必须优先于 429 判断，且只信任 describe_unavailable 产出的机器可识别标记——
@@ -75,16 +107,14 @@ pub(crate) fn map_provider_error_with_context(
     // 判定为 temporary 故障并反复重试，定时任务会整轮空转。
     if err_str.contains(QUOTA_EXHAUSTED_ALL_MARKER) {
         tracing::error!(error = %err, "上游额度耗尽：返回 402 告知客户端不可重试");
-        return (
-            StatusCode::PAYMENT_REQUIRED,
-            Json(ErrorResponse::new(
-                "quota_exceeded_error",
-                "All bound Kiro accounts have exhausted their monthly request quota. \
-                 Quota resets at the start of next month, or add/enable another account \
-                 in the admin panel.",
-            )),
-        )
-            .into_response();
+        return ProviderErrorClass {
+            status: StatusCode::PAYMENT_REQUIRED,
+            error_type: "quota_exceeded_error",
+            message: "All bound Kiro accounts have exhausted their monthly request quota. \
+                      Quota resets at the start of next month, or add/enable another account \
+                      in the admin panel."
+                .to_string(),
+        };
     }
 
     // 上游限流（429 Too Many Requests）：所有账号重试后仍被限流。
@@ -93,28 +123,22 @@ pub(crate) fn map_provider_error_with_context(
     // （表现为工具调用不执行 / 卡住），而 429 会触发客户端自动等待重试。
     if err_str.contains("429") || err_str.contains("Too Many Requests") {
         tracing::warn!(error = %err, "上游限流（所有账号 429 耗尽）：透传 429 给客户端以触发其退避重试");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(header::RETRY_AFTER, "5")],
-            Json(ErrorResponse::new(
-                "rate_limit_error",
-                "Upstream rate limit reached on all accounts. Please retry shortly.",
-            )),
-        )
-            .into_response();
+        return ProviderErrorClass {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            error_type: "rate_limit_error",
+            message: "Upstream rate limit reached on all accounts. Please retry shortly."
+                .to_string(),
+        };
     }
 
     // 兜底：完整错误详情只进日志，不回显给客户端——describe_unavailable 等诊断文案
     // 含账号数量/禁用原因拆解，属内部状态，不应通过客户端可见的响应体外泄。
     tracing::error!(error = %err, "Kiro API 调用失败");
-    (
-        StatusCode::BAD_GATEWAY,
-        Json(ErrorResponse::new(
-            "api_error",
-            "Upstream API call failed. Please retry shortly.",
-        )),
-    )
-        .into_response()
+    ProviderErrorClass {
+        status: StatusCode::BAD_GATEWAY,
+        error_type: "api_error",
+        message: "Upstream API call failed. Please retry shortly.".to_string(),
+    }
 }
 
 /// 从原始请求体反序列化 MessagesRequest，失败时记录详细的 serde 错误用于诊断。

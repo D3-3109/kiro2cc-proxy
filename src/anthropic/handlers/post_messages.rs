@@ -304,7 +304,7 @@ pub async fn post_messages(
         // 流式响应
         handle_stream_request(
             provider,
-            &request_body,
+            request_body,
             &payload.model,
             input_tokens,
             prefix_estimated_tokens,

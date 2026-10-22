@@ -4,4 +4,5 @@ mod bridge;
 mod error;
 mod final_events;
 mod models;
+mod upstream_wait;
 mod websearch;

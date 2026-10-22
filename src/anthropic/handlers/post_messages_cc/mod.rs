@@ -265,7 +265,7 @@ pub async fn post_messages_cc(
         // （上游挂起保护，沿用此端点历史上一直具备的 5min 上限）
         handle_stream_request(
             provider,
-            &request_body,
+            request_body,
             &payload.model,
             input_tokens,
             prefix_estimated_tokens,

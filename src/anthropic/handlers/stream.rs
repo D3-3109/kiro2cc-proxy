@@ -13,21 +13,23 @@ use axum::{
     response::Response,
 };
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, stream};
+use std::pin::Pin;
 use std::time::Duration;
-use tokio::time::{Instant, interval_at};
+use tokio::time::{Instant, Interval, interval_at};
 
 use super::bridge::{
     BridgeContext, BridgeRoundOutcome, BridgeState, InFlightRound, bridge_execute_round_owned,
     bridge_handle_event, build_web_search_result_events, harvest_bridge_round,
 };
-use super::error::map_provider_error_with_context;
+use super::error::{map_provider_error_with_context, provider_error_sse_event};
 
 /// 处理流式请求
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_stream_request(
     provider: std::sync::Arc<crate::kiro::provider::KiroProvider>,
-    request_body: &str,
+    request_body: String,
     model: &str,
     input_tokens: i32,
     prefix_estimated_tokens: i32,
@@ -61,73 +63,106 @@ pub(crate) async fn handle_stream_request(
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
     let request_started_at = std::time::Instant::now();
 
-    // 调用 Kiro API（支持多账号故障转移）
-    let (response, credential_id) = match provider
-        .call_api_stream(
-            request_body,
-            is_compact_request,
-            thinking_adaptive_requested,
-            &bound_ids,
+    // 调用 Kiro API（支持多账号故障转移）；Box::pin 使调用可在宽限期超时后移入 SSE body 继续等待
+    let call_provider = std::sync::Arc::clone(&provider);
+    let mut upstream_call = Box::pin(async move {
+        call_provider
+            .call_api_stream(
+                &request_body,
+                is_compact_request,
+                thinking_adaptive_requested,
+                &bound_ids,
+            )
+            .await
+    });
+
+    // 上游响应头到达后构建 SSE 事件流（快慢两条路径共用）
+    let stream_model = model.to_string();
+    let into_sse_stream = move |response: reqwest::Response, credential_id: u64| {
+        let model = stream_model.as_str();
+
+        // 账号级 thinking 开关是最终裁决（开 = 强制思考，关 = 禁止思考），必须在选中账号后
+        // 才能确定；故障转移后的账号即 credential_id 对应账号
+        let client_thinking_enabled = thinking_enabled;
+        let thinking_enabled = super::helpers::effective_thinking_enabled(
+            &provider,
+            credential_id,
+            model,
+            client_thinking_enabled,
+        );
+        tracing::info!(
+            model = %model,
+            credential_id,
+            client_request = client_thinking_enabled,
+            effective = thinking_enabled,
+            "[THINKING] 账号开关裁决后的深度思考状态"
+        );
+        let thinking_as_text = thinking_as_text_allowed.filter(|_| thinking_enabled);
+
+        // effort 入库口径与 thinking 裁决联动（口径说明见 resolve_recorded_effort 文档）
+        let effort = super::helpers::resolve_recorded_effort(thinking_enabled, effort);
+
+        // 创建流处理上下文
+        let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
+            .with_usage_tracking(
+                usage_tracker,
+                api_key_id,
+                Some(credential_id),
+                client_ip,
+                user_agent,
+            )
+            .with_prompt_cache_usage(prompt_cache_usage)
+            .with_prefix_estimated_tokens(prefix_estimated_tokens)
+            .with_cache_accounting(cache_accounting)
+            .with_conversation_id(conversation_id)
+            .with_effort(effort)
+            // 计时起点在 call_api_stream 之前注入（见函数开头注释）
+            .with_request_started_at(request_started_at)
+            .with_thinking_as_text(thinking_as_text);
+
+        // 生成初始事件
+        let initial_events = ctx.generate_initial_events();
+
+        // 创建 SSE 流
+        create_sse_stream(
+            response,
+            ctx,
+            initial_events,
+            stream_deadline.map(|d| Instant::now() + d),
+            bridge_ctx,
+            std::sync::Arc::clone(&provider),
         )
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => return map_provider_error_with_context(e, model, input_tokens),
     };
 
-    // 账号级 thinking 开关是最终裁决（开 = 强制思考，关 = 禁止思考），必须在选中账号后
-    // 才能确定；故障转移后的账号即 credential_id 对应账号
-    let client_thinking_enabled = thinking_enabled;
-    let thinking_enabled = super::helpers::effective_thinking_enabled(
-        &provider,
-        credential_id,
-        model,
-        client_thinking_enabled,
-    );
-    tracing::info!(
-        model = %model,
-        credential_id,
-        client_request = client_thinking_enabled,
-        effective = thinking_enabled,
-        "[THINKING] 账号开关裁决后的深度思考状态"
-    );
-    let thinking_as_text = thinking_as_text_allowed.filter(|_| thinking_enabled);
+    // 宽限期内完成（含秒级返回的 400/402/429）→ 原有路径，HTTP 状态码语义不变
+    match tokio::time::timeout(UPSTREAM_HEADERS_GRACE, upstream_call.as_mut()).await {
+        Ok(Ok((response, credential_id))) => sse_response(into_sse_stream(response, credential_id)),
+        Ok(Err(e)) => map_provider_error_with_context(e, model, input_tokens),
+        Err(_) => {
+            tracing::info!(
+                grace_secs = UPSTREAM_HEADERS_GRACE.as_secs(),
+                "上游响应头超出宽限期，先下发 SSE 响应头并保活等待"
+            );
+            sse_response(create_awaiting_upstream_sse_stream(
+                upstream_call,
+                into_sse_stream,
+                model.to_string(),
+                input_tokens,
+            ))
+        }
+    }
+}
 
-    // effort 入库口径与 thinking 裁决联动（口径说明见 resolve_recorded_effort 文档）
-    let effort = super::helpers::resolve_recorded_effort(thinking_enabled, effort);
+/// 上游响应头宽限期
+///
+/// 超出后先下发 SSE 响应头并保活，防止反代因首字节超时断开（Cloudflare 默认 125s 即 524）。
+/// 确定性错误（400/402/429）通常秒级返回，落在窗口内，仍以 HTTP 状态码告知客户端。
+const UPSTREAM_HEADERS_GRACE: Duration = Duration::from_secs(5);
 
-    // 创建流处理上下文
-    let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
-        .with_usage_tracking(
-            usage_tracker,
-            api_key_id,
-            Some(credential_id),
-            client_ip,
-            user_agent,
-        )
-        .with_prompt_cache_usage(prompt_cache_usage)
-        .with_prefix_estimated_tokens(prefix_estimated_tokens)
-        .with_cache_accounting(cache_accounting)
-        .with_conversation_id(conversation_id)
-        .with_effort(effort)
-        // 计时起点在 call_api_stream 之前注入（见函数开头注释）
-        .with_request_started_at(request_started_at)
-        .with_thinking_as_text(thinking_as_text);
-
-    // 生成初始事件
-    let initial_events = ctx.generate_initial_events();
-
-    // 创建 SSE 流
-    let stream = create_sse_stream(
-        response,
-        ctx,
-        initial_events,
-        stream_deadline.map(|d| Instant::now() + d),
-        bridge_ctx,
-        std::sync::Arc::clone(&provider),
-    );
-
-    // 返回 SSE 响应
+fn sse_response<S>(stream: S) -> Response
+where
+    S: Stream<Item = Result<Bytes, Infallible>> + Send + 'static,
+{
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream")
@@ -135,6 +170,100 @@ pub(crate) async fn handle_stream_request(
         .header(header::CONNECTION, "keep-alive")
         .body(Body::from_stream(stream))
         .unwrap()
+}
+
+/// 等待上游响应头阶段的 SSE 状态
+enum UpstreamPhase<C, B> {
+    Waiting {
+        upstream_call: Pin<Box<C>>,
+        keepalive: Interval,
+        into_sse_stream: B,
+        model: String,
+        input_tokens: i32,
+    },
+    Streaming(BoxStream<'static, Result<Bytes, Infallible>>),
+}
+
+/// 宽限期后仍在等待上游响应头时的 SSE 流
+///
+/// ```text
+/// Waiting ──keepalive tick──▶ ": keepalive"（状态不变）
+///    │ 上游 Ok  → into_sse_stream（message_start …）
+///    │ 上游 Err → 单个 error 事件（HTTP 状态码已是 200，只能流内告知）
+///    ▼
+/// Streaming ──▶ 透传至结束
+/// ```
+pub(crate) fn create_awaiting_upstream_sse_stream<C, B, S>(
+    upstream_call: Pin<Box<C>>,
+    into_sse_stream: B,
+    model: String,
+    input_tokens: i32,
+) -> impl Stream<Item = Result<Bytes, Infallible>>
+where
+    C: Future<Output = anyhow::Result<(reqwest::Response, u64)>> + Send + 'static,
+    B: FnOnce(reqwest::Response, u64) -> S + Send + 'static,
+    S: Stream<Item = Result<Bytes, Infallible>> + Send + 'static,
+{
+    // 首个 tick 立即触发：响应头后紧跟首个 body 字节，不依赖 hyper 在 body 未就绪时单独 flush 响应头
+    let keepalive = tokio::time::interval(Duration::from_secs(PING_INTERVAL_SECS));
+    let initial = UpstreamPhase::Waiting {
+        upstream_call,
+        keepalive,
+        into_sse_stream,
+        model,
+        input_tokens,
+    };
+
+    stream::unfold(initial, |phase| async move {
+        match phase {
+            UpstreamPhase::Waiting {
+                mut upstream_call,
+                mut keepalive,
+                into_sse_stream,
+                model,
+                input_tokens,
+            } => {
+                tokio::select! {
+                    result = upstream_call.as_mut() => {
+                        let mut events = match result {
+                            Ok((response, credential_id)) => {
+                                into_sse_stream(response, credential_id).boxed()
+                            }
+                            Err(e) => {
+                                let event = provider_error_sse_event(&e, &model, input_tokens);
+                                let frame = Ok::<_, Infallible>(Bytes::from(event.to_sse_string()));
+                                stream::iter([frame]).boxed()
+                            }
+                        };
+                        let first = events.next().await?;
+                        Some((first, UpstreamPhase::Streaming(events)))
+                    }
+                    _ = keepalive.tick() => {
+                        tracing::trace!("等待上游响应头，发送注释保活");
+                        let next = UpstreamPhase::Waiting {
+                            upstream_call,
+                            keepalive,
+                            into_sse_stream,
+                            model,
+                            input_tokens,
+                        };
+                        Some((Ok(keepalive_comment_sse()), next))
+                    }
+                }
+            }
+            UpstreamPhase::Streaming(mut events) => {
+                let item = events.next().await?;
+                Some((item, UpstreamPhase::Streaming(events)))
+            }
+        }
+    })
+}
+
+/// SSE 注释帧：协议规定客户端忽略
+///
+/// 用于 message_start 之前的保活——Anthropic 事件顺序以 message_start 开头，此时不宜发 ping 事件。
+pub(crate) fn keepalive_comment_sse() -> Bytes {
+    Bytes::from_static(b": keepalive\n\n")
 }
 
 /// Ping 事件间隔（25秒）
