@@ -46,6 +46,29 @@ pub struct CredentialDaySummary {
     pub total_cache_read_tokens: u64,
 }
 
+/// 指定账号在 CST 最近 N 天（含今日）的用量汇总
+///
+/// 与「累计」汇总同口径：仅统计仍留在明细缓冲内的记录（受 `MAX_RECORDS_PER_KEY`
+/// 裁剪约束），繁忙账号的 7/30 天汇总可能低于真实值。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialRangeSummary {
+    pub credential_id: u64,
+    /// 区间起始 CST 日期（含），格式 YYYY-MM-DD
+    pub from_date: String,
+    /// 区间结束 CST 日期（含），恒为今日
+    pub to_date: String,
+    pub total_requests: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cost: f64,
+    pub total_credits: f64,
+    /// 节省的 credits 总量（仅含有 credits_used 的记录）
+    pub total_credits_saved: f64,
+    /// 累计 cache 命中的输入 tokens（None 按 0 计入）
+    pub total_cache_read_tokens: u64,
+}
+
 /// 指定账号全部留存记录（受 MAX_RECORDS_PER_KEY 裁剪约束）的用量汇总
 ///
 /// 与该页「总请求数」同口径：只统计当前仍留在明细缓冲里的记录，
@@ -156,6 +179,69 @@ impl UsageTracker {
         CredentialDaySummary {
             date: today,
             credential_id,
+            total_requests: requests,
+            total_input_tokens: input_tokens,
+            total_output_tokens: output_tokens,
+            total_cache_read_tokens: cache_read_tokens,
+            total_cost: cost,
+            total_credits: credits,
+            total_credits_saved: credits_saved,
+        }
+    }
+
+    /// 按 CST（UTC+8）聚合指定 credential 最近 N 天（含今日）的用量。
+    ///
+    /// 区间为 [今日 - (days-1), 今日]，闭区间按 CST 归属日比较；
+    /// 聚合口径与 `get_today_summary_for_credential` 完全一致。
+    /// 统计范围仅限仍留在明细缓冲内的记录（受 `MAX_RECORDS_PER_KEY` 裁剪约束），
+    /// 已被裁剪的历史不计入。
+    /// 无记录时返回零值汇总（不报错）。
+    pub fn get_range_summary_for_credential(
+        &self,
+        credential_id: u64,
+        days: u32,
+    ) -> CredentialRangeSummary {
+        // 防御极大入参：NaiveDate 减法越界会 panic，区间查询无理由超过留存窗口
+        const MAX_RANGE_DAYS: u32 = 366;
+        let days = days.clamp(1, MAX_RANGE_DAYS);
+        let cst = FixedOffset::east_opt(8 * 3600).unwrap();
+        let today = chrono::Utc::now().with_timezone(&cst).date_naive();
+        let from = today - chrono::Duration::days((days - 1) as i64);
+
+        let mut requests: u64 = 0;
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        let mut cache_read_tokens: u64 = 0;
+        let mut cost: f64 = 0.0;
+        let mut credits: f64 = 0.0;
+        let mut credits_saved: f64 = 0.0;
+
+        let records = self.records.read();
+        for r in records.iter() {
+            if r.credential_id != Some(credential_id) {
+                continue;
+            }
+            let date = r.created_at.with_timezone(&cst).date_naive();
+            if date < from || date > today {
+                continue;
+            }
+            requests += 1;
+            input_tokens = input_tokens.saturating_add(r.input_tokens.max(0) as u64);
+            output_tokens = output_tokens.saturating_add(r.output_tokens.max(0) as u64);
+            cache_read_tokens = cache_read_tokens
+                .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
+            cost += r.estimated_cost;
+            let k_ref = get_k_ref(&r.model);
+            credits += r.credits_used.unwrap_or(r.estimated_cost * k_ref);
+            if let Some(cu) = r.credits_used {
+                credits_saved += r.estimated_cost * k_ref - cu;
+            }
+        }
+
+        CredentialRangeSummary {
+            credential_id,
+            from_date: from.format("%Y-%m-%d").to_string(),
+            to_date: today.format("%Y-%m-%d").to_string(),
             total_requests: requests,
             total_input_tokens: input_tokens,
             total_output_tokens: output_tokens,

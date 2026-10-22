@@ -303,6 +303,8 @@
     "infoGroupRuntime": "运行配置与统计",
     "usageStatsTitle": "使用统计",
     "usageStatsTotal": "累计",
+    "usageStats30Days": "30 天",
+    "usageStats7Days": "7 天",
     "usageStatsToday": "今日",
     "usageStatsRequests": "请求数",
     "usageStatsInputTokens": "输入 tokens",

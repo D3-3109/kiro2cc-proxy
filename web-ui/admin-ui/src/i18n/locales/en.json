@@ -303,6 +303,8 @@
     "infoGroupRuntime": "Runtime & Stats",
     "usageStatsTitle": "Usage Stats",
     "usageStatsTotal": "Total",
+    "usageStats30Days": "30 Days",
+    "usageStats7Days": "7 Days",
     "usageStatsToday": "Today",
     "usageStatsRequests": "Requests",
     "usageStatsInputTokens": "Input tokens",

@@ -8,7 +8,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Progress, QuotaPercentBadge, quotaTone } from '@/components/ui/progress'
-import { useCredentialBalance, useCredentialTodaySummary, useCredentialUsageSummary } from '@/hooks/use-credentials'
+import {
+  useCredential30DaysSummary,
+  useCredential7DaysSummary,
+  useCredentialBalance,
+  useCredentialTodaySummary,
+  useCredentialUsageSummary,
+} from '@/hooks/use-credentials'
 import { ACCOUNT_STATE_VISUAL, deriveAccountState, loginSource } from '@/lib/account-state'
 import { parseError, getSubscriptionColor } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -111,7 +117,8 @@ function UsageStatsRow({
   const { t } = useTranslation()
   // 本地化口径与组件内 formatNumber 保持一致（千分位 + 2 位小数）
   const formatInt = (n: number) => n.toLocaleString(localeTag())
-  const formatCost = (n: number) => n.toLocaleString(localeTag(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // 花费与 credits 统一 4 位小数，与 usage-log-table.formatCost / 详情页口径一致（保留千分位分组）
+  const formatCost = (n: number) => n.toLocaleString(localeTag(), { minimumFractionDigits: 4, maximumFractionDigits: 4 })
   const metrics: Array<{ label: string; value: string }> = [
     { label: t('credentials.usageStatsRequests'), value: stats ? formatInt(stats.totalRequests) : '--' },
     { label: t('credentials.usageStatsInputTokens'), value: stats ? formatInt(stats.totalInputTokens) : '--' },
@@ -142,9 +149,13 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
   const { t } = useTranslation()
   const { data: balance, isLoading, error } = useCredentialBalance(credentialId)
   // 使用统计：复用账号详情页同款 hooks（60s 自动刷新），失败时卡片内显示占位符；
-  // hooks 内部 enabled: id > 0，credentialId 为 null 时传 0 仅作哨兵，不会发起请求
-  const { data: usageSummary } = useCredentialUsageSummary(credentialId ?? 0)
-  const { data: usageToday } = useCredentialTodaySummary(credentialId ?? 0)
+  // credentialId 为 null 时传 0 仅作哨兵；弹窗关闭后 enabled=false，停止请求与轮询。
+  // 声明顺序与渲染顺序保持一致：累计 → 今日 → 7 天 → 30 天
+  const statsEnabled = open && credentialId != null
+  const { data: usageSummary } = useCredentialUsageSummary(credentialId ?? 0, statsEnabled)
+  const { data: usageToday } = useCredentialTodaySummary(credentialId ?? 0, statsEnabled)
+  const { data: usage7Days } = useCredential7DaysSummary(credentialId ?? 0, statsEnabled)
+  const { data: usage30Days } = useCredential30DaysSummary(credentialId ?? 0, statsEnabled)
 
   const formatTimestamp = (timestamp: number | null) => {
     if (!timestamp) return t('credentials.unknown')
@@ -185,9 +196,10 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-transparent bg-surface">
+      {/* flex 列布局：Header 固定不参与滚动，仅下方内容区滚动 */}
+      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-transparent bg-surface">
         {/* 阶梯一：顶栏资产标识与全局状态 */}
-        <DialogHeader className="flex flex-col gap-1 border-b-[0.5px] border-hairline px-[22px] pt-5 pb-4 text-left">
+        <DialogHeader className="flex shrink-0 flex-col gap-1 border-b-[0.5px] border-hairline px-[22px] pt-5 pb-4 text-left">
           {/* pr-6 为右上角关闭按钮让位，避免标题与其重叠 */}
           <div className="flex flex-wrap items-center gap-2 pr-6">
             <DialogTitle className="text-[17px] font-semibold tracking-tight text-ink">
@@ -209,7 +221,8 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
           )}
         </DialogHeader>
 
-        <div className="space-y-4 px-[22px] pt-[18px] pb-[22px]">
+        {/* 隐藏滚动条但保留滚动能力，与编辑账号弹窗口径一致 */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-[22px] pt-[18px] pb-[22px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {/* 加载态：余额查询中，Hero 与错误卡片均不渲染，但账号信息卡片照常显示 */}
           {isLoading && (
             <div className="flex items-center justify-center py-10">
@@ -439,7 +452,7 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
             </div>
           )}
 
-          {/* 阶梯五：使用统计（累计 / 今日），接口失败时占位符降级 */}
+          {/* 阶梯五：使用统计（累计 / 今日 / 7 天 / 30 天），接口失败时占位符降级 */}
           {credential && (
             <div className="space-y-3 rounded-lg border border-transparent bg-surface-2 p-3.5">
               <CardHeader
@@ -457,6 +470,12 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
                 <UsageStatsRow label={t('credentials.usageStatsTotal')} stats={usageSummary} />
                 <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
                   <UsageStatsRow label={t('credentials.usageStatsToday')} stats={usageToday} />
+                </div>
+                <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
+                  <UsageStatsRow label={t('credentials.usageStats7Days')} stats={usage7Days} />
+                </div>
+                <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
+                  <UsageStatsRow label={t('credentials.usageStats30Days')} stats={usage30Days} />
                 </div>
               </div>
             </div>

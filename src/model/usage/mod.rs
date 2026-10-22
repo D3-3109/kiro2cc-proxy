@@ -629,7 +629,7 @@ mod pricing;
 mod tests;
 
 #[allow(unused_imports)] // 类型归属 daily.rs，经 mod 再导出保持原模块路径
-pub(crate) use daily::{CredentialDaySummary, DailySummary};
+pub(crate) use daily::{CredentialDaySummary, CredentialRangeSummary, DailySummary};
 #[allow(unused_imports)]
 pub(crate) use pagination::{UsageRecordItem, UsageRecordsPage};
 #[allow(unused_imports)]

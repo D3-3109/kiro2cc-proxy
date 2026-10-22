@@ -18,6 +18,7 @@ import type {
   UsageRecordsResponse,
   DailySummary,
   CredentialDaySummary,
+  CredentialRangeSummary,
   CredentialUsageSummary,
   ThrottleLogsResponse,
   FailureLogsResponse,
@@ -300,6 +301,17 @@ export async function getCredentialTodaySummary(
 ): Promise<CredentialDaySummary> {
   const { data } = await api.get<CredentialDaySummary>(
     `/credentials/${id}/usage/today`
+  )
+  return data
+}
+
+// 获取单账号 CST 最近 N 天（含今日）的用量汇总（7days / 30days）
+export async function getCredentialRangeSummary(
+  id: number,
+  range: '7days' | '30days'
+): Promise<CredentialRangeSummary> {
+  const { data } = await api.get<CredentialRangeSummary>(
+    `/credentials/${id}/usage/${range}`
   )
   return data
 }

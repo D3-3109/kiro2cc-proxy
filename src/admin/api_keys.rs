@@ -243,6 +243,32 @@ pub async fn get_credential_today_summary(
     Json(tracker.get_today_summary_for_credential(id)).into_response()
 }
 
+/// GET /api/admin/credentials/:id/usage/7days
+/// 获取单个账号在 CST 最近 7 天（含今日）的用量汇总
+pub async fn get_credential_7days_summary(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    let Some(tracker) = &state.usage_tracker else {
+        let error = AdminErrorResponse::internal_error("用量追踪未启用");
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
+    };
+    Json(tracker.get_range_summary_for_credential(id, 7)).into_response()
+}
+
+/// GET /api/admin/credentials/:id/usage/30days
+/// 获取单个账号在 CST 最近 30 天（含今日）的用量汇总
+pub async fn get_credential_30days_summary(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    let Some(tracker) = &state.usage_tracker else {
+        let error = AdminErrorResponse::internal_error("用量追踪未启用");
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response();
+    };
+    Json(tracker.get_range_summary_for_credential(id, 30)).into_response()
+}
+
 /// GET /api/admin/models
 /// 获取当前代理支持的完整模型列表（admin 鉴权），直接来源于上游 ListAvailableModels
 /// 实时响应；上游调用失败时回退到本地静态模型表

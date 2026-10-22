@@ -309,6 +309,19 @@ export interface CredentialDaySummary {
   totalCreditsSaved?: number
 }
 
+// 单账号在 CST 最近 N 天（含今日）的用量汇总（后端 /credentials/:id/usage/7days、/30days）
+export interface CredentialRangeSummary {
+  credentialId: number
+  fromDate: string       // "2026-10-16" CST，区间起始日（含）
+  toDate: string         // 区间结束日（含），恒为今日
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number
+  totalCredits: number
+  totalCreditsSaved?: number
+}
+
 // 单条限流日志记录
 export interface ThrottleLogRecord {
   credentialId: number
