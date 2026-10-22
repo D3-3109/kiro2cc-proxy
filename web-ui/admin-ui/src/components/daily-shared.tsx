@@ -26,6 +26,9 @@ export interface CustomRange {
 /** Token 展示：不小于 100 万时改用紧凑缩写，避免窄列溢出 */
 const tokenText = (n: number) => (n >= 1e6 ? formatCompactToken(n) : formatTokenCount(n))
 
+/** Credits 展示：不小于 1 万时用紧凑缩写，避免 7 列窄格内长整数溢出（与账号详情页 creditsText 同口径） */
+const creditsText = (n: number) => (n >= 1e4 ? formatCompactToken(n) : n.toFixed(4))
+
 /** 紧凑脚注文本：在 flex 脚注行内独立截断并带省略号 */
 function FootText({ children, title }: { children: ReactNode; title?: string }) {
   return (
@@ -110,7 +113,7 @@ export function UsageMetricsBar({
         </Metric>
         <Metric label={t('dailyStats.metricTotalCreditsLabel')}>
           <MetricValue
-            value={hasDaily ? totals.credits.toFixed(4) : '—'}
+            value={hasDaily ? creditsText(totals.credits) : '—'}
             unit={t('dailyStats.unitCredits')}
           />
           <MetricFoot className="min-w-0">
@@ -133,7 +136,7 @@ export function UsageMetricsBar({
           </MetricFoot>
         </Metric>
         <Metric label={t('common.pageCredits')}>
-          <MetricValue value={pageCredits.toFixed(4)} unit={t('dailyStats.unitCredits')} />
+          <MetricValue value={creditsText(pageCredits)} unit={t('dailyStats.unitCredits')} />
           <MetricFoot className="min-w-0">
             {pageSaved > 0 ? (
               <span className="min-w-0 truncate text-ok">

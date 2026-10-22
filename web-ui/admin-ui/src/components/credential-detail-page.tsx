@@ -120,7 +120,7 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
               </span>
             )}
             <Button variant="outline" onClick={handleRefresh} disabled={isLoading || refreshing}>
-              <RotateCw className={refreshing ? 'animate-spin' : ''} />
+              <RotateCw className={isLoading || refreshing ? 'animate-spin' : ''} aria-hidden="true" />
               {t('common.refresh')}
             </Button>
           </>
@@ -151,7 +151,7 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
         <Metric label={t('dailyStats.metricTotalCreditsLabel')}>
           <MetricValue
             value={hasUsageSummary ? creditsText(totalCredits) : '—'}
-            unit="cr"
+            unit={t('dailyStats.unitCredits')}
             trailing={savedTrailing(totalCreditsSaved)}
           />
           <MetricFoot className="min-w-0">
@@ -172,12 +172,12 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
           <MetricValue value={formatCost(pageCost)} />
         </Metric>
         <Metric label={t('common.pageCredits')}>
-          <MetricValue value={pageCredits.toFixed(4)} unit="cr" trailing={savedTrailing(pageSaved)} />
+          <MetricValue value={creditsText(pageCredits)} unit={t('dailyStats.unitCredits')} trailing={savedTrailing(pageSaved)} />
         </Metric>
         <Metric label={t('credentials.todayCredits')}>
           <MetricValue
-            value={(todaySummary?.totalCredits ?? 0).toFixed(4)}
-            unit="cr"
+            value={creditsText(todaySummary?.totalCredits ?? 0)}
+            unit={t('dailyStats.unitCredits')}
             trailing={savedTrailing(todaySaved)}
           />
           {todayRequests > 0 && (

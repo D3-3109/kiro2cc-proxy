@@ -132,8 +132,8 @@ export function DailyStatsPage({
               <BarChart3 aria-hidden="true" />
               {t('dailyStats.navSummaryButton')}
             </Button>
-            <Button variant="outline" onClick={handleRefreshClick} disabled={refreshing}>
-              <RotateCw className={refreshing ? 'animate-spin' : ''} aria-hidden="true" />
+            <Button variant="outline" onClick={handleRefreshClick} disabled={isLoading || refreshing}>
+              <RotateCw className={isLoading || refreshing ? 'animate-spin' : ''} aria-hidden="true" />
               {t('common.refresh')}
             </Button>
           </>

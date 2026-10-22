@@ -23,6 +23,7 @@ pub struct DailySummary {
     pub total_credits_saved: f64,
     /// 累计输入 tokens（含 cache 命中部分）
     pub total_input_tokens: u64,
+    /// 累计输出 tokens
     pub total_output_tokens: u64,
     /// 累计 cache 命中的输入 tokens（None 按 0 计入）
     pub total_cache_read_tokens: u64,

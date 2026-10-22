@@ -29,6 +29,7 @@ interface EditCredentialDialogProps {
 /** 打开时初始值快照：credentialId 标识归属账号，供渲染守卫判断快照是否已就绪 */
 interface Snapshot {
   credentialId: number
+  priority: string
   authRegion: string
   apiRegion: string
   nickname: string
@@ -83,8 +84,10 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
       const machineId = credential.machineId || ''
       const proxyUrl = credential.proxyUrl || ''
       const loginSource = normalizeLoginSource(credential.provider) ?? ''
+      const priority = String(credential.priority)
       setInitial({
         credentialId: credential.id,
+        priority,
         authRegion, apiRegion, nickname, email, clientId,
         profileArn, machineId, proxyUrl, loginSource,
       })
@@ -99,7 +102,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
       setProxyUrl(proxyUrl)
       setProxyUsername('')
       setProxyPassword('')
-      setPriority(String(credential.priority))
+      setPriority(priority)
       setLoginSourceValue(loginSource)
     } else {
       // 关闭即作废快照：同账号紧接着重开时守卫依然生效，不会显示上一会话的旧值
@@ -121,8 +124,9 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
     // 守卫保证表单仅在快照就绪后渲染，此分支理论不可达；防御性检查以收窄快照类型
     if (initial === null || initial.credentialId !== credential.id) return
 
-    // 优先级不在 UpdateCredentialRequest 里，走独立端点；先校验避免半途失败
-    const priorityChanged = priority !== String(credential.priority)
+    // 优先级不在 UpdateCredentialRequest 里，走独立端点；先校验避免半途失败。
+    // 判据同样以打开时快照为基准：弹窗打开期间他人改了优先级时，不应以旧值静默覆盖
+    const priorityChanged = priority !== initial.priority
     if (priorityChanged && !/^\d+$/.test(priority)) {
       toast.error(t('credentials.toastPriorityInvalid'))
       return
@@ -275,8 +279,13 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
             <Section icon={Globe} title={t('credentials.sectionIdentityRegion')}>
               <Field label={t('credentials.regionConfigLabel')} hint={t('credentials.regionHintEdit')}>
                 {/* Auth Region 影响 token 刷新，有值即锁定；API Region 可反复编辑。
-                    只读侧省略 label（由外层 Field 统一承载），两侧框体同为 31px 同顶对齐 */}
-                <div className="grid grid-cols-2 gap-2">
+                    只读侧省略 label（由外层 Field 统一承载），两侧框体同为 31px 同顶对齐。
+                    双输入/只读混合无单一控件可关联，可访问名称由 group + aria-label 承载（同 authMethod 口径） */}
+                <div
+                  className="grid grid-cols-2 gap-2"
+                  role="group"
+                  aria-label={t('credentials.regionConfigLabel')}
+                >
                   {locked.authRegion ? (
                     <ReadOnlyField value={authRegion} mono lockNote={lockNote} />
                   ) : (
@@ -407,8 +416,10 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
                 />
               </Field>
               <div className="grid grid-cols-2 gap-2">
+                {/* 无独立 label 可关联（Field 的 htmlFor 指向 proxyUrl），placeholder 消失即失名，补 aria-label */}
                 <Input
                   id="proxyUsername"
+                  aria-label={t('credentials.proxyUsernamePlaceholder')}
                   placeholder={t('credentials.proxyUsernamePlaceholder')}
                   value={proxyUsername}
                   onChange={(e) => setProxyUsername(e.target.value)}
@@ -417,6 +428,7 @@ export function EditCredentialDialog({ open, onOpenChange, credential }: EditCre
                 <Input
                   id="proxyPassword"
                   type="password"
+                  aria-label={t('credentials.proxyPasswordPlaceholder')}
                   placeholder={t('credentials.proxyPasswordPlaceholder')}
                   value={proxyPassword}
                   onChange={(e) => setProxyPassword(e.target.value)}

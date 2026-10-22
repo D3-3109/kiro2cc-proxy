@@ -203,7 +203,12 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
             {/* 身份与区域 */}
             <Section icon={Globe} title={t('credentials.sectionIdentityRegion')}>
               <Field label={t('credentials.regionConfigLabel')} hint={t('credentials.regionHintAdd')}>
-                <div className="grid grid-cols-2 gap-2">
+                {/* 同 authMethod 分段器口径：双输入无单一控件可关联，可访问名称由 group + aria-label 承载 */}
+                <div
+                  className="grid grid-cols-2 gap-2"
+                  role="group"
+                  aria-label={t('credentials.regionConfigLabel')}
+                >
                   <Input
                     id="authRegion"
                     placeholder={t('credentials.authRegionPlaceholder')}
@@ -314,8 +319,10 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
                   disabled={isPending}
                 />
                 <div className="grid grid-cols-2 gap-2 mt-2">
+                  {/* 无独立 label 可关联（Field 的 htmlFor 指向 proxyUrl），placeholder 消失即失名，补 aria-label */}
                   <Input
                     id="proxyUsername"
+                    aria-label={t('credentials.proxyUsernamePlaceholder')}
                     placeholder={t('credentials.proxyUsernamePlaceholder')}
                     value={proxyUsername}
                     onChange={(e) => setProxyUsername(e.target.value)}
@@ -324,6 +331,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
                   <Input
                     id="proxyPassword"
                     type="password"
+                    aria-label={t('credentials.proxyPasswordPlaceholder')}
                     placeholder={t('credentials.proxyPasswordPlaceholder')}
                     value={proxyPassword}
                     onChange={(e) => setProxyPassword(e.target.value)}

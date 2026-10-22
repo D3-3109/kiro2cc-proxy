@@ -73,8 +73,8 @@ export function DailyDetailPage({ date, onBack }: DailyDetailPageProps) {
         note={t('dailyStats.detailNote', { size: PAGE_SIZE })}
         onBack={onBack}
         actions={
-          <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
-            <RotateCw className={refreshing ? 'animate-spin' : ''} aria-hidden="true" />
+          <Button variant="outline" onClick={handleRefresh} disabled={isLoading || refreshing}>
+            <RotateCw className={isLoading || refreshing ? 'animate-spin' : ''} aria-hidden="true" />
             {t('common.refresh')}
           </Button>
         }
