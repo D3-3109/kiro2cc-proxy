@@ -67,6 +67,30 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.34".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "账号编辑弹窗重构：已有信息（邮箱、登录来源、Auth Region、Client ID、Profile ARN、Machine ID）改为「有值即锁定」只读展示，无值字段仍可补录；表单按「核心凭据 / 身份与区域 / 运行与网络」三分区重排，分区卡片、分段器与头部图标统一为 credential-form-kit 共享视觉基元；账号状态接口随之下发 clientId / profileArn / machineId（均非机密字段）",
+                        "Account edit dialog redesign: existing values (email, login source, Auth Region, Client ID, Profile ARN, Machine ID) are shown read-only under a value-locks-the-field rule, while empty fields stay editable for backfill. The form is regrouped into Core Credentials / Identity & Region / Runtime & Network sections, with section cards, segmented controls and the header icon unified into a shared credential-form-kit; the credential status API now returns clientId / profileArn / machineId (all non-secret)",
+                    ),
+                    Bilingual::new(
+                        "使用日志页与账号详情页新增总费用 / 总 Credits / 总 Token 统计：使用日志页指标条扩为 7 项（区间总计 + 当页汇总）；账号详情页新增累计统计卡，配套新端点 /credentials/{id}/usage/summary（按账号聚合全部留存记录，口径与该页总请求数一致，不含已裁剪历史）；日报 DailySummary 补充 totalOutputTokens",
+                        "Total cost / total credits / total tokens stats on the usage log page and account detail page: the usage log metrics bar expands to 7 items (range totals plus current-page rollups); the account detail page gains cumulative stat cards backed by a new /credentials/{id}/usage/summary endpoint that aggregates all retained records for an account (same scope as its total-request count, trimmed history excluded); DailySummary now includes totalOutputTokens",
+                    ),
+                ]),
+                improve_group(vec![Bilingual::new(
+                    "账号弹窗细节打磨：分区卡片与页脚按钮右缘精确对齐关闭按钮（19px 同线）；弹窗滚动条整体隐藏（滚动仍可用，各平台口径一致）；只读字段与双输入组补齐 role / aria-label 无障碍语义",
+                    "Account dialog polish: section cards and footer buttons align flush with the close button's right edge (19px line); dialog scrollbars are hidden while scrolling still works, consistent across platforms; read-only fields and paired inputs gain role / aria-label accessibility semantics",
+                )]),
+                fix_group(vec![Bilingual::new(
+                    "修复编辑弹窗在列表自动刷新场景下的健壮性问题：初始值快照补 priority 参与差异比对，避免弹窗打开期间他人修改优先级后被旧值覆盖；快照守卫重构为可空 state + useLayoutEffect，修复关闭态对 null 取属性导致整页白屏；刷新按钮加防重入锁并统一禁用/旋转加载态；Credits 大数改紧凑缩写防窄格溢出；统计单位文案接入 i18n",
+                    "Robustness fixes for the edit dialog under automatic list refresh: the initial-value snapshot now includes priority in diff detection so a priority changed by someone else mid-edit is no longer silently overwritten with a stale value; the snapshot guard is rebuilt as nullable state plus useLayoutEffect, fixing a whole-page white screen caused by dereferencing null while the dialog is closed; the refresh button gains a re-entry lock with unified disabled/spinning states; large credit numbers switch to compact notation to avoid narrow-cell overflow; stat unit labels are moved into i18n",
+                )]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.33".to_string(),
             is_latest: false,
             groups: vec![
