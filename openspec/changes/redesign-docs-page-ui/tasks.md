@@ -1,6 +1,6 @@
 # 任务清单：redesign-docs-page-ui
 
-## 状态：IN_PROGRESS
+## 状态：DONE
 
 ## 任务
 
@@ -38,9 +38,9 @@
 
 ## 验收标准
 
-- [ ] 页面结构与 `/Users/MacBook/Downloads/Kiro2cc` 下 1–5 号设计稿一致：sticky hero（含状态点与 GitHub README）、计数 tabs、三步流转卡（含状态徽章）、Mac 窗体工作台、CC Switch 独立卡、cURL 验证卡、语义化接口徽标与类型徽章、429/401 双卡、五步闭环表、TOC 快速接入子项与滚动跟随
-- [ ] 所有既有功能零回归：Key 选择与回落、Base URL 校验与回退、四客户端 × 两 OS 配置生成、CC Switch deeplink 与唤起、hash 深链与滚动补偿、TOC 高亮、折叠抽屉、返回按钮
-- [ ] 明暗双主题与至少一套非默认主题（theme-mono）下排版正常、文字对比度 ≥ 4.5:1
-- [ ] `pnpm build` + `tsc --noEmit` 通过，无 TypeScript 错误与未使用导入
-- [ ] 不新增任何外部依赖（`package.json` 无变更）
-- [ ] `cargo fmt` + `cargo clippy` 保持 clean（无 Rust 改动，仅确认未破坏）
+- [x] 页面结构与 `/Users/MacBook/Downloads/Kiro2cc` 下 1–5 号设计稿一致：sticky hero（含状态点与 GitHub README）、计数 tabs、三步流转卡（含状态徽章）、Mac 窗体工作台、CC Switch 独立卡、cURL 验证卡、语义化接口徽标与类型徽章、429/401 双卡、五步闭环表、TOC 快速接入子项与滚动跟随
+- [x] 所有既有功能零回归：Key 选择与回落、Base URL 校验与回退、四客户端 × 两 OS 配置生成、CC Switch deeplink 与唤起、hash 深链与滚动补偿、TOC 高亮、折叠抽屉、返回按钮
+- [x] 明暗双主题与至少一套非默认主题（theme-mono）下排版正常、文字对比度 ≥ 4.5:1
+- [x] `pnpm build` + `tsc --noEmit` 通过，无 TypeScript 错误与未使用导入
+- [x] 不新增任何外部依赖（`package.json` 无变更）
+- [x] `cargo fmt` + `cargo clippy` 保持 clean（无 Rust 改动，仅确认未破坏）

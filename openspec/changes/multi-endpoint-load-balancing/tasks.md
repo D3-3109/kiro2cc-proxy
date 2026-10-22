@@ -48,13 +48,13 @@
 
 ## 验收标准（全局）
 
-- [ ] `cargo check` 通过
-- [ ] `cargo clippy -- -D warnings` 通过
-- [ ] `cargo fmt --check` 通过
-- [ ] `cargo test` 全绿（既有测试零回归 + 新增 ≥ 6 测试）
-- [ ] `credentials.json` 缺省 `endpoint` 字段时行为与现行完全一致（默认 `Ide` 单端点）
-- [ ] 不引入新外部 crate（`Cargo.toml` 无新增依赖）
-- [ ] 文档同步完成（代码速查表 + README）
+- [x] `cargo check` 通过
+- [x] `cargo clippy -- -D warnings` 通过
+- [x] `cargo fmt --check` 通过
+- [x] `cargo test` 全绿（既有测试零回归 + 新增 ≥ 6 测试）
+- [x] `credentials.json` 缺省 `endpoint` 字段时行为与现行完全一致（默认 `Ide` 单端点）
+- [x] 不引入新外部 crate（`Cargo.toml` 无新增依赖）
+- [x] 文档同步完成（代码速查表 + README）
 
 ## 依赖与约束
 
