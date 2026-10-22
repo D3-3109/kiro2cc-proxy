@@ -67,6 +67,20 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.35".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![Bilingual::new(
+                    "账号余额弹窗新增多时间窗使用统计：累计 / 今日 / 7 天 / 30 天四组统计卡片，各自展示请求数、输入输出 Tokens、花费与 Credits 消费；新增 /credentials/{id}/usage/today|7days|30days 端点，按 CST（UTC+8）自然日聚合，口径与累计统计一致（受明细缓冲裁剪约束）",
+                    "Multi-range usage stats in the account balance dialog: four stat card groups — total / today / 7 days / 30 days — each showing requests, input/output tokens, cost and credits consumption; backed by new /credentials/{id}/usage/today|7days|30days endpoints aggregated by CST (UTC+8) calendar day, same scope as the total stats (bounded by the retained-records cap)",
+                )]),
+                fix_group(vec![Bilingual::new(
+                    "i18n 英文文案润色：修正 20 余处不地道或歧义表述，包括批量操作文案缺失批量语义（Restore Failed Accounts、Batch Disable 等）、中式英语（Re-query → Refresh balance、Release to import → Drop the file to import、Real Credits → Actual Credits 等）与冠词、大小写细节",
+                    "i18n English copy polish: fixed 20+ non-idiomatic or ambiguous phrasings, including batch-action labels missing the batch semantic (Restore Failed Accounts, Batch Disable, etc.), unnatural wording (Re-query → Refresh balance, Release to import → Drop the file to import, Real Credits → Actual Credits, etc.) and article/capitalization details",
+                )]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.34".to_string(),
             is_latest: false,
             groups: vec![
