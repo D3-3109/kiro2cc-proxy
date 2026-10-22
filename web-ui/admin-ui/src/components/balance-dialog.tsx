@@ -103,6 +103,7 @@ function UsageStatsRow({
         totalInputTokens: number
         totalOutputTokens: number
         totalCost: number
+        totalCredits: number
       }
     | null
     | undefined
@@ -116,12 +117,14 @@ function UsageStatsRow({
     { label: t('credentials.usageStatsInputTokens'), value: stats ? formatInt(stats.totalInputTokens) : '--' },
     { label: t('credentials.usageStatsOutputTokens'), value: stats ? formatInt(stats.totalOutputTokens) : '--' },
     { label: t('credentials.usageStatsCost'), value: stats ? `$${formatCost(stats.totalCost)}` : '--' },
+    // credits 口径与使用日志页 credits 列一致（toFixed(4)）
+    { label: t('credentials.usageStatsCredits'), value: stats ? stats.totalCredits.toFixed(4) : '--' },
   ]
 
   return (
     <div>
       <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wider text-ink-3">{label}</div>
-      <div className="grid grid-cols-4 divide-x-[0.5px] divide-hairline text-center">
+      <div className="grid grid-cols-5 divide-x-[0.5px] divide-hairline text-center">
         {metrics.map((m) => (
           <div key={m.label} className="min-w-0 px-1">
             <div className="truncate text-[10px] text-ink-3">{m.label}</div>

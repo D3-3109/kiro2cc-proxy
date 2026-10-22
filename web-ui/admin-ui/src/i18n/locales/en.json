@@ -308,6 +308,7 @@
     "usageStatsInputTokens": "Input tokens",
     "usageStatsOutputTokens": "Output tokens",
     "usageStatsCost": "Cost",
+    "usageStatsCredits": "Credits",
     "priorityPlaceholder": "Lower number = higher priority",
     "priorityHint": "Lower number = higher priority, default is 0",
     "machineIdLabel": "Machine ID",

@@ -308,6 +308,7 @@
     "usageStatsInputTokens": "输入 tokens",
     "usageStatsOutputTokens": "输出 tokens",
     "usageStatsCost": "花费",
+    "usageStatsCredits": "Credits",
     "priorityPlaceholder": "数字越小优先级越高",
     "priorityHint": "数字越小优先级越高，默认为 0",
     "machineIdLabel": "Machine ID",
