@@ -383,7 +383,7 @@
     "verifyBackgroundHint": "💡 验活过程中每次请求间隔 2 秒，防止被封号。你可以关闭此窗口，验活会在后台继续进行。",
     "runInBackgroundButton": "后台运行",
     "cancelVerifyButton": "取消验活",
-    "importBadge": "同时支持单账号 / 批量导入",
+    "importBadge": "同时支持单账号 / 批量账号导入",
     "importToolbarFormat": "格式化",
     "importToolbarClear": "清空",
     "importDropOverlay": "松开鼠标即可导入该文件",
