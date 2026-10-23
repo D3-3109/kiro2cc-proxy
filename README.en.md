@@ -387,7 +387,7 @@ Using an overseas server is recommended — no proxy needed.
 
 **Step 1: Export account JSON from Kiro Account Manager**
 
-1. Install Kiro IDE or Kiro Account Manager
+1. Install Kiro IDE or [Kiro Account Manager (KAM)](https://github.com/chaogei/Kiro-account-manager/releases) — download from the [KAM Releases page](https://github.com/chaogei/Kiro-account-manager/releases)
 2. Sign in with your GitHub / Google Social account
 3. Find the "Export Account" option in the account management interface
 4. Export as a JSON file (or copy the JSON content)

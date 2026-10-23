@@ -391,7 +391,7 @@ bash start_server.sh restart   # 重启
 
 **第一步：从 Kiro Account Manager 导出账号 JSON**
 
-1. 安装 Kiro IDE 或 Kiro Account Manager
+1. 安装 Kiro IDE 或 [Kiro Account Manager（KAM）](https://github.com/chaogei/Kiro-account-manager/releases)，下载地址：[KAM Releases 页面](https://github.com/chaogei/Kiro-account-manager/releases)
 2. 使用 GitHub / Google 等 Social 账号登录
 3. 在账号管理界面找到"导出账号信息"或"Export Account"选项
 4. 导出为 JSON 文件（或复制 JSON 内容）
