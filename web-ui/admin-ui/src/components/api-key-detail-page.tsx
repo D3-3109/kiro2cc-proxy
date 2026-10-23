@@ -82,7 +82,7 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
   }
 
   return (
-    <div>
+    <div className="flex h-[calc(100vh-56px)] min-h-[480px] flex-col">
       {/* 页头（设计稿 .head）：三级面包屑 + 返回钮 + 序号副标题 + 右侧状态标签与刷新 */}
       <PageHead
         crumb={[t('dashboard.navMain'), t('apiKeys.pageTitle'), title]}
@@ -207,10 +207,10 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
       )}
 
       {/* 请求日志（.panel + .tscroll + .panel-foot） */}
-      <div className="mt-[15px]">
+      <div className="mt-[15px] flex min-h-0 flex-1 flex-col">
         <h3 className={PANEL_TITLE}>{t('common.requestLog')}</h3>
-        <section className={PANEL}>
-          <div className="max-h-[70vh] overflow-y-auto">
+        <section className={`${PANEL} flex min-h-0 flex-1 flex-col`}>
+          <div className="relative min-h-0 flex-1 overflow-y-auto">
             <UsageLogTable records={records} geoMap={geoMap} isLoading={isLoading} />
           </div>
 
