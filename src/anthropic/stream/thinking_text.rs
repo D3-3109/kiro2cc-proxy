@@ -68,7 +68,6 @@ pub fn thinking_as_text_enabled() -> bool {
 /// 单行文本是否为渲染出的思考标记行（兼容 dim 转义包裹，以及 Plain 的引用 + 斜体包裹）
 fn is_rendered_header_line(line: &str) -> bool {
     let line = line.replace(DIM_ON, "").replace(DIM_OFF, "");
-    let line = line.strip_suffix('\r').unwrap_or(&line);
     line == THOUGHT_HEADER
         || line
             .strip_prefix(QUOTE_ITALIC_OPEN)
@@ -169,14 +168,19 @@ pub(crate) fn strip_rendered_thinking(text: &str) -> std::borrow::Cow<'_, str> {
         if let Some(nl2) = rest[start + 1..].find('\n') {
             // 仅对当前行匹配，行尾锚定以换行为界；span_end 停在时长行末尾，
             // 其后的粘连文本（旧格式时长行无尾 \n 时与答案同行）原样保留
-            if let Some(span_end) = find_duration_span(&rest[start + 1..start + 1 + nl2]) {
+            let line = &rest[start + 1..start + 1 + nl2];
+            if let Some(span_end) = find_duration_span(line) {
                 return std::borrow::Cow::Owned(after_thinking_block(
                     &rest[start + 1 + span_end..],
+                    trailing_newlines_of(line),
                 ));
             }
         } else if let Some(span_end) = find_duration_span(&rest[start + 1..]) {
             // 最后一行（无换行结尾）：丢弃到时长行末尾，其后粘连文本保留
-            return std::borrow::Cow::Owned(after_thinking_block(&rest[start + 1 + span_end..]));
+            return std::borrow::Cow::Owned(after_thinking_block(
+                &rest[start + 1 + span_end..],
+                trailing_newlines_of(&rest[start + 1..]),
+            ));
         }
         i = start + 1;
     }
@@ -188,9 +192,17 @@ pub(crate) fn strip_rendered_thinking(text: &str) -> std::borrow::Cow<'_, str> {
 
 /// 拆除 Plain 样式渲染的逐行 `> *内容*` 包裹；不符合该形态的行原样保留。
 /// 块在行中间被中断时最后一行可能缺少结束的 `*`，同样处理。
+/// 渲染出的思考块是一段连续的引用行，所以只处理开头这一段，遇到第一个非 `>` 行即停止，
+/// 其后的文本（可能是答案，自带的 `> *斜体*` 引用不应被误拆）原样保留。
 fn unwrap_quoted_italic_lines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
+    let mut in_quote_run = true;
     for line in text.split_inclusive('\n') {
+        in_quote_run = in_quote_run && line.starts_with('>');
+        if !in_quote_run {
+            out.push_str(line);
+            continue;
+        }
         let (body, nl) = match line.strip_suffix('\n') {
             Some(b) => (b, "\n"),
             None => (line, ""),
@@ -233,11 +245,28 @@ fn unwrap_quoted_italic_lines(text: &str) -> String {
     out
 }
 
-/// 思考块（到时长行末尾）之后的剩余文本：去掉时长行后渲染器补的换行
+/// 思考块（到时长行末尾）之后的剩余文本：精确去掉时长行后渲染器补的换行
 /// （ANSI 补一个，Plain 补两个以结束引用块；它们只用于让答案在客户端另起一段，
-/// 丢弃思考块后留着会成为无意义的前导空行）。
-fn after_thinking_block(tail: &str) -> String {
-    tail.trim_start_matches('\n').to_string()
+/// 丢弃思考块后留着会成为无意义的前导空行）。最多剥 `limit` 个，
+/// 不多剥答案自身可能带的前导空行；`limit` 由 [`trailing_newlines_of`] 按时长行样式给出。
+fn after_thinking_block(tail: &str, limit: usize) -> String {
+    let mut rest = tail;
+    for _ in 0..limit {
+        match rest.strip_prefix('\n') {
+            Some(r) => rest = r,
+            None => break,
+        }
+    }
+    rest.to_string()
+}
+
+/// 时长行之后渲染器补的换行个数：Plain（引用 + 斜体包裹）补两个，其余格式补一个
+fn trailing_newlines_of(duration_line: &str) -> usize {
+    if duration_line.starts_with(QUOTE_ITALIC_OPEN) {
+        2
+    } else {
+        1
+    }
 }
 
 /// 剥离历史 assistant 文本里的 dim 样式标记，避免模型把它们当作自己的输出格式模仿。
@@ -1200,5 +1229,26 @@ mod tests {
         // 首行不是标记行：整段原样返回
         let plain_text = "> *a*\n> *b*\n";
         assert_eq!(strip_rendered_thinking(plain_text), plain_text);
+    }
+
+    #[test]
+    fn strip_removes_only_the_newlines_the_renderer_added() {
+        // Plain 补两个、ANSI 补一个；答案自己的前导空行必须保留
+        let plain = "> *💭 Thinking*\n>\n> *思考*\n>\n> *💭 Thought for 2s (5 tokens)*\n\n\n答案";
+        assert_eq!(strip_rendered_thinking(plain), "\n答案");
+        let ansi = format!(
+            "{DIM_ON}{THOUGHT_HEADER}{DIM_OFF}\n{DIM_ON}思考{DIM_OFF}\n\n{DIM_ON}{THOUGHT_DURATION_PREFIX}2s (5 tokens){DIM_OFF}\n\n答案"
+        );
+        assert_eq!(strip_rendered_thinking(&ansi), "\n答案");
+    }
+
+    #[test]
+    fn unwrap_stops_at_end_of_leading_quote_run() {
+        // 降级时只拆开头那段思考引用块；其后文本里自带的 `> *斜体*` 引用保持原样
+        let text = "> *💭 Thinking*\n>\n> *思考*  \n\n答案如下\n> *用户引用*\n";
+        assert_eq!(
+            strip_rendered_thinking(text),
+            "\n思考\n\n答案如下\n> *用户引用*\n"
+        );
     }
 }
