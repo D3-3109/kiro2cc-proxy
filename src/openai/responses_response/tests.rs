@@ -4,6 +4,8 @@
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
+use crate::openai::responses_request::NamespaceMap;
+
 use super::nonstream::*;
 use super::stream::*;
 
@@ -14,7 +16,12 @@ mod tests {
     /// 绝大多数用例没有 custom 工具声明；本地定义遮蔽 glob 导入的同名函数，
     /// 需要 custom 语义的用例显式调 [`super::convert_non_stream`]
     fn convert_non_stream(anthropic: &Value, client_model: &str) -> Value {
-        super::convert_non_stream(anthropic, client_model, &HashSet::new())
+        super::convert_non_stream(
+            anthropic,
+            client_model,
+            &HashSet::new(),
+            &NamespaceMap::new(),
+        )
     }
 
     fn custom_names(names: &[&str]) -> HashSet<String> {
@@ -861,6 +868,7 @@ mod tests {
             }),
             "gpt-5.6-terra",
             &custom_names(&["exec"]),
+            &NamespaceMap::new(),
         );
         let output = out["output"].as_array().unwrap();
         assert_eq!(output[0]["type"], "custom_tool_call");
@@ -885,6 +893,7 @@ mod tests {
             }),
             "gpt-5.6-terra",
             &custom_names(&["exec"]),
+            &NamespaceMap::new(),
         );
         // 模型没照降级 schema 作答时不能给空串，整段 JSON 原样交给客户端
         assert_eq!(
@@ -969,5 +978,141 @@ mod tests {
             .find(|(n, _)| n == "response.custom_tool_call_input.done")
             .expect("应有 input.done 事件");
         assert_eq!(done.1["input"], json!("{\"input\":\"ls"));
+    }
+
+    fn dbhub_namespaces() -> NamespaceMap {
+        [(
+            "mcp__dbhub__execute_sql".to_string(),
+            ("mcp__dbhub".to_string(), "execute_sql".to_string()),
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn namespaced_tool_use_is_restored_to_namespace_and_leaf_name() {
+        let out = super::convert_non_stream(
+            &json!({
+                "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "mcp__dbhub__execute_sql",
+                     "input": {"sql": "select 1"}},
+                    {"type": "tool_use", "id": "toolu_2", "name": "wait", "input": {}},
+                ],
+                "stop_reason": "tool_use",
+            }),
+            "gpt-5.6-terra",
+            &HashSet::new(),
+            &dbhub_namespaces(),
+        );
+        let output = out["output"].as_array().unwrap();
+        // Codex 按 {namespace, name} 严格匹配：name 必须是叶子名，namespace 单独成字段
+        assert_eq!(output[0]["type"], "function_call");
+        assert_eq!(output[0]["name"], "execute_sql");
+        assert_eq!(output[0]["namespace"], "mcp__dbhub");
+        assert_eq!(output[0]["call_id"], "toolu_1");
+        // 不在映射里的工具保持原样，且不带 namespace 字段
+        assert_eq!(output[1]["name"], "wait");
+        assert!(output[1].get("namespace").is_none());
+    }
+
+    #[test]
+    fn namespaced_tool_stream_carries_namespace_on_added_done_and_completed() {
+        let mut conv = ResponsesStreamConverter::new("gpt-5.6-terra", HashSet::new())
+            .with_namespaces(dbhub_namespaces());
+        let mut frames = Vec::new();
+        for (name, data) in [
+            (
+                "content_block_start",
+                json!({"index": 0, "content_block": {"type": "tool_use", "id": "toolu_1",
+                                                      "name": "mcp__dbhub__execute_sql"}}),
+            ),
+            (
+                "content_block_delta",
+                json!({"index": 0, "delta": {"type": "input_json_delta",
+                                              "partial_json": "{\"sql\":\"select 1\"}"}}),
+            ),
+            ("content_block_stop", json!({"index": 0})),
+            ("message_stop", json!({})),
+        ] {
+            frames.extend(conv.on_event(name, &data));
+        }
+        frames.extend(conv.finish());
+        let parsed = parse_all(&frames);
+
+        let fc_items: Vec<&Value> = parsed
+            .iter()
+            .filter(|(n, d)| {
+                n.starts_with("response.output_item.") && d["item"]["type"] == "function_call"
+            })
+            .map(|(_, d)| &d["item"])
+            .collect();
+        assert_eq!(fc_items.len(), 2, "added + done 各一次");
+        for item in fc_items {
+            assert_eq!(item["name"], "execute_sql");
+            assert_eq!(item["namespace"], "mcp__dbhub");
+        }
+        let completed = parsed
+            .iter()
+            .find(|(n, _)| n == "response.completed")
+            .expect("应有 completed 事件");
+        let output = &completed.1["response"]["output"][0];
+        assert_eq!(output["name"], "execute_sql");
+        assert_eq!(output["namespace"], "mcp__dbhub");
+        assert_eq!(output["arguments"], "{\"sql\":\"select 1\"}");
+    }
+
+    #[test]
+    fn namespaced_tool_call_round_trips_through_request_and_response() {
+        use crate::openai::responses_request::convert;
+
+        // 第一轮：Codex 声明 MCP namespace 工具
+        let tools = json!([{"type": "namespace", "name": "mcp__dbhub", "tools": [
+            {"type": "function", "name": "execute_sql",
+             "parameters": {"type": "object", "properties": {}}},
+        ]}]);
+        let first = convert(&json!({
+            "model": "gpt-5.6-terra", "input": "查一下", "tools": tools,
+        }))
+        .unwrap();
+        let declared = first.anthropic_body["tools"][0]["name"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // 上游按声明的扁平名回调，响应侧拆回 {namespace, name}
+        let resp = super::convert_non_stream(
+            &json!({
+                "content": [{"type": "tool_use", "id": "toolu_1", "name": declared, "input": {}}],
+                "stop_reason": "tool_use",
+            }),
+            "gpt-5.6-terra",
+            &first.custom_tools,
+            &first.namespaced_tools,
+        );
+        let call = resp["output"][0].clone();
+        assert_eq!(call["namespace"], "mcp__dbhub");
+        assert_eq!(call["name"], "execute_sql");
+
+        // 第二轮：Codex 把该 function_call 原样回放进 input，必须能还原成同一个扁平名
+        let second = convert(&json!({
+            "model": "gpt-5.6-terra",
+            "input": [
+                {"type": "message", "role": "user", "content": "查一下"},
+                call,
+                {"type": "function_call_output", "call_id": "toolu_1", "output": "ok"},
+            ],
+            "tools": tools,
+        }))
+        .unwrap();
+        let replayed = second.anthropic_body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .find(|b| b["type"] == "tool_use")
+            .expect("回放的调用应转成 tool_use")["name"]
+            .clone();
+        assert_eq!(replayed, json!(declared));
     }
 }

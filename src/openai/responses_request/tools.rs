@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 //! 工具声明收集与转换：namespace 展开、custom 自由文本工具降级、同名去重
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::openai::chat_request::convert_tool;
 
@@ -67,8 +68,50 @@ pub(crate) const FREEFORM_ADAPTATION_NOTE: &str = concat!(
     "Put the raw tool text (unquoted, no code fences) into the `input` string field."
 );
 
-/// OpenAI 工具协议的默认命名空间名——只有这个容器会被展开，理由见 [`ToolCollector::push_one`]
+/// OpenAI 工具协议的默认命名空间名：其子工具按裸名声明、按裸名回调，展开时不加前缀
 pub(crate) const DEFAULT_TOOL_NAMESPACE: &str = "functions";
+
+/// 扁平工具名里分隔 namespace 与叶子名的分隔符
+const NAMESPACE_SEP: &str = "__";
+
+/// 扁平工具名的长度上限（Anthropic 工具名 `^[a-zA-Z0-9_-]{1,64}$`）
+const MAX_FLAT_TOOL_NAME_LEN: usize = 64;
+
+/// 扁平工具名 → (namespace, 叶子名)
+///
+/// 请求侧把非默认 namespace 的子工具展开成扁平名发给上游；上游回调时给的是扁平名，
+/// 响应侧据此映射表还原成 Codex 要求的 `{namespace, name}` 两个字段。
+pub(crate) type NamespaceMap = HashMap<String, (String, String)>;
+
+/// 把 `namespace` + 叶子名拼成上游可接受的扁平工具名：`<namespace>__<leaf>`
+///
+/// Codex 的路由按 `{namespace, name}` 做严格匹配，裸叶子名、`ns.名`、`ns__名` 当作单个名字回调
+/// 都会被拒（`unsupported call`），所以必须记映射表、在响应里拆回两个字段。
+///
+/// 结果是确定性的：同样的输入永远得到同样的名字，历史里回放的 `function_call` 才能
+/// 与本轮声明的工具名对上，不依赖映射表。含非法字符或超长时，把非法字符换成 `_`、
+/// 截断到上限，并在末尾附上原始全名的 SHA-256 前 4 字节（8 位十六进制）以免撞名。
+pub(crate) fn flatten_tool_name(namespace: &str, leaf: &str) -> String {
+    let full = format!("{namespace}{NAMESPACE_SEP}{leaf}");
+    let clean: String = full
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if clean == full && clean.len() <= MAX_FLAT_TOOL_NAME_LEN {
+        return clean;
+    }
+    let digest = Sha256::digest(full.as_bytes());
+    let suffix: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    // clean 逐字符映射后全是 ASCII，按字节截断不会切到字符中间
+    let keep = (MAX_FLAT_TOOL_NAME_LEN - 1 - suffix.len()).min(clean.len());
+    format!("{}_{suffix}", &clean[..keep])
+}
 
 /// 工具调用入参的两种形态
 #[derive(Clone, Copy)]
@@ -91,6 +134,9 @@ pub(crate) struct ConvertedResponsesRequest {
     /// 声明为 `custom` 的工具名。响应侧必须把这些工具的调用还原成
     /// `custom_tool_call` item（自由文本入参），否则客户端认不出来
     pub(crate) custom_tools: HashSet<String>,
+    /// 非默认 namespace 的子工具：扁平名 → (namespace, 叶子名)。响应侧据此把上游的
+    /// 扁平调用还原成 `function_call.namespace` + 叶子 `name`，否则 Codex 认不出
+    pub(crate) namespaced_tools: NamespaceMap,
     /// 是否为 Codex remote compaction v2 压缩请求
     ///
     /// 当 `input` 末尾包含 `{"type":"compaction_trigger"}` 时置为 `true`。
@@ -111,39 +157,50 @@ pub(crate) struct ToolCollector {
     seen: HashSet<String>,
     /// 其中入参为自由文本（`custom`）的工具名
     pub(crate) custom: HashSet<String>,
+    /// 其中来自非默认 namespace 的工具：扁平名 → (namespace, 叶子名)
+    pub(crate) namespaced: NamespaceMap,
 }
 
 impl ToolCollector {
     pub(crate) fn push_list(&mut self, list: &[Value], depth: usize) {
+        self.push_list_in(list, depth, None);
+    }
+
+    /// `ns` 是最近一层非默认 namespace 的名字；`None` 表示工具按裸名声明
+    fn push_list_in(&mut self, list: &[Value], depth: usize, ns: Option<&str>) {
         for tool in list {
-            self.push_one(tool, depth);
+            self.push_one(tool, depth, ns);
         }
     }
 
-    fn push_one(&mut self, tool: &Value, depth: usize) {
+    fn push_one(&mut self, tool: &Value, depth: usize, ns: Option<&str>) {
         let tool_type = tool
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or("function");
 
         // namespace 本身不可调用，只是分组容器，真正的工具在它的 tools 数组里。
-        // 分组名不拼进工具名：Anthropic 的工具名不接受 `.`，而模型回调时给的就是叶子名。
         //
-        // 只展开名为 `functions` 的容器：它是 OpenAI 工具协议的默认命名空间，其子工具按裸名
-        // 回调，剥掉容器后名字与响应编码都不用动。其余 namespace（collaboration 等）的子工具
-        // 按裸名和 `ns.名` 调用均被客户端拒绝，展开只会造出一批调不动的死工具、白占工具槽位。
+        // - `functions`（OpenAI 默认命名空间）：子工具按裸名声明、按裸名回调，直接剥掉容器。
+        // - 其余 namespace（Codex 的 MCP server、multi_agent_v1 等）：Anthropic 工具名不接受
+        //   `.`，且客户端的路由按 `{namespace, name}` 严格匹配，所以子工具展开成扁平名
+        //   `ns__叶子名` 发给上游，同时记入映射表，响应侧再拆回两个字段（见 `flatten_tool_name`）。
         // "是不是默认命名空间"在协议里没有字段可表达，只能按名字判别。
         if tool_type == "namespace" {
             let ns_name = tool.get("name").and_then(Value::as_str).unwrap_or_default();
-            if ns_name != DEFAULT_TOOL_NAMESPACE {
-                tracing::warn!(
-                    namespace = %ns_name,
-                    "跳过非默认命名空间的工具容器：其子工具无法被客户端调用"
-                );
+            if ns_name.is_empty() {
+                tracing::warn!("namespace 容器缺少 name，无法生成工具名，已跳过");
                 return;
             }
+            let inner_ns = if ns_name == DEFAULT_TOOL_NAMESPACE {
+                ns
+            } else {
+                Some(ns_name)
+            };
             match tool.get("tools").and_then(Value::as_array) {
-                Some(inner) if depth < MAX_NAMESPACE_DEPTH => self.push_list(inner, depth + 1),
+                Some(inner) if depth < MAX_NAMESPACE_DEPTH => {
+                    self.push_list_in(inner, depth + 1, inner_ns)
+                }
                 Some(_) => {
                     tracing::warn!(depth, "namespace 嵌套超过深度上限，已跳过");
                 }
@@ -152,21 +209,43 @@ impl ToolCollector {
             return;
         }
 
-        let Some(converted) = convert_one_tool(tool) else {
+        // namespace 内只支持 function：custom 工具的回调 item 没有 namespace 字段可还原
+        if let Some(ns) = ns
+            && tool_type != "function"
+        {
+            tracing::warn!(
+                namespace = %ns,
+                tool_type = %tool_type,
+                "namespace 内的非 function 工具无法还原调用，已跳过"
+            );
+            return;
+        }
+
+        let Some(mut converted) = convert_one_tool(tool) else {
             return;
         };
-        let Some(name) = converted
+        let Some(leaf) = converted
             .get("name")
             .and_then(Value::as_str)
             .map(str::to_string)
         else {
             return;
         };
+        let name = match ns {
+            Some(ns) => {
+                let flat = flatten_tool_name(ns, &leaf);
+                converted["name"] = Value::String(flat.clone());
+                flat
+            }
+            None => leaf.clone(),
+        };
         if !self.seen.insert(name.clone()) {
             tracing::warn!(tool_name = %name, "工具重名，保留先出现的声明");
             return;
         }
-        if tool_type == "custom" {
+        if let Some(ns) = ns {
+            self.namespaced.insert(name, (ns.to_string(), leaf));
+        } else if tool_type == "custom" {
             self.custom.insert(name);
         }
         self.tools.push(converted);

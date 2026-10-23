@@ -4,7 +4,10 @@
 
 use serde_json::{Value, json};
 
-use super::tools::{ToolCollector, ToolInputForm, base64_decode_compaction};
+use super::tools::{
+    DEFAULT_TOOL_NAMESPACE, ToolCollector, ToolInputForm, base64_decode_compaction,
+    flatten_tool_name,
+};
 use crate::openai::chat_request::{
     MessageAccumulator, convert_image_url, flatten_text, parse_tool_arguments, part_text,
 };
@@ -165,6 +168,20 @@ fn tool_use_block(item: &Value, form: ToolInputForm) -> Option<Value> {
             tracing::warn!("工具调用 item 缺少 name，已跳过");
             None
         })?;
+    // 带 namespace 的调用（Codex 的 MCP / 子代理工具）：name 只是叶子名。声明侧把这类工具
+    // 展开成了扁平名，历史里回放的调用必须用同一规则算出同样的名字，否则与声明对不上
+    let flat_name;
+    let name = match item
+        .get("namespace")
+        .and_then(Value::as_str)
+        .filter(|ns| !ns.is_empty() && *ns != DEFAULT_TOOL_NAMESPACE)
+    {
+        Some(ns) => {
+            flat_name = flatten_tool_name(ns, name);
+            flat_name.as_str()
+        }
+        None => name,
+    };
 
     let input = match form {
         ToolInputForm::Json => parse_tool_arguments(item.get("arguments"), name),

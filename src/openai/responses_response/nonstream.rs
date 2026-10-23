@@ -14,6 +14,12 @@
 //! `custom_tool_call` item（入参是自由文本），所以这里要按请求侧给出的 custom 工具名
 //! 集合把它还原回去——否则 Codex 会把调用当成未知工具。
 //!
+//! # namespace 工具的还原
+//!
+//! 请求侧把非默认 namespace（Codex 的 MCP server、子代理等）的子工具展开成扁平名
+//! `ns__叶子名` 发给上游。客户端的路由按 `{namespace, name}` 严格匹配，所以这里按请求侧给出的
+//! 映射表把上游回调的扁平名拆回 `function_call.namespace` + 叶子 `name`。
+//!
 //! # reasoning 的处理
 //!
 //! 上游 thinking 文本会作为 `type: "reasoning"` item 放在 `output` 首位（与 OpenAI 的
@@ -26,6 +32,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::super::chat_response::unix_now;
+use crate::openai::responses_request::NamespaceMap;
 
 /// 生成 `<prefix>_<32位hex>` 形式的 id
 pub(crate) fn new_id(prefix: &str) -> String {
@@ -96,7 +103,11 @@ struct ExtractedContent {
 ///
 /// `thinking` 块的 `signature` 字段是为通过下游检测伪造的无语义串
 /// （`src/anthropic/stream.rs` 的 `generate_fake_signature`），只取 `thinking` 文本。
-fn extract_content(content: Option<&Value>, custom_tools: &HashSet<String>) -> ExtractedContent {
+fn extract_content(
+    content: Option<&Value>,
+    custom_tools: &HashSet<String>,
+    namespaced: &NamespaceMap,
+) -> ExtractedContent {
     let mut out = ExtractedContent::default();
     let Some(blocks) = content.and_then(Value::as_array) else {
         return out;
@@ -119,7 +130,7 @@ fn extract_content(content: Option<&Value>, custom_tools: &HashSet<String>) -> E
                 }
             }
             "tool_use" => {
-                if let Some(call) = tool_use_to_item(block, custom_tools) {
+                if let Some(call) = tool_use_to_item(block, custom_tools, namespaced) {
                     out.tool_calls.push(call);
                 }
             }
@@ -136,7 +147,11 @@ fn extract_content(content: Option<&Value>, custom_tools: &HashSet<String>) -> E
 ///
 /// `call_id` 直接用上游的 `tool_use.id`：客户端下一轮会以该值回传
 /// `function_call_output`，请求侧再原样还原为 `tool_result.tool_use_id`。
-fn tool_use_to_item(block: &Value, custom_tools: &HashSet<String>) -> Option<Value> {
+fn tool_use_to_item(
+    block: &Value,
+    custom_tools: &HashSet<String>,
+    namespaced: &NamespaceMap,
+) -> Option<Value> {
     let id = block.get("id").and_then(Value::as_str);
     let name = block.get("name").and_then(Value::as_str);
     // 缺字段的块只能跳过，但必须留痕：否则客户端收到的响应会莫名少一次工具调用且无从排查
@@ -166,14 +181,20 @@ fn tool_use_to_item(block: &Value, custom_tools: &HashSet<String>) -> Option<Val
         .map(|v| v.to_string())
         .unwrap_or_else(|| "{}".to_string());
 
-    Some(json!({
+    let mut item = json!({
         "type": "function_call",
         "id": new_id("fc"),
         "call_id": id,
         "name": name,
         "arguments": arguments,
         "status": "completed",
-    }))
+    });
+    // 来自非默认 namespace 的工具：上游给的是扁平名，Codex 只认 `{namespace, name}` 两个字段
+    if let Some((ns, leaf)) = namespaced.get(name) {
+        item["name"] = Value::String(leaf.clone());
+        item["namespace"] = Value::String(ns.clone());
+    }
+    Some(item)
 }
 
 /// 从降级 schema 的入参对象里取回 custom 工具的自由文本
@@ -224,8 +245,9 @@ pub(crate) fn convert_non_stream(
     anthropic: &Value,
     client_model: &str,
     custom_tools: &HashSet<String>,
+    namespaced: &NamespaceMap,
 ) -> Value {
-    convert_non_stream_inner(anthropic, client_model, custom_tools, false)
+    convert_non_stream_inner(anthropic, client_model, custom_tools, namespaced, false)
 }
 
 /// 把 Anthropic 非流式响应转换为 Responses `response` 对象（压缩模式）
@@ -236,17 +258,19 @@ pub(crate) fn convert_non_stream_compaction(
     anthropic: &Value,
     client_model: &str,
     custom_tools: &HashSet<String>,
+    namespaced: &NamespaceMap,
 ) -> Value {
-    convert_non_stream_inner(anthropic, client_model, custom_tools, true)
+    convert_non_stream_inner(anthropic, client_model, custom_tools, namespaced, true)
 }
 
 fn convert_non_stream_inner(
     anthropic: &Value,
     client_model: &str,
     custom_tools: &HashSet<String>,
+    namespaced: &NamespaceMap,
     is_compaction: bool,
 ) -> Value {
-    let extracted = extract_content(anthropic.get("content"), custom_tools);
+    let extracted = extract_content(anthropic.get("content"), custom_tools, namespaced);
     let stop_reason = anthropic.get("stop_reason").and_then(Value::as_str);
 
     let mut output = Vec::new();
