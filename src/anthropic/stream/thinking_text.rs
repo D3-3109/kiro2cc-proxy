@@ -6,7 +6,7 @@
 //! SSE 中的 thinking 块改写为普通 text 块（逐行流式输出），使思考过程
 //! 像 Kiro CLI 一样实时可见。
 //!
-//! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
+//! 每行内容用 ANSI dim + italic（变暗斜体，`ESC[2;3m`）转义包裹，接近 Kiro CLI 的灰色思考文字；
 //! 是否生效取决于客户端是否放行转义字符：只有确认是终端渲染的入口（UA 入口为 `cli`，
 //! 或解析不出入口）才用 ANSI，其余入口一律改用无转义的 Markdown 样式（每行 `> *内容*`，引用块 + 斜体，
 //! 用 Markdown 自带样式近似变暗）
@@ -44,9 +44,19 @@ const THOUGHT_TOKEN_SUFFIX_OPEN: &str = " (";
 /// 时长行 token 统计后缀的结束标记（`" tokens)"`），与 [`THOUGHT_TOKEN_SUFFIX_OPEN`] 配套。
 const THOUGHT_TOKEN_SUFFIX_CLOSE: &str = " tokens)";
 
-/// ANSI：变暗开始 / 复位（dim 样式，仅包在每行内容两侧，不跨行）
-const DIM_ON: &str = "\x1b[2m";
+/// ANSI：变暗斜体开始 / 复位（dim + italic，仅包在每行内容两侧，不跨行）
+const DIM_ON: &str = "\x1b[2;3m";
 const DIM_OFF: &str = "\x1b[0m";
+/// 旧版本只变暗不斜体的起始转义。客户端历史里可能还留着旧版本渲染的文本，
+/// 剥离 / 识别侧必须同时认 [`DIM_ON`] 与它；生成侧只用 [`DIM_ON`]。
+const LEGACY_DIM_ON: &str = "\x1b[2m";
+
+/// 去掉所有起始转义（新旧两种）与复位转义，得到可见文本
+fn remove_ansi_style(text: &str) -> String {
+    text.replace(DIM_ON, "")
+        .replace(LEGACY_DIM_ON, "")
+        .replace(DIM_OFF, "")
+}
 
 /// Plain 样式下每行的起始 / 结束标记：引用块 + 斜体（`> *内容*`），
 /// 用 Markdown 自带的样式近似 ANSI 的「变暗」。生成侧与剥离侧共用，修改需保持两侧一致。
@@ -67,7 +77,7 @@ pub fn thinking_as_text_enabled() -> bool {
 
 /// 单行文本是否为渲染出的思考标记行（兼容 dim 转义包裹，以及 Plain 的引用 + 斜体包裹）
 fn is_rendered_header_line(line: &str) -> bool {
-    let line = line.replace(DIM_ON, "").replace(DIM_OFF, "");
+    let line = remove_ansi_style(line);
     line == THOUGHT_HEADER
         || line
             .strip_prefix(QUOTE_ITALIC_OPEN)
@@ -296,7 +306,7 @@ pub(crate) fn strip_dim_markers(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains('\x1b') && !text.contains(LIT_ON) {
         return std::borrow::Cow::Borrowed(text);
     }
-    let no_esc = text.replace(DIM_ON, "").replace(DIM_OFF, "");
+    let no_esc = remove_ansi_style(text);
 
     // 逐行拆分，记录哪些行位于 fenced 代码块之外且为整行字面包裹
     let lines: Vec<&str> = no_esc.split_inclusive('\n').collect();
@@ -360,6 +370,8 @@ fn find_duration_span(line: &str) -> Option<usize> {
         j += QUOTE_ITALIC_OPEN.len();
     } else if line.starts_with(DIM_ON) {
         j += DIM_ON.len();
+    } else if line.starts_with(LEGACY_DIM_ON) {
+        j += LEGACY_DIM_ON.len();
     }
     if !line[j..].starts_with(THOUGHT_DURATION_PREFIX) {
         return None;
@@ -461,7 +473,7 @@ impl ThinkingTextRewriter {
         }
     }
 
-    /// 样式起始 / 复位：Ansi 为 dim 转义，Plain 为引用块 + 斜体的 Markdown 标记
+    /// 样式起始 / 复位：Ansi 为 dim + italic 转义，Plain 为引用块 + 斜体的 Markdown 标记
     fn dim_on(&self) -> &'static str {
         match self.style {
             ThinkingTextStyle::Ansi => DIM_ON,
@@ -714,7 +726,7 @@ mod tests {
 
     /// 去掉 dim 转义，便于断言可见文本
     fn plain(s: &str) -> String {
-        s.replace(DIM_ON, "").replace(DIM_OFF, "")
+        remove_ansi_style(s)
     }
 
     fn text_of(events: &[SseEvent]) -> String {
@@ -832,6 +844,40 @@ mod tests {
         // 普通文本（含普通引用）不受影响
         assert_eq!(strip_rendered_thinking("> quote\nx"), "> quote\nx");
         assert_eq!(strip_rendered_thinking("plain"), "plain");
+    }
+
+    #[test]
+    fn ansi_style_is_dim_italic_and_legacy_dim_only_is_still_stripped() {
+        // 生成侧：dim + italic（SGR 2;3）
+        assert_eq!(DIM_ON, "\x1b[2;3m");
+
+        // 剥离侧：新格式与旧版本只变暗的格式（可能还留在客户端历史里）都要整块识别
+        let render = |on: &str| {
+            format!(
+                "{on}{THOUGHT_HEADER}{DIM_OFF}\n{on}思考一{DIM_OFF}\n{on}思考二{DIM_OFF}\n\n\
+                 {on}{THOUGHT_DURATION_PREFIX}2s (5 tokens){DIM_OFF}\n答案"
+            )
+        };
+        let new_fmt = render(DIM_ON);
+        let old_fmt = render(LEGACY_DIM_ON);
+        assert_eq!(strip_rendered_thinking(&new_fmt), "答案");
+        assert_eq!(strip_rendered_thinking(&old_fmt), "答案");
+
+        // 降级路径（流被中断、缺少时长行）：只剥标记行，两种格式都要认出标记行
+        for on in [DIM_ON, LEGACY_DIM_ON] {
+            let interrupted = format!("{on}{THOUGHT_HEADER}{DIM_OFF}\n{on}思考{DIM_OFF}\n");
+            assert_eq!(
+                strip_rendered_thinking(&interrupted),
+                format!("{on}思考{DIM_OFF}\n"),
+                "{on:?}"
+            );
+        }
+
+        // 残留转义清理：新旧起始转义与复位都要去掉
+        assert_eq!(
+            strip_dim_markers("\x1b[2;3m推理一\x1b[0m\n\x1b[2m推理二\x1b[0m\n答案"),
+            "推理一\n推理二\n答案"
+        );
     }
 
     #[test]

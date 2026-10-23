@@ -137,7 +137,7 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
         ),
         c(
           '思维链内容以 thinking 块返回；开启 thinkingAsText 设置后，思考块会被改写为逐行流出的文本（cli 入口带灰色 ANSI 样式，其余入口为 Markdown 引用块 + 斜体），便于在 Claude Code 中直接看到思考过程。用量统计在流的末尾事件中校准。',
-          'Chain-of-thought is returned as thinking blocks; with the thinkingAsText setting on, thinking blocks are rewritten into line-by-line text (dim ANSI styling for the cli entrypoint, a Markdown blockquote with italics for other entrypoints) so Claude Code shows the reasoning inline. Usage is calibrated in the terminal events of the stream.',
+          'Chain-of-thought is returned as thinking blocks; with the thinkingAsText setting on, thinking blocks are rewritten into line-by-line text (dim italic ANSI styling for the cli entrypoint, a Markdown blockquote with italics for other entrypoints) so Claude Code shows the reasoning inline. Usage is calibrated in the terminal events of the stream.',
         ),
       ],
     },
