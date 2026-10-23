@@ -7,8 +7,8 @@
 //! 像 Kiro CLI 一样实时可见。
 //!
 //! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
-//! 是否生效取决于客户端是否放行转义字符：已确认不解析 ANSI 的图形界面（UA 入口以
-//! `claude-desktop` 开头）改用无转义的纯文本样式，其余 Claude Code 入口一律用 ANSI
+//! 是否生效取决于客户端是否放行转义字符：只有确认是终端渲染的入口（UA 入口为 `cli`，
+//! 或解析不出入口）才用 ANSI，其余入口一律改用无转义的纯文本样式
 //! （见 [`thinking_text_style`]）。首行为「💭 Thinking」标记，
 //! 块收尾追加「💭 Thought for Ns (N tokens)」时长行（贴近 Claude Code 原生样式，
 //! token 数为该思考块正文的 cl100k_base 计数），
@@ -85,20 +85,22 @@ pub enum ThinkingTextStyle {
 /// 按请求的客户端决定思考文本化的渲染样式；`None` 表示不启用（走原生 thinking）。
 ///
 /// 渲染默认用 ANSI dim 转义，只有终端会把它当样式；Claude Desktop 等图形界面不解析，
-/// 会把 `ESC` 显示成方块、`[2m` / `[0m` 显示成明文（issue #48）。而 Desktop 的原生 thinking
-/// 默认不展示思考内容，所以对它改用无转义的 [`ThinkingTextStyle::Plain`]。
+/// 会把 `ESC` 显示成方块、`[2m` / `[0m` 显示成明文（issue #48、#54）。而这类客户端的原生
+/// thinking 默认不展示思考内容，所以对它们改用无转义的 [`ThinkingTextStyle::Plain`]。
 ///
 /// 判定依据是 UA 括号内的入口字段，如 `claude-cli/2.1.231 (external, cli)` 的 `cli`、
-/// `claude-cli/2.1.295 (external, claude-desktop-3p, agent-sdk/0.3.295)` 的 `claude-desktop-3p`：
-/// - 入口以 `claude-desktop` 开头 → [`ThinkingTextStyle::Plain`]（唯一已确认渲染不了 ANSI 的入口）；
-/// - 其余 Claude Code 入口（`cli`、`local-agent`、`claude-vscode`、`sdk-ts`，或解析不出入口）
-///   → [`ThinkingTextStyle::Ansi`]，保持引入入口判定之前的行为；
+/// `claude-cli/2.1.295 (external, local-agent, agent-sdk/0.3.295)` 的 `local-agent`：
+/// - 入口为 `cli`，或解析不出入口（老格式 UA）→ [`ThinkingTextStyle::Ansi`]，保持原有行为；
+/// - 其余 Claude Code 入口（`claude-desktop*`、`local-agent`、`claude-vscode`、`sdk-ts`、
+///   `sdk-cli` 及未知入口）→ [`ThinkingTextStyle::Plain`]；
 /// - 非 Claude Code 客户端 → `None`，走原生 thinking。
 ///
-/// 这里刻意用「已知不支持才切换」的黑名单，而不是「已知支持才启用」的白名单：
-/// 对渲染能力未知的入口回退原生 thinking，会让它们的思考过程静默消失（原生 thinking
-/// 在多数客户端被折叠，长任务期间界面无任何输出，issue #48 后续反馈中 `local-agent`
-/// 即因此回归）。显示成乱码是可见、可自查的；静默丢失则不是。
+/// 默认方向的取舍：不能回退原生 thinking（多数客户端会折叠，长任务期间界面无输出，
+/// issue #48 后续反馈中 `local-agent` 即因此回归），所以只在 ANSI 与 Plain 之间选。
+/// Plain 在任何客户端都不会出现乱码，最坏只是少了变暗样式；ANSI 在不解析它的图形界面里
+/// 每次都会显示乱码。同一个入口（如 `local-agent`）在不同宿主里渲染能力并不一致
+/// （issue #54：Claude Desktop 的 Cowork 模式即为 `local-agent` 且显示乱码），
+/// 入口字段区分不了，因此只有确认是终端的入口才用 ANSI。
 pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTextStyle> {
     if !is_claude_code_client(headers) {
         return None;
@@ -109,8 +111,8 @@ pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTe
         .and_then(client_entrypoint)
         .map(str::to_ascii_lowercase);
     match entrypoint.as_deref() {
-        Some(e) if e.starts_with("claude-desktop") => Some(ThinkingTextStyle::Plain),
-        _ => Some(ThinkingTextStyle::Ansi),
+        None | Some("cli") => Some(ThinkingTextStyle::Ansi),
+        Some(_) => Some(ThinkingTextStyle::Plain),
     }
 }
 
@@ -906,9 +908,10 @@ mod tests {
     }
 
     #[test]
-    fn style_is_ansi_for_every_non_desktop_claude_code_entrypoint() {
-        // 只有 Desktop 被确认渲染不了 ANSI；其余入口保持原有行为，不能静默回退原生 thinking
-        // （issue #48 后续反馈：local-agent 因此看不到思考过程）
+    fn style_is_plain_for_every_non_cli_claude_code_entrypoint() {
+        // 只有 cli 确认是终端渲染；其余入口用 Plain：既不回退原生 thinking
+        // （issue #48 后续反馈：local-agent 因此看不到思考过程），也不显示 ANSI 乱码
+        // （issue #54：Claude Desktop Cowork 模式入口为 local-agent，不解析 ANSI）
         for ua in [
             "claude-cli/2.1.295 (external, local-agent, agent-sdk/0.3.295)",
             "claude-cli/2.1.295 (external, claude-vscode, agent-sdk/0.3.295)",
@@ -916,7 +919,7 @@ mod tests {
             "claude-cli/2.1.295 (external, sdk-cli)",
             "claude-cli/2.1.295 (external, some-future-entrypoint)",
         ] {
-            assert_eq!(style_of(ua), Some(ThinkingTextStyle::Ansi), "{ua}");
+            assert_eq!(style_of(ua), Some(ThinkingTextStyle::Plain), "{ua}");
         }
     }
 
