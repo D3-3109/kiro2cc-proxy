@@ -67,6 +67,26 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.37".to_string(),
+            is_latest: false,
+            groups: vec![
+                improve_group(vec![Bilingual::new(
+                    "思考文本化在非 cli 入口（Claude Desktop、local-agent 等）改用 Markdown 引用块 + 斜体来近似变暗，不含任何转义序列，避免出现 ESC 方块与字面 [2m/[0m（#54）；cli 入口仍使用 ANSI 变暗样式",
+                    "Thinking-as-text on non-cli entries (Claude Desktop, local-agent, etc.) now renders as a Markdown blockquote with italics to approximate dimming, with no escape sequences, avoiding ESC blocks and literal [2m/[0m (#54); the cli entry still uses ANSI dimming",
+                )]),
+                fix_group(vec![
+                    Bilingual::new(
+                        "修复 Claude Code 开启 advisor 后整个会话每次请求都返回 400 的问题：内联 system 消息中的 tool_addition / tool_removal 事件现在会被跳过，同条消息里的文本照常保留；type 为 advisor_* 的服务端工具不再作为普通工具转发给 Kiro（Kiro 无对应能力，本次仅做兼容降级，并不提供 advisor 功能本身）（#56）",
+                        "Fix HTTP 400 on every request once Claude Code enables advisor: tool_addition / tool_removal events in inline system messages are now skipped while text in the same message is kept, and server tools whose type starts with advisor_ are no longer forwarded to Kiro as ordinary tools (Kiro has no equivalent; this is a compatibility fallback only and does not provide advisor itself) (#56)",
+                    ),
+                    Bilingual::new(
+                        "修复历史回传时剥离思考文本过度的问题：只剥离渲染器补充的换行，降级路径（流被中断、缺少时长行）仅拆开头的引用段，避免误删正文",
+                        "Fix over-aggressive stripping of rendered thinking text in replayed history: only newlines added by the renderer are removed, and the fallback path (interrupted stream without a duration line) now unwraps only the leading quote run, so answer text is no longer clipped",
+                    ),
+                ]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.36".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![
