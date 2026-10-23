@@ -67,6 +67,20 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.36".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![
+                Bilingual::new(
+                    "修复 Claude Desktop Cowork 模式下思考内容出现 ESC 方块与字面 ANSI 转义序列（如 [2m/[0m）的格式异常：思考文本化输出改为仅 cli 入口（或解析不出入口的老格式 UA）使用 ANSI 变暗样式，Claude Desktop / local-agent / VS Code / SDK 等其余入口一律用纯文本，任何客户端下都不会乱码（#54）",
+                    "Fix garbled thinking content in Claude Desktop Cowork mode (ESC blocks and literal ANSI sequences like [2m/[0m): thinking-as-text output now applies ANSI dimming only for the cli entry (or legacy UAs without a parseable entry); all other entries — Claude Desktop / local-agent / VS Code / SDK — fall back to plain text, which renders correctly in every client (#54)",
+                ),
+                Bilingual::new(
+                    "修复管理面板账号详情、API Key 详情与失败/限流日志页滚动到底出现大块空白的问题：根容器改为确定高度 flex 布局，消除页面级与表格内层的双层滚动，页面级滚动归零后仅保留表格单层滚动",
+                    "Fix a large blank area when scrolling to the bottom of the account detail, API Key detail and failure/throttle log pages: the root container now uses a fixed-height flex layout, eliminating the dual page-level + table-level scrollbars so only the table scrolls internally",
+                ),
+            ])],
+        },
+        ReleaseNote {
             version: "3.4.35".to_string(),
             is_latest: false,
             groups: vec![
