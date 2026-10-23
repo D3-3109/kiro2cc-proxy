@@ -203,10 +203,12 @@ pub struct Config {
     /// 思考内容文本化展示（仅 Claude Code 客户端）
     ///
     /// Claude Code 默认隐藏/折叠 thinking，长推理期间界面像卡住。开启后，出站 SSE 的
-    /// thinking 块被改写为 markdown 引用文本块，以 ANSI 变暗（灰色）样式逐行流式输出
-    /// （类似 Kiro CLI 的展示；转义字符是否生效取决于客户端渲染）；
-    /// 回传的历史里这些文本会被自动剥离，上游看不到。默认 true（文本化展示）。
-    /// 副作用：客户端自己的上下文会包含这些文本，auto-compact 会更早触发。
+    /// thinking 块被改写为 text 块逐行流式输出（类似 Kiro CLI 的展示），样式按客户端入口选择：
+    /// 终端入口（`cli`）用 ANSI 变暗（灰色）；Claude Desktop、`local-agent` 等其他入口不解析
+    /// ANSI，改用无转义的 Markdown 引用块 + 斜体（每行 `> *内容*`）近似变暗。
+    /// 回传的历史里这些文本会被自动剥离，上游看不到；代理上报的 input_tokens 不含它们，output_tokens 默认也不含（见 outputTokensIncludeThinking）。
+    /// 默认 true（文本化展示）。
+    /// 副作用：客户端本地的消息列表仍包含这些文本，其本地估算与自身 compact 的输入会相应变长。
     #[serde(default = "default_true")]
     pub thinking_as_text: bool,
 
