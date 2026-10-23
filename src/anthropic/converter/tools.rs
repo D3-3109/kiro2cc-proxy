@@ -180,6 +180,14 @@ pub(super) fn has_content_writing_tool(tools: &[Tool]) -> bool {
     })
 }
 
+/// 是否为 Anthropic 服务端 advisor 工具（`type` 形如 `advisor_20260301`）。
+/// 只认 type，不按名称匹配，避免误伤用户自己定义的同名普通工具。
+fn is_advisor_server_tool(t: &crate::anthropic::types::Tool) -> bool {
+    t.tool_type
+        .as_deref()
+        .is_some_and(|ty| ty.starts_with("advisor_"))
+}
+
 /// 转换工具定义
 pub(super) fn convert_tools(tools: &Option<Vec<crate::anthropic::types::Tool>>) -> Vec<Tool> {
     let Some(tools) = tools else {
@@ -190,6 +198,13 @@ pub(super) fn convert_tools(tools: &Option<Vec<crate::anthropic::types::Tool>>) 
     let mut seen = std::collections::HashSet::new();
 
     for t in tools {
+        // Anthropic 服务端 advisor 工具（advisor_YYYYMMDD）由 Anthropic 侧执行，Kiro 无此能力；
+        // 作为普通工具发给 Kiro 会让模型发起客户端无法执行的 `advisor` 调用，所以直接剔除
+        if is_advisor_server_tool(t) {
+            tracing::info!(tool_type = ?t.tool_type, "跳过 advisor 服务端工具（Kiro 不支持）");
+            continue;
+        }
+
         let name = t.name.trim();
         if name.is_empty() {
             tracing::warn!("跳过空名称工具定义");

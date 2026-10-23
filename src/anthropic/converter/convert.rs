@@ -60,19 +60,34 @@ pub(super) fn convert_request_with_chunking(
         match message.role.as_str() {
             "user" | "assistant" => messages.push(message),
             "system" => {
-                let texts = system.get_or_insert_with(Vec::new);
+                // 惰性创建系统区：只有真正贡献文本时才从 None 变为 Some，否则仅含被跳过
+                // 事件的消息会造出空的 Some，让 build_history 误判为「有 system 但为空」而漏注 thinking 前缀
                 match &message.content {
-                    serde_json::Value::String(text) => texts.push(text.as_str()),
+                    serde_json::Value::String(text) => {
+                        system.get_or_insert_with(Vec::new).push(text.as_str())
+                    }
                     serde_json::Value::Array(blocks) => {
                         for block in blocks {
-                            if block.get("type").and_then(|v| v.as_str()) != Some("text") {
+                            let block_type = block.get("type").and_then(|v| v.as_str());
+                            // 客户端的「会话中途变更工具」事件（如开启 advisor 后出现的
+                            // tool_addition / tool_removal）：Kiro 没有对应机制，跳过而不是整次
+                            // 请求报 400（该事件会随历史持续回传，报错会让整个会话不可用）
+                            if let Some(skipped @ ("tool_addition" | "tool_removal")) = block_type {
+                                tracing::info!(
+                                    index,
+                                    block_type = skipped,
+                                    "跳过内联 system 中的工具变更事件"
+                                );
+                                continue;
+                            }
+                            if block_type != Some("text") {
                                 return Err(ConversionError::InvalidSystemContent { index });
                             }
                             let text = block
                                 .get("text")
                                 .and_then(|v| v.as_str())
                                 .ok_or(ConversionError::InvalidSystemContent { index })?;
-                            texts.push(text);
+                            system.get_or_insert_with(Vec::new).push(text);
                         }
                     }
                     _ => return Err(ConversionError::InvalidSystemContent { index }),
