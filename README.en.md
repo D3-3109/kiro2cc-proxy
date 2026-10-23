@@ -933,17 +933,18 @@ This project is based on [kiro.rs](https://github.com/hank9999/kiro.rs). Thanks 
 
 Thanks to all the contributors of this project (in no particular order):
 
-- [jayus71](https://github.com/jayus71)
-- [fhy12130-afk](https://github.com/fhy12130-afk)
-- [kosuke-zhang](https://github.com/kosuke-zhang)
-- [lqzhgood](https://github.com/lqzhgood)
+- [jayus71](https://github.com/jayus71) — [#53](https://github.com/TsinHzl/kiro2cc-proxy/pull/53)
+- [fhy12130-afk](https://github.com/fhy12130-afk) — [#50](https://github.com/TsinHzl/kiro2cc-proxy/pull/50)
+- [kosuke-zhang](https://github.com/kosuke-zhang) — [#28](https://github.com/TsinHzl/kiro2cc-proxy/pull/28)
+- [lqzhgood](https://github.com/lqzhgood) — [#37](https://github.com/TsinHzl/kiro2cc-proxy/pull/37), [#35](https://github.com/TsinHzl/kiro2cc-proxy/pull/35), [#33](https://github.com/TsinHzl/kiro2cc-proxy/pull/33)
 - [xhsngdsan](https://github.com/xhsngdsan)
-- [zbjincheng](https://github.com/zbjincheng)
+- [zbjincheng](https://github.com/zbjincheng) — [#41](https://github.com/TsinHzl/kiro2cc-proxy/pull/41)
 
 **Special thanks** — the following issues directly drove critical fixes:
 
-- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) pinpointed the `history[0]` freeze-cache key drift that invalidated the Kiro prefix cache every turn
-- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) pinpointed the upstream stream reset at ~247s on long generations, leading to the chunked-write constraint for large tool arguments
-- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) reported slow responses from the proxied sonnet 5, leading to the lower default effort fallback
+- [aidenli](https://github.com/aidenli) — [#54](https://github.com/TsinHzl/kiro2cc-proxy/issues/54)
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47)
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46)
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40)
 
 > Thanks to everyone who has filed issues, shared feedback, and joined the discussions — you keep making this project better.

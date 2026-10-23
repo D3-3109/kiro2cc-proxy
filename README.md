@@ -954,17 +954,18 @@ MIT
 
 感谢所有为本项目做出贡献的开发者（排名不分先后）：
 
-- [jayus71](https://github.com/jayus71)
-- [fhy12130-afk](https://github.com/fhy12130-afk)
-- [kosuke-zhang](https://github.com/kosuke-zhang)
-- [lqzhgood](https://github.com/lqzhgood)
+- [jayus71](https://github.com/jayus71) — [#53](https://github.com/TsinHzl/kiro2cc-proxy/pull/53)
+- [fhy12130-afk](https://github.com/fhy12130-afk) — [#50](https://github.com/TsinHzl/kiro2cc-proxy/pull/50)
+- [kosuke-zhang](https://github.com/kosuke-zhang) — [#28](https://github.com/TsinHzl/kiro2cc-proxy/pull/28)
+- [lqzhgood](https://github.com/lqzhgood) — [#37](https://github.com/TsinHzl/kiro2cc-proxy/pull/37), [#35](https://github.com/TsinHzl/kiro2cc-proxy/pull/35), [#33](https://github.com/TsinHzl/kiro2cc-proxy/pull/33)
 - [xhsngdsan](https://github.com/xhsngdsan)
-- [zbjincheng](https://github.com/zbjincheng)
+- [zbjincheng](https://github.com/zbjincheng) — [#41](https://github.com/TsinHzl/kiro2cc-proxy/pull/41)
 
 **特别致谢**——以下 Issue 直接推动了关键修复：
 
-- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) 定位 `history[0]` 冻结缓存 key 漂移导致 Kiro 前缀缓存逐轮失效
-- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) 定位长生成轮约 247s 被上游 Reset，促成大参数工具调用分块写入约束
-- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) 反馈 sonnet 5 反代响应慢，促成 effort 兜底值下调
+- [aidenli](https://github.com/aidenli) — [#54](https://github.com/TsinHzl/kiro2cc-proxy/issues/54)
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47)
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46)
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40)
 
 > 感谢每一位提交 Issue、反馈建议和参与讨论的用户，是你们让这个项目不断完善。
