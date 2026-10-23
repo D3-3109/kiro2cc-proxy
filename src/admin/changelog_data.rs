@@ -67,6 +67,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.38".to_string(),
+            is_latest: false,
+            groups: vec![fix_group(vec![Bilingual::new(
+                "修复 Codex Desktop 通过 /v1/responses 接入时所有 MCP 工具和子代理工具都不可用的问题：此前只展开 functions 命名空间，其余 namespace 容器整体被丢弃；现在其子工具展开为 ns__叶子名 发给上游，并在响应里还原为 function_call 的 namespace + 叶子 name，历史回放同步使用同一命名规则；namespace 内的 custom 工具仍会被跳过。注意：被发送的工具数量增加，输入 token 会相应上升（#57）",
+                "Fix all MCP and sub-agent tools being unavailable when Codex Desktop connects via /v1/responses: only the functions namespace used to be expanded and every other namespace container was dropped. Their child tools are now flattened to ns__leaf for the upstream, restored to function_call namespace + leaf name in responses, and replayed history uses the same naming rule; custom tools inside a namespace are still skipped. Note: more tools are now sent, so input tokens increase accordingly (#57)",
+            )])],
+        },
+        ReleaseNote {
             version: "3.4.37".to_string(),
             is_latest: false,
             groups: vec![
