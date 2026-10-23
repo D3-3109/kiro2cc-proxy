@@ -136,8 +136,8 @@ export function buildGuides(baseUrl: string, locale: DocsLocale): GuideSpec[] {
           'With stream=true the response is text/event-stream: the Anthropic endpoints (/v1/messages, /cc/v1/messages) emit message_start / content_block_delta / message_stop events; the OpenAI-compatible endpoints emit chunk streams terminated by data: [DONE] (Chat) or response.completed (Responses).',
         ),
         c(
-          '思维链内容以 thinking 块返回；开启 thinkingAsText 设置后，思考块会被改写为逐行流出的引用文本（带灰色 ANSI 样式），便于在 Claude Code 中直接看到思考过程。用量统计在流的末尾事件中校准。',
-          'Chain-of-thought is returned as thinking blocks; with the thinkingAsText setting on, thinking blocks are rewritten into line-by-line quoted text (with dim ANSI styling) so Claude Code shows the reasoning inline. Usage is calibrated in the terminal events of the stream.',
+          '思维链内容以 thinking 块返回；开启 thinkingAsText 设置后，思考块会被改写为逐行流出的文本（cli 入口带灰色 ANSI 样式，其余入口为 Markdown 引用块 + 斜体），便于在 Claude Code 中直接看到思考过程。用量统计在流的末尾事件中校准。',
+          'Chain-of-thought is returned as thinking blocks; with the thinkingAsText setting on, thinking blocks are rewritten into line-by-line text (dim ANSI styling for the cli entrypoint, a Markdown blockquote with italics for other entrypoints) so Claude Code shows the reasoning inline. Usage is calibrated in the terminal events of the stream.',
         ),
       ],
     },
