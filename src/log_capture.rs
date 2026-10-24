@@ -50,6 +50,15 @@ impl LogCapture {
         self.ring_buffer.lock().iter().cloned().collect()
     }
 
+    /// 返回 ring buffer 中最新的至多 `limit` 条（按时间从旧到新）。
+    ///
+    /// 日志页首屏只需要最新一小段；只复制尾部，避免容量很大时每次连接都全量克隆。
+    pub fn snapshot_tail(&self, limit: usize) -> Vec<LogEntry> {
+        let buf = self.ring_buffer.lock();
+        let skip = buf.len().saturating_sub(limit);
+        buf.iter().skip(skip).cloned().collect()
+    }
+
     /// 订阅后续新事件（返回 broadcast::Receiver）
     pub fn subscribe(&self) -> broadcast::Receiver<LogEntry> {
         self.sender.subscribe()
@@ -127,5 +136,46 @@ impl<'a> tracing::field::Visit for MessageVisitor<'a> {
             }
             self.0.push_str(&format!("{}={}", field.name(), s));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(n: usize) -> LogEntry {
+        LogEntry {
+            timestamp: format!("t{n}"),
+            level: "INFO".to_string(),
+            target: "t".to_string(),
+            message: format!("m{n}"),
+        }
+    }
+
+    fn filled(capacity: usize, count: usize) -> LogCapture {
+        let cap = LogCapture::new(capacity);
+        {
+            let mut buf = cap.ring_buffer.lock();
+            for n in 0..count {
+                buf.push_back(entry(n));
+            }
+        }
+        cap
+    }
+
+    #[test]
+    fn snapshot_tail_returns_latest_in_order() {
+        let cap = filled(100, 10);
+        let tail = cap.snapshot_tail(3);
+        let msgs: Vec<_> = tail.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(msgs, ["m7", "m8", "m9"]);
+    }
+
+    #[test]
+    fn snapshot_tail_limit_larger_than_len_returns_all() {
+        let cap = filled(100, 4);
+        assert_eq!(cap.snapshot_tail(1000).len(), 4);
+        assert_eq!(cap.snapshot_tail(0).len(), 0);
+        assert_eq!(cap.snapshot().len(), 4);
     }
 }

@@ -77,7 +77,7 @@ export function useLogStream(enabled: boolean): {
 
     // 立即 REST 取快照，不等 SSE 建立：反向代理 / CDN 缓冲 SSE 时，EventSource 的
     // onopen 与 history 事件可能很久才到，等它们再取快照会导致日志页长时间空白
-    fetch(`/api/admin/logs/snapshot?api_key=${encodeURIComponent(apiKey)}`)
+    fetch(`/api/admin/logs/snapshot?api_key=${encodeURIComponent(apiKey)}&limit=${MAX_FRONT_LOGS}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((entries: LogEntry[]) => {
         if (mountedRef.current && Array.isArray(entries)) {
@@ -87,7 +87,7 @@ export function useLogStream(enabled: boolean): {
       .catch(() => {})
 
     const es = new EventSource(
-      `/api/admin/logs/stream?api_key=${encodeURIComponent(apiKey)}`
+      `/api/admin/logs/stream?api_key=${encodeURIComponent(apiKey)}&limit=${MAX_FRONT_LOGS}`
     )
     esRef.current = es
 

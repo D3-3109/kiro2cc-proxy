@@ -30,7 +30,7 @@ use model::failure_log::FailureLogStore;
 use model::throttle_log::ThrottleLogStore;
 use model::usage::UsageTracker;
 
-const LOG_CAPTURE_CAPACITY: usize = 1000;
+const LOG_CAPTURE_CAPACITY: usize = 100_000;
 
 #[tokio::main]
 async fn main() {

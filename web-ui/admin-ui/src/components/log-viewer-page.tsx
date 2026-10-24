@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Copy, Download, Pause, Play, Trash2 } from 'lucide-react'
 import { useLogStream, MAX_FRONT_LOGS, type LogEntry } from '@/hooks/use-log-stream'
 import { copyToClipboard } from '@/lib/clipboard'
+import { storage } from '@/lib/storage'
 import { extractErrorMessage } from '@/lib/utils'
 import { formatTokenCount } from '@/lib/locale'
 import { Button } from '@/components/ui/button'
@@ -67,6 +68,19 @@ function localClock(timestamp: string, withMs = false): string {
 }
 
 /** 复制/导出用的完整本地时间戳「YYYY-MM-DD HH:MM:SS.mmm」 */
+/** 「下载」向服务端取回的最大条数，与后端 ring buffer 容量（LOG_CAPTURE_CAPACITY）一致 */
+const DOWNLOAD_LIMIT = 100_000
+
+/** 级别 + 关键字过滤；页面显示与下载共用，保证两者口径一致 */
+function matchesFilter(entry: LogEntry, levelFilter: LogLevel | 'ALL', keyword: string): boolean {
+  if (levelFilter !== 'ALL' && entry.level !== levelFilter) return false
+  if (keyword) {
+    const lower = keyword.toLowerCase()
+    return entry.message.toLowerCase().includes(lower) || entry.target.toLowerCase().includes(lower)
+  }
+  return true
+}
+
 function localStamp(timestamp: string): string {
   const ms = Date.parse(timestamp)
   if (Number.isNaN(ms)) return timestamp
@@ -169,17 +183,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
 
   const filteredLogs = useMemo(
     () =>
-      shownLogs.filter((entry) => {
-        if (levelFilter !== 'ALL' && entry.level !== levelFilter) return false
-        if (keyword) {
-          const lower = keyword.toLowerCase()
-          return (
-            entry.message.toLowerCase().includes(lower) ||
-            entry.target.toLowerCase().includes(lower)
-          )
-        }
-        return true
-      }),
+      shownLogs.filter((entry) => matchesFilter(entry, levelFilter, keyword)),
     [shownLogs, levelFilter, keyword]
   )
 
@@ -230,29 +234,49 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
   }, [])
 
   /** 一行一条；「下载」与「复制」共用同一序列化，避免两处漂移 */
-  const serializeLogs = () =>
-    filteredLogs
+  const serializeLogs = (list: LogEntry[]) =>
+    list
       .map((e) => `${localStamp(e.timestamp)} [${e.level}] ${e.target} ${e.message}`)
       .join('\n')
 
-  // 取客户端缓冲区走 Blob，不请求后端：/api/admin/logs/download 仅支持 query 鉴权，
-  // 走它会把 adminApiKey 留在浏览器历史与反代 access log 中
-  const handleDownload = () => {
-    const url = URL.createObjectURL(
-      new Blob([serializeLogs()], { type: 'text/plain;charset=utf-8' })
-    )
+  // 页面只持有最新 2000 条；下载向服务端取回完整缓冲区（最多 DOWNLOAD_LIMIT 条），
+  // 用 fetch + x-api-key 头鉴权，避免把 adminApiKey 放进 URL（浏览器历史 / 反代 access log）。
+  // 过滤条件与页面一致；「清空」之后产生的日志才会被导出，与清空前的行为相同。
+  const clearedAfterRef = useRef<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
+  const handleDownload = async () => {
+    if (downloading) return
+    setDownloading(true)
     try {
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `kiro2cc-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.log`
-      a.click()
+      const res = await fetch(`/api/admin/logs/snapshot?limit=${DOWNLOAD_LIMIT}`, {
+        headers: { 'x-api-key': storage.getApiKey() ?? '' },
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const all = (await res.json()) as LogEntry[]
+      const cutoff = clearedAfterRef.current
+      const list = all.filter(
+        (e) => (cutoff === null || e.timestamp > cutoff) && matchesFilter(e, levelFilter, keyword)
+      )
+      const url = URL.createObjectURL(
+        new Blob([serializeLogs(list)], { type: 'text/plain;charset=utf-8' })
+      )
+      try {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `kiro2cc-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.log`
+        a.click()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      toast.error(extractErrorMessage(error))
     } finally {
-      URL.revokeObjectURL(url)
+      setDownloading(false)
     }
   }
 
   const handleCopy = async () => {
-    const text = serializeLogs()
+    const text = serializeLogs(filteredLogs)
     try {
       await copyToClipboard(text)
       toast.success(t('logs.copiedLogsCount', { count: filteredLogs.length }))
@@ -262,6 +286,8 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
   }
 
   const handleClear = () => {
+    // 记下清空时最新一条的时间戳，之后的下载只导出更晚的日志
+    clearedAfterRef.current = logs.length > 0 ? logs[logs.length - 1].timestamp : new Date().toISOString()
     clear()
     // shownLogs 是冻结显示帧，effect 在暂停态不会同步，需就地清空，
     // 否则计数卡与底部总条数在恢复播放前仍显示旧数据
@@ -402,7 +428,7 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
           ]}
         />
         <span aria-hidden="true" className="h-[18px] w-[0.5px] shrink-0 bg-hairline-2" />
-        <Button variant="outline" onClick={handleDownload}>
+        <Button variant="outline" onClick={handleDownload} disabled={downloading}>
           <Download aria-hidden="true" />
           {t('logs.downloadLogsButton')}
         </Button>

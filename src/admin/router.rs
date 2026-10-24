@@ -119,7 +119,7 @@ pub fn create_admin_router(state: AdminState) -> Router {
         ))
         .with_state(state.clone());
 
-    // 日志路由使用 Query Param 内联认证（EventSource API 不支持自定义 Header）
+    // 日志路由使用内联认证：Query Param（EventSource 不支持自定义 Header）或 x-api-key / Bearer 头
     let log_routes = Router::new()
         .route("/logs/stream", get(stream_logs))
         .route("/logs/snapshot", get(snapshot_logs))
