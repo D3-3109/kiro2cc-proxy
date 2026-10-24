@@ -67,6 +67,26 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.39".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "终端入口（cli）的思考文本由变暗改为变暗 + 斜体，与其他入口的引用块 + 斜体样式视觉一致；历史里旧版本渲染的变暗文本回传上游时仍会被整块剥离",
+                        "Thinking text in the terminal entry (cli) is now rendered dim + italic instead of dim only, matching the blockquote + italic style used by other entries; legacy dim-only text in client history is still stripped before being sent upstream",
+                    ),
+                    Bilingual::new(
+                        "Admin 模型页在模型 ID 下方展示上游返回的模型描述（悬停显示全文）；上游未返回时不渲染",
+                        "The Admin models page now shows the upstream model description under the model ID (full text on hover); nothing is rendered when upstream does not return one",
+                    ),
+                ]),
+                fix_group(vec![Bilingual::new(
+                    "修复 Claude Code 长会话中 credits 偏高的一个原因：CC 中途追加的“任务工具提醒”（The task tools haven't been used recently…）被并入 history[0]，每触发一次就使上游前缀缓存整段失效。现将其归入动态块，改放到当前消息开头，模型仍可见。新增 DEBUG 级漂移诊断日志（需开启 debugLogs）：缓存 key 变化时列出新增的系统块，便于定位其他类似提醒",
+                    "Fix one cause of inflated credits in long Claude Code sessions: the mid-session \"task tools haven't been used recently\" reminder was merged into history[0], invalidating the whole upstream prefix cache each time it fired. It is now treated as a dynamic block and moved to the start of the current message, so the model still sees it. Adds DEBUG-level drift diagnostics (requires debugLogs) that list newly added system blocks whenever the cache key changes, to help locate similar reminders",
+                )]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.38".to_string(),
             is_latest: false,
             groups: vec![fix_group(vec![Bilingual::new(
