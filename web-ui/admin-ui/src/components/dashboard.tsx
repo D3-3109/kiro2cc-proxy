@@ -15,9 +15,12 @@ import { ThrottleLogPage } from '@/components/throttle-log-page'
 import { FailureLogPage } from '@/components/failure-log-page'
 import { SettingsPanel } from '@/components/settings-panel'
 import { LogViewerPage } from '@/components/log-viewer-page'
+import { DocsPage } from '@/components/docs-page'
 import { useCredentials, useApiKeys, useDeleteCredential, useResetFailure, useRpm, useDailyUsage, useServerInfo } from '@/hooks/use-credentials'
 import { useTheme } from '@/hooks/use-theme'
-import { DailyStatsPage } from '@/components/daily-stats-page'
+import type { CustomRange } from '@/components/daily-shared'
+import { DailyStatsPage, type RangeKey } from '@/components/daily-stats-page'
+import { DailySummaryPage, type SummaryRangeKey } from '@/components/daily-summary-page'
 import { ModelListPage } from '@/components/model-list-page'
 import { ChangelogPage } from '@/components/changelog-page'
 import { ThemeSettingsPage } from '@/components/theme-settings-page'
@@ -47,7 +50,7 @@ interface DashboardProps {
 export function Dashboard({ onLogout }: DashboardProps) {
   const { t } = useTranslation()
   const { theme, toggleTheme } = useTheme()
-  const [activeTab, setActiveTab] = useState<'credentials' | 'apikeys' | 'settings' | 'logs' | 'models' | 'changelog' | 'theme'>('credentials')
+  const [activeTab, setActiveTab] = useState<'credentials' | 'apikeys' | 'settings' | 'logs' | 'models' | 'changelog' | 'theme' | 'docs'>('credentials')
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readStoredSidebarCollapsed)
   // 侧边栏内容（header/nav/footer 的 flex 方向、间距、文字显隐）无法被 CSS transition 平滑插值，
   // 故延迟到宽度动画半程、内容淡为透明时才瞬切，避免可见的布局跳变
@@ -73,6 +76,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [queryInfoProgress, setQueryInfoProgress] = useState({ current: 0, total: 0 })
   const [dailyView, setDailyView] = useState<string | null>(null)
   const [dailyFromSidebar, setDailyFromSidebar] = useState(false)
+  const [dailyRange, setDailyRange] = useState<RangeKey>('today')
+  const [dailyCustomRange, setDailyCustomRange] = useState<CustomRange | null>(null)
+  // 日明细页的返回目标：从「每日统计」汇总页下钻 → 回汇总页；其余路径 → 回使用日志页
+  const [dailyDetailFromSummary, setDailyDetailFromSummary] = useState(false)
+  // 每日统计汇总页的区间选择：提升持有，下钻日明细返回后保持
+  const [dailySummaryRange, setDailySummaryRange] = useState<SummaryRangeKey>('7')
+  const [dailySummaryCustomRange, setDailySummaryCustomRange] = useState<CustomRange | null>(null)
   const cancelVerifyRef = useRef(false)
   // 单账号重查余额的防重入标记（见 handleRefetchBalance）
   const refetchingBalanceIds = useRef<Set<number>>(new Set())
@@ -275,11 +285,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   }
 
-  const handleRefresh = () => {
-    refetch()
-    toast.success(t('dashboard.toastRefreshed'))
-  }
-
   const handleLogout = () => {
     storage.removeApiKey()
     queryClient.clear()
@@ -452,8 +457,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
     deselectAll()
   }
 
-  // 查询所有凭据信息（逐个查询，避免瞬时并发）
+  // 刷新（逐个查询余额，避免瞬时并发）；兼具原独立刷新按钮的职责：
+  // 重拉账号运行时快照（失败计数/健康状态/自动禁用等）
   const handleQueryCurrentPageInfo = async () => {
+    refetch()
+    // 与切 tab 刷新口径对齐：同步失效每日统计（今日消耗积分/请求数/缓存命中率等）
+    queryClient.invalidateQueries({ queryKey: ['dailyUsage'] })
     const allCredentials = data?.credentials || []
 
     if (allCredentials.length === 0) {
@@ -651,7 +660,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       items: [
         { key: 'credentials', label: t('dashboard.navCredentials'), icon: Server, count: data && data.credentials.length > 0 ? data.credentials.length : undefined, active: activeTab === 'credentials' && dailyView === null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
         { key: 'apikeys', label: 'API Keys', icon: Key, count: apiKeys && apiKeys.length > 0 ? apiKeys.length : undefined, active: activeTab === 'apikeys', onClick: () => { setActiveTab('apikeys'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
-        { key: 'daily', label: t('dashboard.navDailyStats'), icon: BarChart2, count: undefined, active: dailyView !== null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView('list'); setDailyFromSidebar(true) } },
+        { key: 'daily', label: t('dashboard.navDailyStats'), icon: BarChart2, count: undefined, active: dailyView !== null, onClick: () => { setActiveTab('credentials'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView('list'); setDailyFromSidebar(true); setDailyRange('today'); setDailyCustomRange(null); setDailyDetailFromSummary(false) } },
         { key: 'models', label: t('dashboard.navModels'), icon: Boxes, count: undefined, active: activeTab === 'models', onClick: () => { setActiveTab('models'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) } },
       ],
     },
@@ -686,6 +695,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
       <main className={`${sidebarCollapsed ? 'ml-16' : 'ml-[232px]'} flex-1 min-h-screen px-9 py-7 transition-all duration-200`}>
         {activeTab === 'logs' ? (
           <LogViewerPage />
+        ) : activeTab === 'docs' ? (
+          <DocsPage onBack={() => setActiveTab('credentials')} />
         ) : activeTab === 'theme' ? (
           <ThemeSettingsPage />
         ) : activeTab === 'settings' ? (
@@ -720,12 +731,31 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <DailyStatsPage
             showBack={!dailyFromSidebar}
             onBack={() => setDailyView(null)}
-            onViewDay={(date) => setDailyView(date)}
+            onOpenSummary={() => setDailyView('summary')}
+            range={dailyRange}
+            onRangeChange={setDailyRange}
+            customRange={dailyCustomRange}
+            onCustomRangeChange={setDailyCustomRange}
+          />
+        ) : dailyView === 'summary' ? (
+          <DailySummaryPage
+            onBack={() => setDailyView('list')}
+            onViewDay={(date) => {
+              setDailyDetailFromSummary(true)
+              setDailyView(date)
+            }}
+            sumRange={dailySummaryRange}
+            onSumRangeChange={setDailySummaryRange}
+            customRange={dailySummaryCustomRange}
+            onCustomRangeChange={setDailySummaryCustomRange}
           />
         ) : dailyView !== null ? (
           <DailyDetailPage
             date={dailyView}
-            onBack={() => setDailyView('list')}
+            onBack={() => {
+              setDailyView(dailyDetailFromSummary ? 'summary' : 'list')
+              setDailyDetailFromSummary(false)
+            }}
           />
         ) : failureLogCredentialId !== null ? (
           <FailureLogPage
@@ -767,13 +797,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
           creditsTrend={creditsTrend}
           cumulativeFailures={cumulativeFailures}
           cumulativeFailureRate={cumulativeFailureRate}
-          onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false) }}
+          onTodayClick={() => { setDailyView('list'); setDailyFromSidebar(false); setDailyRange('today'); setDailyCustomRange(null); setDailyDetailFromSummary(false) }}
+          onOpenDocs={() => { setActiveTab('docs'); setDetailKeyId(null); setDetailCredentialId(null); setDailyView(null) }}
         />
 
         {/* 凭据列表（自本文件拆出，纯代码搬移） */}
         <CredentialList
           allCredentials={allCredentials}
-          handleRefresh={handleRefresh}
           handleQueryCurrentPageInfo={handleQueryCurrentPageInfo}
           queryingInfo={queryingInfo}
           queryInfoProgress={queryInfoProgress}

@@ -36,10 +36,11 @@ pub use converter::{
 };
 pub(crate) use handlers::kiro_body_dump_enabled;
 pub(crate) use handlers::set_kiro_body_dump_enabled;
+pub use handlers::set_models_official_aliases;
 pub use router::create_router_with_provider_and_state;
 pub use stream::{
-    client_token_passthrough_enabled, set_client_token_passthrough, set_thinking_as_text,
-    thinking_as_text_enabled,
+    client_token_passthrough_enabled, set_client_token_passthrough,
+    set_output_tokens_include_thinking, set_thinking_as_text, thinking_as_text_enabled,
 };
 
 #[cfg(test)]

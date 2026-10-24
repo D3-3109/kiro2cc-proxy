@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, Plus, Check, RotateCw, Link2, FileText, Eraser, Box } from 'lucide-react'
+import { Copy, Plus, Check, RotateCw, Link2, Eraser, Box } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageHead } from '@/components/page-head'
 import { SearchBox, Segmented, Toolbar, UpdatedAgo, type SegmentedOption } from '@/components/toolbar'
@@ -565,7 +565,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
 
   return (
     <div>
-      {/* 页头（设计稿 .head）：面包屑 + 19px 标题 + 同基线副标题 + 右侧状态标签与文档入口 */}
+      {/* 页头（设计稿 .head）：面包屑 + 19px 标题 + 同基线副标题 + 右侧状态标签 */}
       <PageHead
         crumb={[t('dashboard.navMain'), t('apiKeys.pageTitle')]}
         title={t('apiKeys.pageTitle')}
@@ -576,15 +576,6 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
               <span className="h-[5px] w-[5px] shrink-0 animate-pulse rounded-full bg-ok ring-[2.5px] ring-ok-soft" aria-hidden="true" />
               {t('apiKeys.serviceRunningTag')}
             </span>
-            <a
-              href="https://github.com/TsinHzl/kiro2cc-proxy#readme"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group inline-flex h-[31px] items-center gap-1.5 rounded-[7px] px-[11px] text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
-            >
-              <FileText className="h-3.5 w-3.5 text-ink-3 transition-colors group-hover:text-ink-2" />
-              {t('apiKeys.docsLink')}
-            </a>
           </>
         }
       />

@@ -10,7 +10,7 @@ use crate::kiro::model::requests::conversation::{
 
 use super::fields::build_additional_model_request_fields;
 use super::history::build_history;
-use super::message::process_message_content;
+use super::message::{process_message_content, process_message_content_with_tool_filter};
 use super::model::map_model;
 use super::prompt::{append_output_format_instruction, append_recent_knowledge_hints};
 use super::result::{ConversionError, ConversionResult};
@@ -60,19 +60,34 @@ pub(super) fn convert_request_with_chunking(
         match message.role.as_str() {
             "user" | "assistant" => messages.push(message),
             "system" => {
-                let texts = system.get_or_insert_with(Vec::new);
+                // 惰性创建系统区：只有真正贡献文本时才从 None 变为 Some，否则仅含被跳过
+                // 事件的消息会造出空的 Some，让 build_history 误判为「有 system 但为空」而漏注 thinking 前缀
                 match &message.content {
-                    serde_json::Value::String(text) => texts.push(text.as_str()),
+                    serde_json::Value::String(text) => {
+                        system.get_or_insert_with(Vec::new).push(text.as_str())
+                    }
                     serde_json::Value::Array(blocks) => {
                         for block in blocks {
-                            if block.get("type").and_then(|v| v.as_str()) != Some("text") {
+                            let block_type = block.get("type").and_then(|v| v.as_str());
+                            // 客户端的「会话中途变更工具」事件（如开启 advisor 后出现的
+                            // tool_addition / tool_removal）：Kiro 没有对应机制，跳过而不是整次
+                            // 请求报 400（该事件会随历史持续回传，报错会让整个会话不可用）
+                            if let Some(skipped @ ("tool_addition" | "tool_removal")) = block_type {
+                                tracing::info!(
+                                    index,
+                                    block_type = skipped,
+                                    "跳过内联 system 中的工具变更事件"
+                                );
+                                continue;
+                            }
+                            if block_type != Some("text") {
                                 return Err(ConversionError::InvalidSystemContent { index });
                             }
                             let text = block
                                 .get("text")
                                 .and_then(|v| v.as_str())
                                 .ok_or(ConversionError::InvalidSystemContent { index })?;
-                            texts.push(text);
+                            system.get_or_insert_with(Vec::new).push(text);
                         }
                     }
                     _ => return Err(ConversionError::InvalidSystemContent { index }),
@@ -195,6 +210,23 @@ pub(super) fn convert_request_with_chunking(
     // 同时返回孤立的 tool_use_id 集合，用于后续清理
     let (validated_tool_results, orphaned_tool_use_ids) =
         validate_tool_pairing(&history, &tool_results);
+
+    // 图片与其所属 tool_result 一起接受或丢弃。仅在配对校验过滤了结果时
+    // 重建 images；从集合中移除已接受的 ID，也能排除当前消息内的重复结果。
+    // 重建时 tool_result 文本也要取重建后的版本：其中的图片序号依赖前面保留了哪些图片。
+    let (images, validated_tool_results) = if validated_tool_results.len() != tool_results.len() {
+        let mut accepted_ids: std::collections::HashSet<_> = validated_tool_results
+            .iter()
+            .map(|result| result.tool_use_id.as_str())
+            .collect();
+        let (_, images, rebuilt_results) =
+            process_message_content_with_tool_filter(&last_message.content, 0, |id| {
+                accepted_ids.remove(id)
+            })?;
+        (images, rebuilt_results)
+    } else {
+        (images, validated_tool_results)
+    };
 
     // 9. 从历史中移除孤立的 tool_use（Kiro API 要求 tool_use 必须有对应的 tool_result）
     remove_orphaned_tool_uses(&mut history, &orphaned_tool_use_ids);

@@ -701,3 +701,140 @@ fn test_code_example_with_literal_dim_line_survives_history() {
     let expected = &expected[1..expected.len() - 1];
     assert!(hist.contains(expected), "{hist}");
 }
+
+/// 带 tools 的请求：复用 reminder_request 的基础字段，再换上指定的 tools
+fn request_with_tools(messages: serde_json::Value, tools: serde_json::Value) -> MessagesRequest {
+    MessagesRequest {
+        tools: Some(serde_json::from_value(tools).unwrap()),
+        ..reminder_request(Some("TOP"), messages)
+    }
+}
+
+#[test]
+fn test_inline_system_skips_tool_change_events_and_keeps_text() {
+    // advisor 开启后 Claude Code 会在内联 system 里放 tool_addition / tool_removal：
+    // 事件被跳过，同一条消息里的 text 照常保留，不再整次请求 400
+    let req = reminder_request(
+        Some("TOP"),
+        serde_json::json!([
+            {"role": "user", "content": "first"},
+            {"role": "system", "content": [
+                {"type": "text", "text": "原有系统说明"},
+                {"type": "tool_addition",
+                 "tool": {"type": "tool_reference", "name": "advisor"},
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "tool_removal", "tool": {"type": "tool_reference", "name": "advisor"}}
+            ]},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "current"}
+        ]),
+    );
+    let result = convert_request(&req).expect("工具变更事件不应导致转换失败");
+    assert_eq!(system_history(&result), "TOP\n原有系统说明");
+}
+
+#[test]
+fn test_inline_system_with_only_tool_change_event_adds_no_text() {
+    let with_event = reminder_request(
+        Some("TOP"),
+        serde_json::json!([
+            {"role": "user", "content": "first"},
+            {"role": "system", "content": [{"type": "tool_addition", "tool": {"name": "x"}}]},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "current"}
+        ]),
+    );
+    let without_event = reminder_request(
+        Some("TOP"),
+        serde_json::json!([
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "current"}
+        ]),
+    );
+    let a = convert_request(&with_event).unwrap();
+    let b = convert_request(&without_event).unwrap();
+    assert_eq!(system_history(&a), system_history(&b));
+    assert_eq!(
+        a.conversation_state.history.len(),
+        b.conversation_state.history.len()
+    );
+}
+
+#[test]
+fn test_advisor_server_tool_is_not_forwarded_but_same_named_user_tool_is() {
+    let messages = serde_json::json!([{"role": "user", "content": "hi"}]);
+    // 带 advisor_* type 的服务端工具被剔除，普通工具保留
+    let req = request_with_tools(
+        messages.clone(),
+        serde_json::json!([
+            {"type": "advisor_20260301", "name": "advisor", "defer_loading": true,
+             "model": "claude-opus-4-6"},
+            {"name": "Read", "description": "read", "input_schema": {"type": "object"}}
+        ]),
+    );
+    let result = convert_request(&req).unwrap();
+    let names: Vec<_> = result
+        .conversation_state
+        .current_message
+        .user_input_message
+        .user_input_message_context
+        .tools
+        .iter()
+        .map(|t| t.tool_specification.name.as_str())
+        .collect();
+    assert_eq!(names, ["Read"]);
+
+    // 用户自己定义、恰好叫 advisor 的普通工具（无 advisor_* type）不能被误伤
+    let req = request_with_tools(
+        messages,
+        serde_json::json!([
+            {"name": "advisor", "description": "my own", "input_schema": {"type": "object"}}
+        ]),
+    );
+    let result = convert_request(&req).unwrap();
+    assert_eq!(
+        result
+            .conversation_state
+            .current_message
+            .user_input_message
+            .user_input_message_context
+            .tools
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn test_tool_change_event_only_inline_system_keeps_thinking_prefix_without_top_level_system() {
+    // 没有顶层 system、内联 system 只有被跳过的工具变更事件时，应与「没有 system」一致：
+    // thinking 前缀照常注入，而不是因为空的 system 区被漏掉
+    let build = |with_event: bool| {
+        let mut messages = vec![serde_json::json!({"role": "user", "content": "first"})];
+        if with_event {
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": [{"type": "tool_addition", "tool": {"name": "advisor"}}]
+            }));
+        }
+        messages.push(serde_json::json!({"role": "assistant", "content": "reply"}));
+        messages.push(serde_json::json!({"role": "user", "content": "current"}));
+        let mut req = reminder_request(None, serde_json::json!(messages));
+        req.thinking = Some(crate::anthropic::types::Thinking {
+            thinking_type: "enabled".to_string(),
+            budget_tokens: 4096,
+        });
+        convert_request(&req).unwrap()
+    };
+    let with_event = build(true);
+    let without_event = build(false);
+    assert!(
+        system_history(&without_event).contains("thinking"),
+        "基线应注入 thinking 前缀"
+    );
+    assert_eq!(system_history(&with_event), system_history(&without_event));
+    assert_eq!(
+        with_event.conversation_state.history.len(),
+        without_event.conversation_state.history.len()
+    );
+}

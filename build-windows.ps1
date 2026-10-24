@@ -31,6 +31,7 @@ Write-Host "[1/3] 构建 web-ui/admin-ui..."
 Set-Location "$SCRIPT_DIR\web-ui\admin-ui"
 npm install --registry $NPM_REGISTRY --progress
 npm run build
+if ($LASTEXITCODE -ne 0) { Write-Host "[!] admin-ui 构建失败"; Read-Host "按回车退出"; exit 1 }
 Set-Location $SCRIPT_DIR
 Write-Host "[*] web-ui/admin-ui 构建完成 ✓"
 
@@ -39,12 +40,14 @@ Write-Host "[2/3] 构建 web-ui/user-ui..."
 Set-Location "$SCRIPT_DIR\web-ui\user-ui"
 npm install --registry $NPM_REGISTRY --progress
 npm run build
+if ($LASTEXITCODE -ne 0) { Write-Host "[!] user-ui 构建失败"; Read-Host "按回车退出"; exit 1 }
 Set-Location $SCRIPT_DIR
 Write-Host "[*] web-ui/user-ui 构建完成 ✓"
 
 Write-Host ""
 Write-Host "[3/3] 编译 Rust 二进制..."
 cargo build --release
+if ($LASTEXITCODE -ne 0) { Write-Host "[!] Rust 编译失败"; Read-Host "按回车退出"; exit 1 }
 Write-Host "[*] 编译完成 ✓"
 
 Write-Host ""

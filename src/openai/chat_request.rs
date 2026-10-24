@@ -209,18 +209,27 @@ pub(super) fn flatten_text(content: Option<&Value>) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(parts)) => parts
             .iter()
-            .filter_map(|p| match p {
-                Value::String(s) => Some(s.clone()),
-                Value::Object(_) => p
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .or_else(|| p.get("output").and_then(Value::as_str).map(str::to_string)),
-                _ => None,
-            })
+            .filter_map(part_text)
             .collect::<Vec<_>>()
             .join("\n"),
         Some(other) => other.to_string(),
+    }
+}
+
+/// 取单个 content part 的文本：裸字符串、`text` 字段，或 `output` 字段
+pub(super) fn part_text(part: &Value) -> Option<String> {
+    match part {
+        Value::String(s) => Some(s.clone()),
+        Value::Object(_) => part
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                part.get("output")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            }),
+        _ => None,
     }
 }
 

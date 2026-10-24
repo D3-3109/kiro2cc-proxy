@@ -142,6 +142,9 @@ pub(crate) async fn post_responses(
     // custom 工具名要同时供流式与非流式转换使用，各持一份（集合很小，克隆成本可忽略）
     let custom_tools = converted.custom_tools;
     let stream_custom_tools = custom_tools.clone();
+    // 非默认 namespace 的工具映射，用途同上：响应侧据此还原 function_call 的 namespace 字段
+    let namespaced_tools = converted.namespaced_tools;
+    let stream_namespaced_tools = namespaced_tools.clone();
     let is_compaction = converted.is_compaction;
     forward_and_wrap(
         state,
@@ -153,22 +156,32 @@ pub(crate) async fn post_responses(
         client_model,
         move || {
             if is_compaction {
-                Box::new(ResponsesStreamConverter::new_compaction(
-                    &converter_model,
-                    stream_custom_tools,
-                ))
+                Box::new(
+                    ResponsesStreamConverter::new_compaction(&converter_model, stream_custom_tools)
+                        .with_namespaces(stream_namespaced_tools),
+                )
             } else {
-                Box::new(ResponsesStreamConverter::new(
-                    &converter_model,
-                    stream_custom_tools,
-                ))
+                Box::new(
+                    ResponsesStreamConverter::new(&converter_model, stream_custom_tools)
+                        .with_namespaces(stream_namespaced_tools),
+                )
             }
         },
         move |anthropic, model| {
             if is_compaction {
-                responses_response::convert_non_stream_compaction(anthropic, model, &custom_tools)
+                responses_response::convert_non_stream_compaction(
+                    anthropic,
+                    model,
+                    &custom_tools,
+                    &namespaced_tools,
+                )
             } else {
-                responses_response::convert_non_stream(anthropic, model, &custom_tools)
+                responses_response::convert_non_stream(
+                    anthropic,
+                    model,
+                    &custom_tools,
+                    &namespaced_tools,
+                )
             }
         },
     )
@@ -247,8 +260,16 @@ fn forward_to_anthropic(
     headers: HeaderMap,
     anthropic_body: &Value,
 ) -> impl std::future::Future<Output = Response> + use<> {
+    // OpenAI 协议是自动前缀缓存：断点记账开启时补顶层自动缓存标记（见 ensure_auto_cache_control）
+    // 只有开启时才需要可变副本；默认关闭路径不做整包深拷贝
     // Value 一定可序列化，unwrap_or_default 只为避免 panic 路径
-    let bytes = Bytes::from(serde_json::to_vec(anthropic_body).unwrap_or_default());
+    let bytes = if state.breakpoint_cache.is_some() {
+        let mut owned = anthropic_body.clone();
+        crate::cache::breakpoint::ensure_auto_cache_control(&mut owned);
+        Bytes::from(serde_json::to_vec(&owned).unwrap_or_default())
+    } else {
+        Bytes::from(serde_json::to_vec(anthropic_body).unwrap_or_default())
+    };
     post_messages(State(state), identity, ConnectInfo(addr), headers, bytes)
 }
 

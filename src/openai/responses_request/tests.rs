@@ -3,6 +3,7 @@ mod tests {
     use crate::openai::chat_request::DEFAULT_MAX_TOKENS;
     use crate::openai::responses_request::tools::{
         DEFAULT_TOOL_NAMESPACE, FREEFORM_ADAPTATION_NOTE, MAX_NAMESPACE_DEPTH, custom_tool_schema,
+        flatten_tool_name,
     };
     use crate::openai::responses_request::{ConvertedResponsesRequest, convert};
     use serde_json::{Value, json};
@@ -338,9 +339,18 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        // namespace 名不拼进工具名：模型回调时给的就是叶子名。
-        // collaboration 的 list_agents 被整体跳过——非默认命名空间的子工具客户端调不动
-        assert_eq!(names, vec!["exec", "wait"]);
+        // functions 命名空间的子工具保持裸名；其余 namespace 的子工具展开成 `ns__叶子名`，
+        // 并登记映射供响应侧还原 namespace 字段
+        assert_eq!(names, vec!["exec", "wait", "collaboration__list_agents"]);
+        assert_eq!(
+            r.namespaced_tools,
+            [(
+                "collaboration__list_agents".to_string(),
+                ("collaboration".to_string(), "list_agents".to_string())
+            )]
+            .into_iter()
+            .collect()
+        );
         assert_eq!(
             r.anthropic_body["tools"][0]["input_schema"],
             custom_tool_schema()
@@ -349,6 +359,127 @@ mod tests {
         assert_eq!(r.custom_tools, ["exec".to_string()].into_iter().collect());
         // additional_tools item 本身不产生任何消息
         assert_eq!(r.anthropic_body["messages"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn mcp_namespace_tools_are_flattened_and_recorded() {
+        // Codex 0.163：顶层 tools 里每个 MCP server 是一个 namespace 容器，叶子名是裸名
+        let r = convert_ok(json!({
+            "model": "gpt-5.6-terra",
+            "input": "hi",
+            "tools": [
+                {"type": "function", "name": "list_mcp_resources",
+                 "parameters": {"type": "object", "properties": {}}},
+                {"type": "namespace", "name": "mcp__dbhub", "tools": [
+                    {"type": "function", "name": "execute_sql", "description": "跑 SQL",
+                     "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}}},
+                    {"type": "function", "name": "search_objects",
+                     "parameters": {"type": "object", "properties": {}}},
+                ]},
+                {"type": "namespace", "name": "mcp__yunxiao", "tools": [
+                    {"type": "function", "name": "execute_sql",
+                     "parameters": {"type": "object", "properties": {}}},
+                ]},
+            ],
+        }));
+        let names: Vec<&str> = r.anthropic_body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        // 不同 server 的同名叶子工具靠前缀区分，不会被去重吞掉
+        assert_eq!(
+            names,
+            vec![
+                "list_mcp_resources",
+                "mcp__dbhub__execute_sql",
+                "mcp__dbhub__search_objects",
+                "mcp__yunxiao__execute_sql",
+            ]
+        );
+        assert_eq!(
+            r.namespaced_tools["mcp__yunxiao__execute_sql"],
+            ("mcp__yunxiao".to_string(), "execute_sql".to_string())
+        );
+        // 顶层裸函数不在映射里
+        assert!(!r.namespaced_tools.contains_key("list_mcp_resources"));
+        // 描述与 schema 原样保留
+        assert_eq!(r.anthropic_body["tools"][1]["description"], "跑 SQL");
+    }
+
+    #[test]
+    fn flatten_tool_name_is_valid_deterministic_and_collision_free() {
+        // 正常情况只是拼接
+        assert_eq!(flatten_tool_name("mcp__a", "b"), "mcp__a__b");
+
+        // 超长：截断到 64 字符并带哈希后缀；同输入同输出，不同输入不同输出
+        let long_leaf = "x".repeat(80);
+        let a = flatten_tool_name("mcp__codex_apps__github", &long_leaf);
+        let b = flatten_tool_name("mcp__codex_apps__github", &format!("{long_leaf}y"));
+        assert_eq!(a.len(), 64);
+        assert_eq!(a, flatten_tool_name("mcp__codex_apps__github", &long_leaf));
+        assert_ne!(a, b);
+
+        // 非法字符被替换，且不会因替换后相同而撞名
+        let dot = flatten_tool_name("mcp__a", "get.file");
+        let slash = flatten_tool_name("mcp__a", "get/file");
+        assert!(
+            dot.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        );
+        assert_ne!(dot, slash);
+
+        // 非 ASCII 不会让按字节截断 panic
+        let cjk = flatten_tool_name("mcp__a", &"查".repeat(40));
+        assert!(cjk.len() <= 64);
+        assert!(cjk.is_ascii());
+    }
+
+    #[test]
+    fn history_function_call_with_namespace_uses_the_same_flat_name_as_declaration() {
+        let r = convert_ok(json!({
+            "model": "gpt-5.6-terra",
+            "input": [
+                {"type": "message", "role": "user", "content": "查一下"},
+                {"type": "function_call", "call_id": "call_1", "name": "execute_sql",
+                 "namespace": "mcp__dbhub", "arguments": "{\"sql\":\"select 1\"}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+                {"type": "function_call", "call_id": "call_2", "name": "wait",
+                 "namespace": "functions", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_2", "output": "done"},
+            ],
+            "tools": [{"type": "namespace", "name": "mcp__dbhub", "tools": [
+                {"type": "function", "name": "execute_sql",
+                 "parameters": {"type": "object", "properties": {}}},
+            ]}],
+        }));
+        let declared = r.anthropic_body["tools"][0]["name"].as_str().unwrap();
+        let used: Vec<&str> = r.anthropic_body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .filter(|b| b["type"] == "tool_use")
+            .map(|b| b["name"].as_str().unwrap())
+            .collect();
+        // 回放的调用与声明同名，默认命名空间的调用保持裸名
+        assert_eq!(declared, "mcp__dbhub__execute_sql");
+        assert_eq!(used, vec!["mcp__dbhub__execute_sql", "wait"]);
+    }
+
+    #[test]
+    fn non_function_tool_inside_named_namespace_is_skipped() {
+        let r = convert_ok(json!({
+            "model": "gpt-5.6-terra",
+            "input": "hi",
+            "tools": [{"type": "namespace", "name": "mcp__x", "tools": [
+                {"type": "custom", "name": "freeform", "description": "d"},
+            ]}],
+        }));
+        assert!(r.anthropic_body.get("tools").is_none());
+        assert!(r.namespaced_tools.is_empty());
     }
 
     #[test]
@@ -557,5 +688,102 @@ mod tests {
             r.anthropic_body["messages"],
             json!([{"role": "user", "content": [{"type": "text", "text": "still here"}]}])
         );
+    }
+
+    // ---------- function_call_output 内嵌图片（Codex view_image / 截图类工具） ----------
+
+    fn tool_output_request(output: Value) -> Value {
+        json!({
+            "model": "gpt-5-codex",
+            "input": [
+                {"type": "message", "role": "user", "content": "看一下截图"},
+                {"type": "function_call", "call_id": "call_img", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_img", "output": output},
+            ],
+        })
+    }
+
+    fn tool_result_content(r: &ConvertedResponsesRequest) -> Value {
+        r.anthropic_body["messages"][2]["content"][0]["content"].clone()
+    }
+
+    #[test]
+    fn function_call_output_image_only_becomes_image_block() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image", "image_url": "data:image/png;base64,QUJD"},
+        ])));
+        assert_eq!(
+            tool_result_content(&r),
+            json!([{
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"},
+            }])
+        );
+    }
+
+    #[test]
+    fn function_call_output_mixed_text_and_image_keeps_order() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_text", "text": "before"},
+            {"type": "input_image", "image_url": "data:image/jpeg;base64,REVG"},
+            "after",
+        ])));
+        assert_eq!(
+            tool_result_content(&r),
+            json!([
+                {"type": "text", "text": "before"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "REVG"}},
+                {"type": "text", "text": "after"},
+            ])
+        );
+    }
+
+    #[test]
+    fn function_call_output_remote_image_url_degrades_to_text_placeholder() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image", "image_url": "https://example.com/a.png"},
+        ])));
+        assert_eq!(
+            tool_result_content(&r),
+            json!([{"type": "text", "text": "[image: https://example.com/a.png]"}])
+        );
+    }
+
+    #[test]
+    fn function_call_output_unconvertible_image_leaves_placeholder_not_empty_content() {
+        // 缺 image_url / image_url 为空串：不能被静默丢弃成空 content 数组
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image"},
+            {"type": "input_image", "image_url": ""},
+        ])));
+        let placeholder =
+            json!({"type": "text", "text": "[image omitted: missing or empty image_url]"});
+        assert_eq!(tool_result_content(&r), json!([placeholder, placeholder]));
+    }
+
+    #[test]
+    fn function_call_output_text_only_array_stays_flattened_string() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_text", "text": "a"},
+            {"type": "output_text", "text": "b"},
+            {"output": "c"},
+        ])));
+        assert_eq!(tool_result_content(&r), json!("a\nb\nc"));
+    }
+
+    #[test]
+    fn function_call_output_image_reaches_kiro_images() {
+        let r = convert_ok(tool_output_request(json!([
+            {"type": "input_image", "image_url": "data:image/png;base64,QUJD"},
+        ])));
+        let anthropic: crate::anthropic::types::MessagesRequest =
+            serde_json::from_value(r.anthropic_body).expect("anthropic body 应可反序列化");
+        let kiro = crate::anthropic::convert_request(&anthropic).expect("转换 Kiro 请求应成功");
+        let current = &kiro.conversation_state.current_message.user_input_message;
+        assert_eq!(current.images.len(), 1, "工具图片应进入 Kiro images");
+        assert_eq!(current.images[0].source.bytes, "QUJD");
+        let results = &current.user_input_message_context.tool_results;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool_use_id, "call_img");
     }
 }

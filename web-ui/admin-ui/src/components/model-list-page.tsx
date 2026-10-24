@@ -15,11 +15,14 @@ import { extractErrorMessage } from '@/lib/utils'
 import { localeTag } from '@/lib/locale'
 import type { ModelItem } from '@/types/api'
 import {
+  AUTO_MODEL_ID,
   FAMILY_AUTO,
   FAMILY_OTHER,
+  familyBrand,
   formatRate,
   formatRateRange,
   groupByFamily,
+  groupByFamilyWith,
   rateRange,
 } from '@/lib/model-family'
 
@@ -109,8 +112,14 @@ export function ModelListPage() {
   const allRange = rateRange(models)
   const maxRate = allRange?.max ?? 0
   const syncedCount = models.filter((m) => m.rate_multiplier != null).length
-  const allGroups = groupByFamily(models)
-  const providerCount = new Set(models.map((m) => m.owned_by)).size
+  // 家族统计走品牌口径（Claude 5.x/4.x/3.x 同属 Claude 一族），auto 不计入
+  const familyGroups = groupByFamilyWith(models, familyBrand).filter((g) => g.name !== FAMILY_AUTO)
+  // auto 为本代理的智能路由伪模型（owned_by=kiro），非真实上游提供方，不计入
+  const providerCount = new Set(
+    models
+      .filter((m) => m.id !== AUTO_MODEL_ID && m.owned_by !== '' && m.owned_by !== 'unknown')
+      .map((m) => m.owned_by)
+  ).size
   const outputs = models.map((m) => m.max_tokens)
 
   const familyLabel = (name: string): string => {
@@ -209,12 +218,12 @@ export function ModelListPage() {
         </Metric>
 
         <Metric label={t('models.metricFamiliesLabel')}>
-          <MetricValue value={String(allGroups.length)} unit={t('models.unitFamilies')} />
+          <MetricValue value={String(familyGroups.length)} unit={t('models.unitFamilies')} />
           <MetricFoot className="truncate">
-            {allGroups.length === 0 ? (
+            {familyGroups.length === 0 ? (
               <span>{t('models.emptyNoModels')}</span>
             ) : (
-              allGroups.slice(0, FAMILY_PREVIEW).map((group, i) => (
+              familyGroups.slice(0, FAMILY_PREVIEW).map((group, i) => (
                 <span key={group.name} className="flex items-center gap-1.5">
                   {i > 0 && <FootSep />}
                   {familyLabel(group.name)}
@@ -222,10 +231,10 @@ export function ModelListPage() {
                 </span>
               ))
             )}
-            {allGroups.length > FAMILY_PREVIEW && (
+            {familyGroups.length > FAMILY_PREVIEW && (
               <>
                 <FootSep />
-                <span>{t('models.metricFamiliesMore', { n: allGroups.length - FAMILY_PREVIEW })}</span>
+                <span>{t('models.metricFamiliesMore', { n: familyGroups.length - FAMILY_PREVIEW })}</span>
               </>
             )}
           </MetricFoot>

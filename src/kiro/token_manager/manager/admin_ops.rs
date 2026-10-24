@@ -95,6 +95,9 @@ impl MultiTokenManager {
                         .as_deref()
                         .map(|m| canonicalize_auth_method_value(m).to_string()),
                     has_profile_arn: e.credentials.profile_arn.is_some(),
+                    client_id: e.credentials.client_id.clone(),
+                    profile_arn: e.credentials.profile_arn.clone(),
+                    machine_id: e.credentials.machine_id.clone(),
                     expires_at: e.credentials.expires_at.clone(),
                     refresh_token_hash: e.credentials.refresh_token.as_deref().map(sha256_hex),
                     email: e.credentials.email.clone(),

@@ -392,13 +392,19 @@ fn canonicalize_content_block(block: &serde_json::Value, tools: Option<&[Tool]>)
     }
 }
 
-fn canonical_json(v: &serde_json::Value) -> String {
+/// 对象键按 JSON 字符串编码（加引号并转义）：否则键 `a:1,b` 与两个键 `a`、`b`
+/// 会规范化成同一串，导致不同内容得到相同哈希
+pub(crate) fn json_key(k: &str) -> String {
+    serde_json::Value::String(k.to_owned()).to_string()
+}
+
+pub(crate) fn canonical_json(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Object(m) => {
             let sorted: BTreeMap<&String, &serde_json::Value> = m.iter().collect();
             let mut parts: Vec<String> = Vec::with_capacity(sorted.len());
             for (k, val) in sorted {
-                parts.push(format!("{}:{}", k, canonical_json(val)));
+                parts.push(format!("{}:{}", json_key(k), canonical_json(val)));
             }
             format!("{{{}}}", parts.join(","))
         }

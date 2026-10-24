@@ -53,7 +53,7 @@ function formatDate(iso: string) {
 
 export function UsageLogPage({ onBack }: UsageLogPageProps) {
   const [page, setPage] = useState(1)
-  const pageSize = 50
+  const pageSize = 100
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['usageRecords', page, pageSize],
@@ -217,7 +217,9 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
                                   <span title={r.clientIp} className="flex flex-col items-start">
                                     <span className="font-mono">{geo?.displayIp ?? r.clientIp}</span>
                                     {geo && geo.country && (
-                                      <span className="text-ink-3">{geo.country}·{geo.city}</span>
+                                      <span className="text-ink-3">
+                                        {geo.city ? `${geo.country}·${geo.city}` : geo.country}
+                                      </span>
                                     )}
                                   </span>
                                 ) : (

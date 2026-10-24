@@ -6,13 +6,14 @@
 //! SSE 中的 thinking 块改写为普通 text 块（逐行流式输出），使思考过程
 //! 像 Kiro CLI 一样实时可见。
 //!
-//! 每行内容用 ANSI dim（变暗）转义包裹，接近 Kiro CLI 的灰色思考文字；
-//! 是否生效取决于客户端是否放行转义字符，故 ANSI 样式仅用于终端入口（UA 入口为 `cli`）；
-//! Claude Desktop 等图形界面改用无转义的纯文本样式，入口未知的客户端回退到原生 thinking
+//! 每行内容用 ANSI dim + italic（变暗斜体，`ESC[2;3m`）转义包裹，接近 Kiro CLI 的灰色思考文字；
+//! 是否生效取决于客户端是否放行转义字符：只有确认是终端渲染的入口（UA 入口为 `cli`，
+//! 或解析不出入口）才用 ANSI，其余入口一律改用无转义的 Markdown 样式（每行 `> *内容*`，引用块 + 斜体，
+//! 用 Markdown 自带样式近似变暗）
 //! （见 [`thinking_text_style`]）。首行为「💭 Thinking」标记，
 //! 块收尾追加「💭 Thought for Ns (N tokens)」时长行（贴近 Claude Code 原生样式，
 //! token 数为该思考块正文的 cl100k_base 计数），
-//! 不带 markdown 引用前缀（客户端不显示竖线）。
+//! ANSI 样式不带 markdown 引用前缀（终端不显示竖线）。
 //!
 //! 代价：这些文本块会被客户端当作 assistant 正文存入对话历史并随后续请求回传
 //! （客户端侧上下文因此包含思考文本）。回传上游时由
@@ -43,9 +44,24 @@ const THOUGHT_TOKEN_SUFFIX_OPEN: &str = " (";
 /// 时长行 token 统计后缀的结束标记（`" tokens)"`），与 [`THOUGHT_TOKEN_SUFFIX_OPEN`] 配套。
 const THOUGHT_TOKEN_SUFFIX_CLOSE: &str = " tokens)";
 
-/// ANSI：变暗开始 / 复位（dim 样式，仅包在每行内容两侧，不跨行）
-const DIM_ON: &str = "\x1b[2m";
+/// ANSI：变暗斜体开始 / 复位（dim + italic，仅包在每行内容两侧，不跨行）
+const DIM_ON: &str = "\x1b[2;3m";
 const DIM_OFF: &str = "\x1b[0m";
+/// 旧版本只变暗不斜体的起始转义。客户端历史里可能还留着旧版本渲染的文本，
+/// 剥离 / 识别侧必须同时认 [`DIM_ON`] 与它；生成侧只用 [`DIM_ON`]。
+const LEGACY_DIM_ON: &str = "\x1b[2m";
+
+/// 去掉所有起始转义（新旧两种）与复位转义，得到可见文本
+fn remove_ansi_style(text: &str) -> String {
+    text.replace(DIM_ON, "")
+        .replace(LEGACY_DIM_ON, "")
+        .replace(DIM_OFF, "")
+}
+
+/// Plain 样式下每行的起始 / 结束标记：引用块 + 斜体（`> *内容*`），
+/// 用 Markdown 自带的样式近似 ANSI 的「变暗」。生成侧与剥离侧共用，修改需保持两侧一致。
+const QUOTE_ITALIC_OPEN: &str = "> *";
+const QUOTE_ITALIC_CLOSE: &str = "*";
 
 static THINKING_AS_TEXT: AtomicBool = AtomicBool::new(false);
 
@@ -59,9 +75,14 @@ pub fn thinking_as_text_enabled() -> bool {
     THINKING_AS_TEXT.load(Ordering::Relaxed)
 }
 
-/// 单行文本是否为渲染出的思考标记行（兼容 dim 转义包裹）
+/// 单行文本是否为渲染出的思考标记行（兼容 dim 转义包裹，以及 Plain 的引用 + 斜体包裹）
 fn is_rendered_header_line(line: &str) -> bool {
-    line.replace(DIM_ON, "").replace(DIM_OFF, "") == THOUGHT_HEADER
+    let line = remove_ansi_style(line);
+    line == THOUGHT_HEADER
+        || line
+            .strip_prefix(QUOTE_ITALIC_OPEN)
+            .and_then(|l| l.strip_suffix(QUOTE_ITALIC_CLOSE))
+            == Some(THOUGHT_HEADER)
 }
 
 /// 仅对 Claude Code 客户端生效：OpenAI 兼容端点等其他调用方需要保留原生 thinking 语义
@@ -78,23 +99,30 @@ pub enum ThinkingTextStyle {
     /// 每行用 ANSI dim 转义包裹（终端客户端：显示为灰色）
     #[default]
     Ansi,
-    /// 无转义的纯文本（图形界面客户端，如 Claude Desktop：不解析 ANSI，且按 Markdown 渲染）
+    /// 无转义的 Markdown：每行 `> *内容*`（引用块 + 斜体），用 Markdown 自带样式近似「变暗」
+    /// （图形界面客户端，如 Claude Desktop：不解析 ANSI，且按 Markdown 渲染）
     Plain,
 }
 
 /// 按请求的客户端决定思考文本化的渲染样式；`None` 表示不启用（走原生 thinking）。
 ///
 /// 渲染默认用 ANSI dim 转义，只有终端会把它当样式；Claude Desktop 等图形界面不解析，
-/// 会把 `ESC` 显示成方块、`[2m` / `[0m` 显示成明文（issue #48）。而 Desktop 的原生 thinking
-/// 默认不展示思考内容，所以对它改用无转义的 [`ThinkingTextStyle::Plain`]。
+/// 会把 `ESC` 显示成方块、`[2m` / `[0m` 显示成明文（issue #48、#54）。而这类客户端的原生
+/// thinking 默认不展示思考内容，所以对它们改用无转义的 [`ThinkingTextStyle::Plain`]（引用块 + 斜体）。
 ///
 /// 判定依据是 UA 括号内的入口字段，如 `claude-cli/2.1.231 (external, cli)` 的 `cli`、
-/// `claude-cli/2.1.295 (external, claude-desktop-3p, agent-sdk/0.3.295)` 的 `claude-desktop-3p`：
-/// - 入口为 `cli` → [`ThinkingTextStyle::Ansi`]；
-/// - 入口以 `claude-desktop` 开头 → [`ThinkingTextStyle::Plain`]；
-/// - 入口为其他值（VS Code 扩展、SDK 等，渲染能力未知）→ `None`，宁可回退原生 thinking，
-///   也不输出可能无法渲染的转义码；
-/// - 解析不出入口（无括号 / 字段不足）→ 保持原有行为，按终端处理（Ansi）。
+/// `claude-cli/2.1.295 (external, local-agent, agent-sdk/0.3.295)` 的 `local-agent`：
+/// - 入口为 `cli`，或解析不出入口（老格式 UA）→ [`ThinkingTextStyle::Ansi`]，保持原有行为；
+/// - 其余 Claude Code 入口（`claude-desktop*`、`local-agent`、`claude-vscode`、`sdk-ts`、
+///   `sdk-cli` 及未知入口）→ [`ThinkingTextStyle::Plain`]（Markdown 引用块 + 斜体）；
+/// - 非 Claude Code 客户端 → `None`，走原生 thinking。
+///
+/// 默认方向的取舍：不能回退原生 thinking（多数客户端会折叠，长任务期间界面无输出，
+/// issue #48 后续反馈中 `local-agent` 即因此回归），所以只在 ANSI 与 Plain 之间选。
+/// Plain 在任何客户端都不会出现乱码，最坏只是不如变暗效果明显；ANSI 在不解析它的图形界面里
+/// 每次都会显示乱码。同一个入口（如 `local-agent`）在不同宿主里渲染能力并不一致
+/// （issue #54：Claude Desktop 的 Cowork 模式即为 `local-agent` 且显示乱码），
+/// 入口字段区分不了，因此只有确认是终端的入口才用 ANSI。
 pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTextStyle> {
     if !is_claude_code_client(headers) {
         return None;
@@ -106,8 +134,7 @@ pub fn thinking_text_style(headers: &axum::http::HeaderMap) -> Option<ThinkingTe
         .map(str::to_ascii_lowercase);
     match entrypoint.as_deref() {
         None | Some("cli") => Some(ThinkingTextStyle::Ansi),
-        Some(e) if e.starts_with("claude-desktop") => Some(ThinkingTextStyle::Plain),
-        Some(_) => None,
+        Some(_) => Some(ThinkingTextStyle::Plain),
     }
 }
 
@@ -151,24 +178,105 @@ pub(crate) fn strip_rendered_thinking(text: &str) -> std::borrow::Cow<'_, str> {
         if let Some(nl2) = rest[start + 1..].find('\n') {
             // 仅对当前行匹配，行尾锚定以换行为界；span_end 停在时长行末尾，
             // 其后的粘连文本（旧格式时长行无尾 \n 时与答案同行）原样保留
-            if let Some(span_end) = find_duration_span(&rest[start + 1..start + 1 + nl2]) {
+            let line = &rest[start + 1..start + 1 + nl2];
+            if let Some(span_end) = find_duration_span(line) {
                 return std::borrow::Cow::Owned(after_thinking_block(
                     &rest[start + 1 + span_end..],
+                    trailing_newlines_of(line),
                 ));
             }
         } else if let Some(span_end) = find_duration_span(&rest[start + 1..]) {
             // 最后一行（无换行结尾）：丢弃到时长行末尾，其后粘连文本保留
-            return std::borrow::Cow::Owned(after_thinking_block(&rest[start + 1 + span_end..]));
+            return std::borrow::Cow::Owned(after_thinking_block(
+                &rest[start + 1 + span_end..],
+                trailing_newlines_of(&rest[start + 1..]),
+            ));
         }
         i = start + 1;
     }
-    std::borrow::Cow::Borrowed(rest)
+    // 找不到时长行：只剥了标记行，正文保留。此时首行已确认是渲染出的思考标记行，
+    // 所以可以安全地拆掉 Plain 样式的 `> *…*` 包裹（含空引用行 `>`、硬换行空格与转义），
+    // 避免模型把「每行引用 + 斜体」当作自己的输出格式模仿（同 [`strip_dim_markers`] 的动机）
+    std::borrow::Cow::Owned(unwrap_quoted_italic_lines(rest))
 }
 
-/// 思考块（到时长行末尾）之后的剩余文本：去掉时长行后渲染器补的那个换行
-/// （它只用于让答案在客户端另起一行，丢弃思考块后留着会成为无意义的前导空行）。
-fn after_thinking_block(tail: &str) -> String {
-    tail.strip_prefix('\n').unwrap_or(tail).to_string()
+/// 拆除 Plain 样式渲染的逐行 `> *内容*` 包裹；不符合该形态的行原样保留。
+/// 块在行中间被中断时最后一行可能缺少结束的 `*`，同样处理。
+/// 渲染出的思考块是一段连续的引用行，所以只处理开头这一段，遇到第一个非 `>` 行即停止，
+/// 其后的文本（可能是答案，自带的 `> *斜体*` 引用不应被误拆）原样保留。
+fn unwrap_quoted_italic_lines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_quote_run = true;
+    for line in text.split_inclusive('\n') {
+        in_quote_run = in_quote_run && line.starts_with('>');
+        if !in_quote_run {
+            out.push_str(line);
+            continue;
+        }
+        let (body, nl) = match line.strip_suffix('\n') {
+            Some(b) => (b, "\n"),
+            None => (line, ""),
+        };
+        let trimmed = body.trim_end_matches(' ');
+        if trimmed == ">" {
+            out.push_str(nl);
+        } else if let Some(inner) = trimmed.strip_prefix(QUOTE_ITALIC_OPEN) {
+            // 结束的 `*` 前若有奇数个反斜杠，则它是被转义的字面 `*`，不是闭合标记
+            let closed = inner
+                .strip_suffix(QUOTE_ITALIC_CLOSE)
+                .is_some_and(|before| {
+                    before.bytes().rev().take_while(|b| *b == b'\\').count() % 2 == 0
+                });
+            let inner = if closed {
+                &inner[..inner.len() - QUOTE_ITALIC_CLOSE.len()]
+            } else {
+                inner
+            };
+            let mut chars = inner.chars();
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    match chars.next() {
+                        Some(n @ ('*' | '\\')) => out.push(n),
+                        Some(n) => {
+                            out.push('\\');
+                            out.push(n);
+                        }
+                        None => out.push('\\'),
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            out.push_str(nl);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// 思考块（到时长行末尾）之后的剩余文本：精确去掉时长行后渲染器补的换行
+/// （ANSI 补一个，Plain 补两个以结束引用块；它们只用于让答案在客户端另起一段，
+/// 丢弃思考块后留着会成为无意义的前导空行）。最多剥 `limit` 个，
+/// 不多剥答案自身可能带的前导空行；`limit` 由 [`trailing_newlines_of`] 按时长行样式给出。
+fn after_thinking_block(tail: &str, limit: usize) -> String {
+    let mut rest = tail;
+    for _ in 0..limit {
+        match rest.strip_prefix('\n') {
+            Some(r) => rest = r,
+            None => break,
+        }
+    }
+    rest.to_string()
+}
+
+/// 时长行之后渲染器补的换行个数：Plain（引用 + 斜体包裹）补两个，其余格式补一个
+fn trailing_newlines_of(duration_line: &str) -> usize {
+    if duration_line.starts_with(QUOTE_ITALIC_OPEN) {
+        2
+    } else {
+        1
+    }
 }
 
 /// 剥离历史 assistant 文本里的 dim 样式标记，避免模型把它们当作自己的输出格式模仿。
@@ -198,7 +306,7 @@ pub(crate) fn strip_dim_markers(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains('\x1b') && !text.contains(LIT_ON) {
         return std::borrow::Cow::Borrowed(text);
     }
-    let no_esc = text.replace(DIM_ON, "").replace(DIM_OFF, "");
+    let no_esc = remove_ansi_style(text);
 
     // 逐行拆分，记录哪些行位于 fenced 代码块之外且为整行字面包裹
     let lines: Vec<&str> = no_esc.split_inclusive('\n').collect();
@@ -256,8 +364,14 @@ const MIN_IMITATED_WRAPPED_LINES: usize = 2;
 /// 否则必须到行尾才认定。token 后缀可选，兼容 v3.4.12 及更早的无后缀格式。
 fn find_duration_span(line: &str) -> Option<usize> {
     let mut j = 0;
-    if line.starts_with(DIM_ON) {
+    // Plain 样式的时长行被引用 + 斜体包裹（`> *💭 Thought for …*`）
+    let quoted = line.starts_with(QUOTE_ITALIC_OPEN);
+    if quoted {
+        j += QUOTE_ITALIC_OPEN.len();
+    } else if line.starts_with(DIM_ON) {
         j += DIM_ON.len();
+    } else if line.starts_with(LEGACY_DIM_ON) {
+        j += LEGACY_DIM_ON.len();
     }
     if !line[j..].starts_with(THOUGHT_DURATION_PREFIX) {
         return None;
@@ -284,6 +398,13 @@ fn find_duration_span(line: &str) -> Option<usize> {
         if count_len > 0 && after[count_len..].starts_with(THOUGHT_TOKEN_SUFFIX_CLOSE) {
             end += THOUGHT_TOKEN_SUFFIX_OPEN.len() + count_len + THOUGHT_TOKEN_SUFFIX_CLOSE.len();
         }
+    }
+    if quoted {
+        // Plain 的答案另起一段，时长行后必为行尾；锚定到行尾避免误剥正文里的相似句子
+        if line[end..].starts_with(QUOTE_ITALIC_CLOSE) {
+            end += QUOTE_ITALIC_CLOSE.len();
+        }
+        return (end == line.len()).then_some(end);
     }
     let has_dim_off = line[end..].starts_with(DIM_OFF);
     if has_dim_off {
@@ -333,6 +454,8 @@ pub struct ThinkingTextRewriter {
     at_line_start: HashMap<i32, bool>,
     /// 各思考块的起始时刻（用于收尾计算 Thought for Ns）
     started_at: HashMap<i32, std::time::Instant>,
+    /// Plain 样式：各块行内待定的空白（仅当后面还有非空白字符才输出，避免 `*foo *` 无法闭合斜体）
+    pending_ws: HashMap<i32, String>,
     /// 各思考块累计的思考正文原文（用于收尾统计 token 数；不含标记行与 ANSI 转义）
     thinking_text: HashMap<i32, String>,
 }
@@ -350,26 +473,26 @@ impl ThinkingTextRewriter {
         }
     }
 
-    /// 样式起始 / 复位转义；Plain 样式下均为空串
+    /// 样式起始 / 复位：Ansi 为 dim + italic 转义，Plain 为引用块 + 斜体的 Markdown 标记
     fn dim_on(&self) -> &'static str {
         match self.style {
             ThinkingTextStyle::Ansi => DIM_ON,
-            ThinkingTextStyle::Plain => "",
+            ThinkingTextStyle::Plain => QUOTE_ITALIC_OPEN,
         }
     }
 
     fn dim_off(&self) -> &'static str {
         match self.style {
             ThinkingTextStyle::Ansi => DIM_OFF,
-            ThinkingTextStyle::Plain => "",
+            ThinkingTextStyle::Plain => QUOTE_ITALIC_CLOSE,
         }
     }
 
-    /// 标记行结尾：Plain 样式（Markdown 渲染）下空一行，使标记行与正文分成两段
+    /// 标记行结尾：Plain 样式下补一个空引用行（`>`），使标记行与正文分成两段且仍在同一引用块内
     fn header_terminator(&self) -> &'static str {
         match self.style {
             ThinkingTextStyle::Ansi => "\n",
-            ThinkingTextStyle::Plain => "\n\n",
+            ThinkingTextStyle::Plain => "\n>\n",
         }
     }
 
@@ -382,8 +505,18 @@ impl ThinkingTextRewriter {
         }
     }
 
-    /// 时长行前的分隔：Plain 样式下空一行，避免时长行并入思考正文最后一段
-    fn duration_leader(&self) -> &'static str {
+    /// 时长行前的分隔。Plain 样式下用空引用行（`>`）分段而不能用空行（空行会结束引用块）；
+    /// 正文停在行中间时需先换行，已在行首（上一行已带换行）则不再多换一行。
+    fn duration_leader(&self, mid_line: bool) -> &'static str {
+        match (self.style, mid_line) {
+            (ThinkingTextStyle::Ansi, _) => "\n",
+            (ThinkingTextStyle::Plain, true) => "\n>\n",
+            (ThinkingTextStyle::Plain, false) => ">\n",
+        }
+    }
+
+    /// 时长行结尾：Plain 样式下空一行结束引用块，否则随后的答案会被并入引用块（lazy continuation）
+    fn duration_trailer(&self) -> &'static str {
         match self.style {
             ThinkingTextStyle::Ansi => "\n",
             ThinkingTextStyle::Plain => "\n\n",
@@ -444,8 +577,42 @@ impl ThinkingTextRewriter {
                     }
                     let (dim_on, dim_off, line_break) =
                         (self.dim_on(), self.dim_off(), self.body_line_break());
+                    let plain_style = self.style == ThinkingTextStyle::Plain;
                     let at_start = self.at_line_start.entry(i).or_insert(true);
+                    let pending_ws = self.pending_ws.entry(i).or_default();
                     for ch in text.chars() {
+                        if plain_style {
+                            // Plain：`> *内容*`。行首空白会让 `> * x` 变成列表项、行尾空白会让
+                            // 结束的 `*` 无法闭合斜体，故丢弃行首空白、延迟行内空白到下一个
+                            // 非空白字符前才输出；空行只输出空引用行 `>`（空斜体 `**` 会原样显示）
+                            if ch == '\n' {
+                                pending_ws.clear();
+                                if *at_start {
+                                    rendered.push_str(">\n");
+                                } else {
+                                    rendered.push_str(dim_off);
+                                    rendered.push_str(line_break);
+                                    *at_start = true;
+                                }
+                            } else if ch.is_whitespace() {
+                                if !*at_start {
+                                    pending_ws.push(ch);
+                                }
+                            } else {
+                                if *at_start {
+                                    rendered.push_str(dim_on);
+                                    *at_start = false;
+                                }
+                                rendered.push_str(pending_ws);
+                                pending_ws.clear();
+                                // 转义 Markdown 强调符与转义符，避免思考文本里的 `*` 提前闭合斜体
+                                if matches!(ch, '*' | '\\') {
+                                    rendered.push('\\');
+                                }
+                                rendered.push(ch);
+                            }
+                            continue;
+                        }
                         if *at_start {
                             rendered.push_str(dim_on);
                             *at_start = false;
@@ -473,16 +640,17 @@ impl ThinkingTextRewriter {
                     let had_output = self.header_sent.remove(&i);
                     // 无论是否追加时长行都要取出并清理累计正文，避免空块残留占用内存
                     let thinking_text = self.thinking_text.remove(&i).unwrap_or_default();
-                    // 块在行中间结束时补一个复位，避免 dim 样式泄漏到后续正文
-                    if self.at_line_start.remove(&i) == Some(false)
-                        && self.style == ThinkingTextStyle::Ansi
-                    {
+                    self.pending_ws.remove(&i);
+                    // 块在行中间结束时补一个复位（Ansi 的 DIM_OFF / Plain 的结束斜体 `*`），
+                    // 避免样式泄漏到后续正文
+                    let mid_line = self.at_line_start.remove(&i) == Some(false);
+                    if mid_line {
                         out.push(SseEvent::new(
                             "content_block_delta",
                             json!({
                                 "type": "content_block_delta",
                                 "index": i,
-                                "delta": {"type": "text_delta", "text": DIM_OFF}
+                                "delta": {"type": "text_delta", "text": self.dim_off()}
                             }),
                         ));
                     }
@@ -512,13 +680,14 @@ impl ThinkingTextRewriter {
                                 "type": "content_block_delta",
                                 "index": i,
                                 "delta": {"type": "text_delta", "text": format!(
-                                    "{}{}{}{}{}{}\n",
-                                    self.duration_leader(),
+                                    "{}{}{}{}{}{}{}",
+                                    self.duration_leader(mid_line),
                                     self.dim_on(),
                                     THOUGHT_DURATION_PREFIX,
                                     duration,
                                     token_suffix,
-                                    self.dim_off()
+                                    self.dim_off(),
+                                    self.duration_trailer()
                                 )}
                             }),
                         ));
@@ -557,7 +726,7 @@ mod tests {
 
     /// 去掉 dim 转义，便于断言可见文本
     fn plain(s: &str) -> String {
-        s.replace(DIM_ON, "").replace(DIM_OFF, "")
+        remove_ansi_style(s)
     }
 
     fn text_of(events: &[SseEvent]) -> String {
@@ -675,6 +844,40 @@ mod tests {
         // 普通文本（含普通引用）不受影响
         assert_eq!(strip_rendered_thinking("> quote\nx"), "> quote\nx");
         assert_eq!(strip_rendered_thinking("plain"), "plain");
+    }
+
+    #[test]
+    fn ansi_style_is_dim_italic_and_legacy_dim_only_is_still_stripped() {
+        // 生成侧：dim + italic（SGR 2;3）
+        assert_eq!(DIM_ON, "\x1b[2;3m");
+
+        // 剥离侧：新格式与旧版本只变暗的格式（可能还留在客户端历史里）都要整块识别
+        let render = |on: &str| {
+            format!(
+                "{on}{THOUGHT_HEADER}{DIM_OFF}\n{on}思考一{DIM_OFF}\n{on}思考二{DIM_OFF}\n\n\
+                 {on}{THOUGHT_DURATION_PREFIX}2s (5 tokens){DIM_OFF}\n答案"
+            )
+        };
+        let new_fmt = render(DIM_ON);
+        let old_fmt = render(LEGACY_DIM_ON);
+        assert_eq!(strip_rendered_thinking(&new_fmt), "答案");
+        assert_eq!(strip_rendered_thinking(&old_fmt), "答案");
+
+        // 降级路径（流被中断、缺少时长行）：只剥标记行，两种格式都要认出标记行
+        for on in [DIM_ON, LEGACY_DIM_ON] {
+            let interrupted = format!("{on}{THOUGHT_HEADER}{DIM_OFF}\n{on}思考{DIM_OFF}\n");
+            assert_eq!(
+                strip_rendered_thinking(&interrupted),
+                format!("{on}思考{DIM_OFF}\n"),
+                "{on:?}"
+            );
+        }
+
+        // 残留转义清理：新旧起始转义与复位都要去掉
+        assert_eq!(
+            strip_dim_markers("\x1b[2;3m推理一\x1b[0m\n\x1b[2m推理二\x1b[0m\n答案"),
+            "推理一\n推理二\n答案"
+        );
     }
 
     #[test]
@@ -903,13 +1106,18 @@ mod tests {
     }
 
     #[test]
-    fn style_is_none_for_unknown_entrypoints() {
-        // 渲染能力未知的入口：回退原生 thinking
+    fn style_is_plain_for_every_non_cli_claude_code_entrypoint() {
+        // 只有 cli 确认是终端渲染；其余入口用 Plain：既不回退原生 thinking
+        // （issue #48 后续反馈：local-agent 因此看不到思考过程），也不显示 ANSI 乱码
+        // （issue #54：Claude Desktop Cowork 模式入口为 local-agent，不解析 ANSI）
         for ua in [
+            "claude-cli/2.1.295 (external, local-agent, agent-sdk/0.3.295)",
             "claude-cli/2.1.295 (external, claude-vscode, agent-sdk/0.3.295)",
             "claude-cli/2.1.295 (external, sdk-ts)",
+            "claude-cli/2.1.295 (external, sdk-cli)",
+            "claude-cli/2.1.295 (external, some-future-entrypoint)",
         ] {
-            assert_eq!(style_of(ua), None, "{ua}");
+            assert_eq!(style_of(ua), Some(ThinkingTextStyle::Plain), "{ua}");
         }
     }
 
@@ -932,25 +1140,37 @@ mod tests {
         assert_eq!(style_of("codex/1.0 (external, cli)"), None);
     }
 
-    #[test]
-    fn plain_style_has_no_escapes_and_roundtrips_through_history_strip() {
+    /// 用 Plain 样式渲染一个完整思考块（按给定分片流入），返回客户端看到的文本
+    fn render_plain(chunks: &[&str]) -> String {
         let mut r = ThinkingTextRewriter::with_style(ThinkingTextStyle::Plain);
         let mut out = r.rewrite(vec![start(0, "thinking")]);
-        out.extend(r.rewrite(vec![
-            delta(0, "thinking_delta", "thinking", "第一行\n第二"),
-            delta(0, "thinking_delta", "thinking", "行\n\n第三段"),
-            stop(0),
-        ]));
-        let rendered = text_of(&out);
+        let mut events: Vec<SseEvent> = chunks
+            .iter()
+            .map(|c| delta(0, "thinking_delta", "thinking", c))
+            .collect();
+        events.push(stop(0));
+        out.extend(r.rewrite(events));
+        text_of(&out)
+    }
 
-        // 无任何转义字符
+    #[test]
+    fn plain_style_renders_quote_italic_and_roundtrips_through_history_strip() {
+        let rendered = render_plain(&["第一行\n第二", "行\n\n第三段"]);
+
+        // 无任何 ANSI 转义
         assert!(!rendered.contains('\x1b'), "{rendered:?}");
-        // 标记行与正文分段；正文换行使用 Markdown 硬换行；时长行独立成段
-        assert!(rendered.starts_with(&format!(
-            "{THOUGHT_HEADER}\n\n第一行  \n第二行  \n  \n第三段"
-        )));
-        assert!(rendered.contains(&format!("\n\n{THOUGHT_DURATION_PREFIX}")));
-        assert!(rendered.ends_with(" tokens)\n"));
+        // 标记行、正文、时长行都在同一个引用块内（块内用 `>` 空行分段，不能有真空行）；
+        // 每行斜体；正文换行使用 Markdown 硬换行
+        assert!(
+            rendered.starts_with(&format!(
+                "> *{THOUGHT_HEADER}*\n>\n> *第一行*  \n> *第二行*  \n>\n> *第三段*\n>\n> *{THOUGHT_DURATION_PREFIX}"
+            )),
+            "{rendered:?}"
+        );
+        let body = rendered.trim_end_matches('\n');
+        assert!(!body.contains("\n\n"), "引用块内不得出现空行: {rendered:?}");
+        // 时长行以空行收尾，结束引用块，使随后的答案不被并入引用
+        assert!(rendered.ends_with("tokens)*\n\n"), "{rendered:?}");
 
         // 客户端把思考块与随后的答案拼成一个 assistant 文本回传：整块思考被剥离，只剩答案
         let history_text = format!("{rendered}最终答案");
@@ -958,8 +1178,47 @@ mod tests {
     }
 
     #[test]
-    fn plain_style_emits_no_extra_reset_delta_for_unterminated_line() {
-        // Ansi 样式下块在行中间结束需补一个复位；Plain 没有转义，不应多出空/无意义的 delta
+    fn plain_style_trims_and_escapes_markdown_hazards() {
+        // 行首空白（会让 `> * x` 变列表）、行尾空白（会让结束 `*` 无法闭合）、
+        // 跨分片的行内空白、`*` 与 `\`（会提前闭合斜体 / 吞掉后续字符）
+        let rendered = render_plain(&["  缩进行  \n", "a ", "* b", " \\c  \n   \n- 列表\n"]);
+        assert!(
+            rendered.contains("> *缩进行*  \n"),
+            "行首 / 行尾空白应被去掉: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("> *a \\* b \\\\c*  \n"),
+            "行内空白保留，`*` 与 `\\` 应转义: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("*  \n>\n> *- 列表*  \n"),
+            "纯空白行应变为空引用行，列表符号应被斜体包裹而非成为列表: {rendered:?}"
+        );
+        assert!(!rendered.contains("**"), "不得出现空斜体: {rendered:?}");
+        let history_text = format!("{rendered}答案");
+        assert_eq!(strip_rendered_thinking(&history_text), "答案");
+    }
+
+    #[test]
+    fn plain_style_closes_italic_when_block_ends_mid_line() {
+        // 块在行中间结束：补结束 `*`，时长行前先换行 + 空引用行；行首结束则不多换行
+        let mid = render_plain(&["没有换行结尾"]);
+        assert!(
+            mid.starts_with("> *💭 Thinking*\n>\n> *没有换行结尾*\n>\n> *💭 Thought for "),
+            "{mid:?}"
+        );
+        let at_line_start = render_plain(&["有换行结尾\n"]);
+        assert!(
+            at_line_start.contains("> *有换行结尾*  \n>\n> *💭 Thought for "),
+            "{at_line_start:?}"
+        );
+        for text in [mid, at_line_start] {
+            assert_eq!(strip_rendered_thinking(&format!("{text}答案")), "答案");
+        }
+    }
+
+    #[test]
+    fn plain_style_emits_no_empty_deltas() {
         let mut r = ThinkingTextRewriter::with_style(ThinkingTextStyle::Plain);
         let mut out = r.rewrite(vec![start(0, "thinking")]);
         out.extend(r.rewrite(vec![
@@ -971,5 +1230,71 @@ mod tests {
             .filter_map(|e| e.data["delta"]["text"].as_str())
             .collect();
         assert!(deltas.iter().all(|t| !t.is_empty() && !t.contains('\x1b')));
+    }
+
+    #[test]
+    fn strip_still_handles_legacy_unquoted_plain_format() {
+        // v3.4.24–v3.4.36 的 Plain 输出（无引用 / 斜体包裹，答案紧随一个换行）仍需整块剥离，
+        // 客户端历史里可能还有这种格式
+        let legacy = "💭 Thinking\n\n第一行  \n第二行  \n\n💭 Thought for 3s (41 tokens)\n最终答案";
+        assert_eq!(strip_rendered_thinking(legacy), "最终答案");
+    }
+
+    #[test]
+    fn strip_does_not_match_quoted_body_line_that_merely_resembles_duration() {
+        // 引用格式的时长行必须锚定行尾：正文里「> *💭 Thought for 5s 的结论…*」不应被当作边界
+        let text = "> *💭 Thinking*\n>\n> *💭 Thought for 5s 的结论是错的*  \n>\n> *💭 Thought for 7s (9 tokens)*\n\n答案";
+        assert_eq!(strip_rendered_thinking(text), "答案");
+    }
+
+    #[test]
+    fn interrupted_plain_block_is_unwrapped_when_stripped() {
+        // 流被中断（无时长行）：只能剥标记行，但正文的 `> *…*` 包裹要拆掉，
+        // 免得模型把「每行引用 + 斜体」当作自己的输出格式模仿
+        let mut r = ThinkingTextRewriter::with_style(ThinkingTextStyle::Plain);
+        let mut out = r.rewrite(vec![start(0, "thinking")]);
+        out.extend(r.rewrite(vec![delta(
+            0,
+            "thinking_delta",
+            "thinking",
+            "第一行\n含*星\\号\n\n以星号结尾\\*\n未完",
+        )]));
+        let rendered = text_of(&out);
+        assert!(rendered.contains("> *第一行*  \n"), "{rendered:?}");
+        assert_eq!(
+            strip_rendered_thinking(&rendered),
+            "\n第一行\n含*星\\号\n\n以星号结尾\\*\n未完"
+        );
+    }
+
+    #[test]
+    fn unwrap_leaves_non_matching_lines_untouched() {
+        // 只在已确认首行是思考标记行时才进入降级拆包；不符合形态的行原样保留
+        let text = "> *💭 Thinking*\n普通行\n> 普通引用\n";
+        assert_eq!(strip_rendered_thinking(text), "普通行\n> 普通引用\n");
+        // 首行不是标记行：整段原样返回
+        let plain_text = "> *a*\n> *b*\n";
+        assert_eq!(strip_rendered_thinking(plain_text), plain_text);
+    }
+
+    #[test]
+    fn strip_removes_only_the_newlines_the_renderer_added() {
+        // Plain 补两个、ANSI 补一个；答案自己的前导空行必须保留
+        let plain = "> *💭 Thinking*\n>\n> *思考*\n>\n> *💭 Thought for 2s (5 tokens)*\n\n\n答案";
+        assert_eq!(strip_rendered_thinking(plain), "\n答案");
+        let ansi = format!(
+            "{DIM_ON}{THOUGHT_HEADER}{DIM_OFF}\n{DIM_ON}思考{DIM_OFF}\n\n{DIM_ON}{THOUGHT_DURATION_PREFIX}2s (5 tokens){DIM_OFF}\n\n答案"
+        );
+        assert_eq!(strip_rendered_thinking(&ansi), "\n答案");
+    }
+
+    #[test]
+    fn unwrap_stops_at_end_of_leading_quote_run() {
+        // 降级时只拆开头那段思考引用块；其后文本里自带的 `> *斜体*` 引用保持原样
+        let text = "> *💭 Thinking*\n>\n> *思考*  \n\n答案如下\n> *用户引用*\n";
+        assert_eq!(
+            strip_rendered_thinking(text),
+            "\n思考\n\n答案如下\n> *用户引用*\n"
+        );
     }
 }

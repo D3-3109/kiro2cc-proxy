@@ -4,9 +4,12 @@
 
 use serde_json::{Value, json};
 
-use super::tools::{ToolCollector, ToolInputForm, base64_decode_compaction};
+use super::tools::{
+    DEFAULT_TOOL_NAMESPACE, ToolCollector, ToolInputForm, base64_decode_compaction,
+    flatten_tool_name,
+};
 use crate::openai::chat_request::{
-    MessageAccumulator, convert_image_url, flatten_text, parse_tool_arguments,
+    MessageAccumulator, convert_image_url, flatten_text, parse_tool_arguments, part_text,
 };
 
 /// 遍历 `input` 数组，把各类 item 分派到 system 块、消息累加器或工具收集器
@@ -165,6 +168,20 @@ fn tool_use_block(item: &Value, form: ToolInputForm) -> Option<Value> {
             tracing::warn!("工具调用 item 缺少 name，已跳过");
             None
         })?;
+    // 带 namespace 的调用（Codex 的 MCP / 子代理工具）：name 只是叶子名。声明侧把这类工具
+    // 展开成了扁平名，历史里回放的调用必须用同一规则算出同样的名字，否则与声明对不上
+    let flat_name;
+    let name = match item
+        .get("namespace")
+        .and_then(Value::as_str)
+        .filter(|ns| !ns.is_empty() && *ns != DEFAULT_TOOL_NAMESPACE)
+    {
+        Some(ns) => {
+            flat_name = flatten_tool_name(ns, name);
+            flat_name.as_str()
+        }
+        None => name,
+    };
 
     let input = match form {
         ToolInputForm::Json => parse_tool_arguments(item.get("arguments"), name),
@@ -190,8 +207,49 @@ fn tool_result_block(item: &Value) -> Option<Value> {
     Some(json!({
         "type": "tool_result",
         "tool_use_id": id,
-        "content": flatten_text(item.get("output")),
+        "content": tool_output_content(item.get("output")),
     }))
+}
+
+/// 工具输出 → `tool_result.content`
+///
+/// 输出数组里带图片 part（Codex `view_image`、截图类工具）时，保留为 Anthropic
+/// content 块数组，让图片随后进入 Kiro 的 `images`；否则仍压平成纯文本，与既有行为一致。
+fn tool_output_content(output: Option<&Value>) -> Value {
+    let Some(Value::Array(parts)) = output else {
+        return Value::String(flatten_text(output));
+    };
+    if !parts.iter().any(is_image_part) {
+        return Value::String(flatten_text(output));
+    }
+    let blocks = parts
+        .iter()
+        .filter_map(|part| {
+            if is_image_part(part) {
+                // 转换失败（缺 image_url / 空串）时留占位，不静默丢弃：否则只含此类 part 的
+                // 输出会变成空 content 数组，与 Anthropic 层对未转发图片的占位策略也不一致
+                convert_content_part(part).or_else(|| {
+                    tracing::warn!("工具输出图片转换失败，降级为文本占位");
+                    Some(json!({
+                        "type": "text",
+                        "text": "[image omitted: missing or empty image_url]"
+                    }))
+                })
+            } else {
+                part_text(part)
+                    .filter(|text| !text.is_empty())
+                    .map(|text| json!({"type": "text", "text": text}))
+            }
+        })
+        .collect::<Vec<_>>();
+    Value::Array(blocks)
+}
+
+fn is_image_part(part: &Value) -> bool {
+    matches!(
+        part.get("type").and_then(Value::as_str),
+        Some("input_image" | "image_url")
+    )
 }
 
 /// 取工具调用的配对 id：`call_id` 是协议字段，`id` 是部分客户端的写法

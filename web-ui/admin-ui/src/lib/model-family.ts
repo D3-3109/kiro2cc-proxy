@@ -29,6 +29,27 @@ export function modelFamily(model: ModelItem): string {
   return model.owned_by !== '' && model.owned_by !== 'unknown' ? model.owned_by.toUpperCase() : FAMILY_OTHER
 }
 
+/**
+ * 品牌口径家族：Claude 全世代合为一族，供统计卡片计数。
+ * 与 modelFamily 的代际口径互补 —— 表格/弹窗分组仍按世代拆分以展示各代倍率区间。
+ */
+export function familyBrand(model: ModelItem): string {
+  const id = model.id.toLowerCase()
+  if (id === AUTO_MODEL_ID) return FAMILY_AUTO
+  if (MODERN_CLAUDE.test(id) || LEGACY_CLAUDE.test(id) || id.startsWith('claude')) return 'Claude'
+  return model.owned_by !== '' && model.owned_by !== 'unknown' ? model.owned_by.toUpperCase() : FAMILY_OTHER
+}
+
+/** 按任意家族口径函数分组；组序与组内序均沿用后端返回顺序（Map 保插入序） */
+export function groupByFamilyWith(models: ModelItem[], family: (m: ModelItem) => string): FamilyGroup[] {
+  const byName = new Map<string, ModelItem[]>()
+  for (const model of models) {
+    const name = family(model)
+    byName.set(name, [...(byName.get(name) ?? []), model])
+  }
+  return [...byName].map(([name, items]) => ({ name, models: items }))
+}
+
 export interface FamilyGroup {
   name: string
   models: ModelItem[]

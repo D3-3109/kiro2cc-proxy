@@ -12,6 +12,18 @@ use super::result::ConversionError;
 pub(super) fn process_message_content(
     content: &serde_json::Value,
 ) -> Result<(String, Vec<KiroImage>, Vec<ToolResult>), ConversionError> {
+    process_message_content_with_tool_filter(content, 0, |_| true)
+}
+
+/// 过滤工具结果时，连同其内嵌图片一起过滤，保留顶层图片的原始顺序。
+///
+/// `image_offset` 是同一条 Kiro 消息里排在本内容之前的图片数（合并多条 user 消息时非 0），
+/// 用于让工具图片的序号等于它在最终 `images` 里的位置。
+pub(super) fn process_message_content_with_tool_filter(
+    content: &serde_json::Value,
+    image_offset: usize,
+    mut keep_tool_result: impl FnMut(&str) -> bool,
+) -> Result<(String, Vec<KiroImage>, Vec<ToolResult>), ConversionError> {
     let mut text_parts = Vec::new();
     let mut images = Vec::new();
     let mut tool_results = Vec::new();
@@ -59,27 +71,15 @@ pub(super) fn process_message_content(
                             }
                         }
                         "tool_result" => {
-                            if let Some(tool_use_id) = block.tool_use_id {
-                                let (mut result_content, result_images) =
-                                    extract_tool_result_parts(&block.content);
-                                // Kiro 的 ToolResult 只接受文本 content，图片块无法内嵌。
-                                // 图片挂到所在 user 消息的 images 上（与 user 消息图片
-                                // 同一通路，Kiro 仅在该字段接受图片），并在工具结果文本
-                                // 末尾留占位，让模型知道图片与该工具结果的对应关系
-                                if !result_images.is_empty() {
-                                    let marker = if result_images.len() == 1 {
-                                        "[image attached]".to_string()
-                                    } else {
-                                        format!("[{} images attached]", result_images.len())
-                                    };
-                                    if result_content.trim().is_empty() {
-                                        result_content = marker;
-                                    } else {
-                                        result_content.push('\n');
-                                        result_content.push_str(&marker);
-                                    }
-                                    images.extend(result_images);
-                                }
+                            if let Some(tool_use_id) = block.tool_use_id
+                                && keep_tool_result(&tool_use_id)
+                            {
+                                let result_content = extract_tool_result_content(
+                                    &block.content,
+                                    &tool_use_id,
+                                    image_offset,
+                                    &mut images,
+                                );
                                 let is_error = block.is_error.unwrap_or(false);
 
                                 let mut result = if is_error {
@@ -122,36 +122,70 @@ pub(super) fn get_image_format(media_type: &str) -> Option<String> {
     }
 }
 
-/// 提取工具结果内容：文本部分拼接为字符串，图片块单独收集
+/// 提取工具结果文字，同时保留 Claude Code Read 返回的内嵌图片。
+/// 工具结果文字仍放在 toolResults；图片放入同条 user 消息的 images 字段，
+/// 并在原工具结果位置留下带序号和 tool_use_id 的说明（`[Image n attached ...]`）。
 ///
-/// Kiro 的 ToolResult.content 只接受 `{text}` 形态，不支持内嵌图片；
-/// 图片由调用方挂到所在 user 消息的 images 上转发（同 user 消息图片通路）。
-/// 与顶层 image 块同一口径：仅支持 base64 + jpeg/png/gif/webp，其余静默忽略。
-fn extract_tool_result_parts(content: &Option<serde_json::Value>) -> (String, Vec<KiroImage>) {
+/// 序号 n 是该图片在整条 user 消息 `images` 里的位置（从 1 开始，含顶层图片和
+/// 其他工具结果的图片）。Kiro 的 images 是不带标签的平铺列表，模型只能按顺序数图；
+/// 若每个工具结果各自从 1 编号（如 1/1、1/1、1/1），并行读多张图时模型无法把图对应到
+/// 工具结果。无法转发的图片留下 `[Image omitted ...]` 占位，避免模型把图片丢失
+/// 误认为工具返回了空内容。
+fn extract_tool_result_content(
+    content: &Option<serde_json::Value>,
+    tool_use_id: &str,
+    image_offset: usize,
+    images: &mut Vec<KiroImage>,
+) -> String {
     match content {
+        Some(serde_json::Value::String(s)) => s.clone(),
         Some(serde_json::Value::Array(arr)) => {
             let mut parts = Vec::new();
-            let mut images = Vec::new();
             for item in arr {
-                if let Ok(block) = serde_json::from_value::<ContentBlock>(item.clone()) {
-                    if block.block_type == "image"
-                        && let Some(source) = block.source
-                        && let Some(format) = get_image_format(&source.media_type)
-                    {
-                        images.push(KiroImage::from_base64(format, source.data));
-                        continue;
-                    }
-                    if let Some(text) = block.text {
-                        parts.push(text);
+                if item.get("type").and_then(|v| v.as_str()) == Some("image") {
+                    match parse_tool_result_image(item) {
+                        Some((format, data)) => {
+                            images.push(KiroImage::from_base64(format, data));
+                            let n = image_offset + images.len();
+                            parts.push(format!(
+                                "[Image {n} attached from tool_result {tool_use_id}]"
+                            ));
+                        }
+                        None => parts.push(format!(
+                            "[Image omitted from tool_result {tool_use_id}: unsupported or invalid image]"
+                        )),
                     }
                 } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
                     parts.push(text.to_string());
                 }
             }
-            (parts.join("\n"), images)
+            parts.join("\n")
         }
-        Some(serde_json::Value::String(s)) => (s.clone(), Vec::new()),
-        Some(v) => (v.to_string(), Vec::new()),
-        None => (String::new(), Vec::new()),
+        Some(v) => v.to_string(),
+        None => String::new(),
+    }
+}
+
+/// 解析工具结果里的一张图片，返回 `(format, base64 data)`。
+/// 需要受支持格式的非空 base64 图片；其余情况返回 `None`。
+fn parse_tool_result_image(item: &serde_json::Value) -> Option<(String, String)> {
+    match serde_json::from_value::<ContentBlock>(item.clone()) {
+        Ok(block) => {
+            if let Some(source) = block.source
+                && source.source_type == "base64"
+                && !source.data.is_empty()
+                && let Some(format) = get_image_format(&source.media_type)
+            {
+                Some((format, source.data))
+            } else {
+                tracing::warn!("工具结果图片未转发：需要受支持格式的非空 base64 图片");
+                None
+            }
+        }
+        Err(_) => {
+            // serde 错误可能包含原始载荷，避免把图片数据写入日志。
+            tracing::warn!("工具结果图片格式无效，未转发");
+            None
+        }
     }
 }

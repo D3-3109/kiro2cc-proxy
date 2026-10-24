@@ -17,6 +17,12 @@ export interface CredentialStatusItem {
   expiresAt: string | null
   authMethod: string | null
   hasProfileArn: boolean
+  /** OIDC Client ID（IdC / external_idp；非机密，编辑弹窗只读展示） */
+  clientId?: string
+  /** Profile ARN（非机密，编辑弹窗只读展示） */
+  profileArn?: string
+  /** 账号级 Machine ID（非机密，编辑弹窗只读展示） */
+  machineId?: string
   email?: string
   nickname?: string
   /** 登录来源 / IdP 标识（social 账号为 Google / GitHub；external_idp 为 AzureAD 等） */
@@ -275,13 +281,39 @@ export interface DailySummary {
   totalCredits: number
   totalCreditsSaved?: number
   totalInputTokens: number      // 累计输入 tokens（含 cache 命中部分）
+  totalOutputTokens: number
   totalCacheReadTokens: number  // 累计 cache 命中的输入 tokens
+}
+
+// 单账号全部留存记录的用量汇总（后端 /credentials/:id/usage/summary，不限日期）
+export interface CredentialUsageSummary {
+  credentialId: number
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number
+  totalCredits: number
+  totalCreditsSaved?: number
+  totalCacheReadTokens: number
 }
 
 // 单账号在某 CST 日期的用量汇总（后端 /credentials/:id/usage/today）
 export interface CredentialDaySummary {
   date: string           // "2026-06-26" CST (UTC+8)
   credentialId: number
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number
+  totalCredits: number
+  totalCreditsSaved?: number
+}
+
+// 单账号在 CST 最近 N 天（含今日）的用量汇总（后端 /credentials/:id/usage/7days、/30days）
+export interface CredentialRangeSummary {
+  credentialId: number
+  fromDate: string       // "2026-10-16" CST，区间起始日（含）
+  toDate: string         // 区间结束日（含），恒为今日
   totalRequests: number
   totalInputTokens: number
   totalOutputTokens: number

@@ -93,7 +93,7 @@ cd kiro2cc-proxy
 
 ### (Optional) Install Shell Aliases
 
-Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any terminal — no need to navigate to the project directory each time:
+Run the one-click installer to make `build_kiro2cc_proxy`, `build_and_run_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any terminal — no need to navigate to the project directory each time:
 
 ```bash
 bash setup_shell_aliases.sh
@@ -103,8 +103,9 @@ source ~/.zshrc   # zsh users; bash users run: source ~/.bashrc
 After installation:
 
 ```bash
-build_kiro2cc_proxy   # equivalent to ./build-mac.sh
-run_kiro2cc_proxy     # equivalent to ./run-local-service-mac.sh
+build_kiro2cc_proxy         # equivalent to ./build-mac.sh
+build_and_run_kiro2cc_proxy # equivalent to ./build-and-run-mac.sh (build, then run)
+run_kiro2cc_proxy           # equivalent to ./run-local-service-mac.sh
 ```
 
 > macOS only. Modifies `~/.zshrc` and `~/.bashrc` (if they exist). Safe to run multiple times (idempotent).
@@ -197,7 +198,7 @@ cd kiro2cc-proxy
 
 ### (Optional) Install PowerShell Aliases
 
-Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any PowerShell window — no need to navigate to the project directory each time:
+Run the one-click installer to make `build_kiro2cc_proxy`, `build_and_run_kiro2cc_proxy` and `run_kiro2cc_proxy` available from any PowerShell window — no need to navigate to the project directory each time:
 
 ```powershell
 .\setup_shell_aliases.ps1
@@ -207,8 +208,9 @@ Run the one-click installer to make `build_kiro2cc_proxy` and `run_kiro2cc_proxy
 After installation:
 
 ```powershell
-build_kiro2cc_proxy   # equivalent to .\build-windows.ps1
-run_kiro2cc_proxy     # equivalent to .\run-local-service-windows.ps1
+build_kiro2cc_proxy         # equivalent to .\build-windows.ps1
+build_and_run_kiro2cc_proxy # equivalent to .\build-and-run-windows.ps1 (build, then run)
+run_kiro2cc_proxy           # equivalent to .\run-local-service-windows.ps1
 ```
 
 > Updates both Windows PowerShell 5.x and PowerShell 7+ profiles. Safe to run multiple times (idempotent).
@@ -385,7 +387,7 @@ Using an overseas server is recommended — no proxy needed.
 
 **Step 1: Export account JSON from Kiro Account Manager**
 
-1. Install Kiro IDE or Kiro Account Manager
+1. Install Kiro IDE or [Kiro Account Manager (KAM)](https://github.com/chaogei/Kiro-account-manager/releases) — download from the [KAM Releases page](https://github.com/chaogei/Kiro-account-manager/releases)
 2. Sign in with your GitHub / Google Social account
 3. Find the "Export Account" option in the account management interface
 4. Export as a JSON file (or copy the JSON content)
@@ -485,8 +487,13 @@ Lower `priority` value = higher priority. Up to 3 retries per account, 9 per req
 | `maxRpmPerCredential` | No | `0` | Maximum requests per minute for each account; `0` means unlimited. Saving from the settings page applies it immediately and persists it to `config.json` |
 | `forwardSuggestionMode` | No | `false` | Suggestion Mode input-prediction switch. With the default `false`, the proxy intercepts Claude Code's automatic full-context prediction request after each turn and returns an empty response without Token usage. `true` forwards it upstream to show input suggestions, but each turn incurs one additional full-context billed request. Override with `FORWARD_SUGGESTION_MODE` |
 | `clientTokenPassthrough` | No | `false` | Client token passthrough: `true` reports returned `usage` fields 1:1 with real values; the default `false` displays values scaled by `0.6657`. It supports third-party clients that calculate context usage from returned usage values. Claude Code's auto-compact trigger timing remains unchanged in either mode. Override with `CLIENT_TOKEN_PASSTHROUGH` |
+| `promptCacheAccounting` | No | `false` | Simulate prompt-cache accounting with Anthropic `cache_control` breakpoint rules. With `true`, `cache_read` / `cache_creation` (including the 5m/1h split) are derived from the request's breakpoints, the 20-block lookback window and TTLs, replacing the prefix estimate that counts everything before the last message as cache reads with zero writes. Requests without `cache_control` count as plain input (OpenAI-compatible endpoints use automatic prefix caching). The cache is isolated per API key (similar to Anthropic's workspace-level isolation) and keyed by the mapped Kiro model ID; the table is persisted to `prompt_cache.json` in the config directory and restored on restart. **This is a local simulation: it only brings the downstream billing split closer to Anthropic's accounting and does not reflect Kiro's actual cache hits or real cost (credits remain the source of truth).** Intended for downstream gateways that bill by usage. Override with `PROMPT_CACHE_ACCOUNTING` |
+| `promptCacheMinTokens` | No | `0` | Global override for the minimum cacheable prefix length (tokens). With `0` (default), Anthropic's per-model values apply: 512 for Opus 5.5 / Opus 5 / Sonnet 5.5 / Haiku 5.5 and similar, 2048 for Opus 4.7, 4096 for Opus 4.6 / Opus 4.5 / Haiku 4.5, and 1024 otherwise; a value `> 0` applies to all models. Override with `PROMPT_CACHE_MIN_TOKENS` |
+| `modelsOfficialAliases` | No | `false` | With `true`, `/v1/models` appends official hyphenated aliases after upstream dotted model IDs (e.g. `claude-opus-4.6` → `claude-opus-4-6`, plus dated IDs for the 4.5 generation), for downstream gateways that build model mappings from the list. Off by default to avoid duplicate entries in Claude Code's model picker. Override with `MODELS_OFFICIAL_ALIASES` |
+| `outputTokensIncludeThinking` | No | `false` | With `true`, the `output_tokens` returned to clients include thinking (matching Anthropic's official accounting); the default `false` counts visible output only. Override with `OUTPUT_TOKENS_INCLUDE_THINKING` |
 | `writeChunkingMaxLines` | No | `300` | Line limit of the chunked-writing instruction (see the `Reset(StreamId(1), INTERNAL_ERROR, Remote)` FAQ entry): when a request carries Write / Edit / MultiEdit, the system prompt asks for no more than ~N lines per tool call. Larger saves credits but makes the ~240s upstream stream reset more likely; `0` disables the instruction. Editable in the Admin settings page and hot-applied to subsequent requests. Override with `WRITE_CHUNKING_MAX_LINES` |
-| `thinkingAsText` | No | `false` | Thinking-as-text display for Claude Code only. `true` rewrites thinking blocks into markdown quote text streamed line by line with ANSI dim (gray) styling, similar to Kiro CLI. This avoids Claude Code appearing stalled while native thinking is folded. In both modes Claude Code's own context contains the thinking content, but it is dropped entirely when history is sent upstream: with the switch off, native thinking blocks are dropped; with it on, the marker line, thinking body and duration line are dropped, so the upstream context never contains thinking (only when the stream is interrupted and the duration line is missing does it conservatively fall back to stripping just the marker line). Override with `THINKING_AS_TEXT` |
+| `thinkingAsText` | No | `true` | Thinking-as-text display for Claude Code only. `true` rewrites thinking blocks into text streamed line by line, similar to Kiro CLI: the terminal entrypoint `cli` uses ANSI dim italic (gray) styling, while other entrypoints such as Claude Desktop and `local-agent` use escape-free Markdown (a blockquote with italic lines) to approximate dimming and avoid `[2m` / `[0m` garbage. This avoids Claude Code appearing stalled while native thinking is folded. In both modes Claude Code's own context contains the thinking content, but it is dropped entirely when history is sent upstream: with the switch off, native thinking blocks are dropped; with it on, the marker line, thinking body and duration line are dropped, so the upstream context never contains thinking (only when the stream is interrupted and the duration line is missing does it conservatively fall back to stripping just the marker line). Override with `THINKING_AS_TEXT` |
+| `debugLogs` | No | `false` | DEBUG log switch: when `true`, DEBUG-level events are emitted to the console, the log file (`logFile`) and the Admin Log Viewer page in sync; hot-switchable from the Admin settings page (no restart) and persisted to config.json. Switching it off stops capturing new DEBUG entries while already captured ones are kept. Note the switch reports/saves its own state, not the effective level: when `RUST_LOG` is set its directives still take precedence (the switch only appends a global `debug` directive on top of `RUST_LOG`; target-specific directives are unaffected). Log volume grows significantly — turn it off after troubleshooting. Override with `DEBUG_LOGS` |
 
 > **TLS note**: If you encounter token refresh failures or request errors, try switching `tlsBackend` to `native-tls`.
 
@@ -504,7 +511,8 @@ Full example:
   "maxRpmPerCredential": 0,
   "forwardSuggestionMode": false,
   "clientTokenPassthrough": false,
-  "thinkingAsText": false
+  "thinkingAsText": true,
+  "debugLogs": false
 }
 ```
 
@@ -517,6 +525,7 @@ After configuring `adminPsw`, the Admin settings page manages the following opti
 | Suggestion Mode input suggestions | `forwardSuggestionMode` | Applies immediately |
 | Client token passthrough | `clientTokenPassthrough` | Applies immediately |
 | Thinking-as-text display | `thinkingAsText` | Applies immediately to subsequent requests only |
+| DEBUG logs | `debugLogs` | Applies immediately; console / log file / Log Viewer stay in sync |
 | Per-account RPM limit | `maxRpmPerCredential` | Applies immediately; `0` means unlimited |
 | Chunked-write line limit | `writeChunkingMaxLines` | Applies immediately to subsequent requests only; `0` disables the instruction |
 | Listen port | `port` | Takes effect after restart; valid range: `1–65535` |
@@ -780,6 +789,7 @@ Features:
 - Adjust account priority
 - Check account balance
 - Reset account failure state
+- **Documentation** page: client config generation (Claude Code / Codex CLI / OpenAI SDK / one-click CC Switch import), API reference and troubleshooting (examples auto-filled with the selected API key)
 
 **Admin API** (requires `x-api-key` or `Authorization: Bearer` header):
 
@@ -873,8 +883,7 @@ docker compose down && docker compose up -d
 
 ```bash
 git pull
-./build-mac.sh
-./run-local-service-mac.sh
+./build-and-run-mac.sh   # or run separately: ./build-mac.sh && ./run-local-service-mac.sh
 ```
 
 ---
@@ -902,6 +911,8 @@ kiro2cc-proxy/
 ├── Dockerfile              # Docker image build
 ├── build-mac.sh            # One-click build script (macOS)
 ├── build-windows.ps1       # One-click build script (Windows)
+├── build-and-run-mac.sh            # One-click build-and-run script (macOS)
+├── build-and-run-windows.ps1       # One-click build-and-run script (Windows)
 ├── run-local-service-mac.sh         # macOS local startup script
 ├── run-local-service-windows.ps1   # Windows local startup script
 ├── setup_shell_aliases.sh  # macOS shell alias installer
@@ -922,15 +933,19 @@ This project is based on [kiro.rs](https://github.com/hank9999/kiro.rs). Thanks 
 
 Thanks to all the contributors of this project (in no particular order):
 
-- [kosuke-zhang](https://github.com/kosuke-zhang)
-- [lqzhgood](https://github.com/lqzhgood)
+- [jayus71](https://github.com/jayus71) — [#53](https://github.com/TsinHzl/kiro2cc-proxy/pull/53)
+- [fhy12130-afk](https://github.com/fhy12130-afk) — [#50](https://github.com/TsinHzl/kiro2cc-proxy/pull/50)
+- [kosuke-zhang](https://github.com/kosuke-zhang) — [#28](https://github.com/TsinHzl/kiro2cc-proxy/pull/28)
+- [lqzhgood](https://github.com/lqzhgood) — [#37](https://github.com/TsinHzl/kiro2cc-proxy/pull/37), [#35](https://github.com/TsinHzl/kiro2cc-proxy/pull/35), [#33](https://github.com/TsinHzl/kiro2cc-proxy/pull/33)
 - [xhsngdsan](https://github.com/xhsngdsan)
-- [zbjincheng](https://github.com/zbjincheng)
+- [zbjincheng](https://github.com/zbjincheng) — [#41](https://github.com/TsinHzl/kiro2cc-proxy/pull/41)
 
 **Special thanks** — the following issues directly drove critical fixes:
 
-- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47) pinpointed the `history[0]` freeze-cache key drift that invalidated the Kiro prefix cache every turn
-- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46) pinpointed the upstream stream reset at ~247s on long generations, leading to the chunked-write constraint for large tool arguments
-- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40) reported slow responses from the proxied sonnet 5, leading to the lower default effort fallback
+- [jayus71](https://github.com/jayus71) — [#56](https://github.com/TsinHzl/kiro2cc-proxy/issues/56)
+- [aidenli](https://github.com/aidenli) — [#54](https://github.com/TsinHzl/kiro2cc-proxy/issues/54)
+- [AX10MER](https://github.com/AX10MER) — [#47](https://github.com/TsinHzl/kiro2cc-proxy/issues/47)
+- [C2Y-cyber](https://github.com/C2Y-cyber) — [#46](https://github.com/TsinHzl/kiro2cc-proxy/issues/46)
+- [XiaoZhuiWang](https://github.com/XiaoZhuiWang) — [#40](https://github.com/TsinHzl/kiro2cc-proxy/issues/40)
 
 > Thanks to everyone who has filed issues, shared feedback, and joined the discussions — you keep making this project better.

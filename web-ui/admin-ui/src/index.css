@@ -181,6 +181,11 @@
     width: 6px;
     height: 6px;
   }
+  /* Firefox 不支持 ::-webkit-scrollbar，单独声明细滚动条以统一两端视觉 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-2) transparent;
+  }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
@@ -190,6 +195,15 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: var(--ink-3);
+  }
+
+  /* 原生控件（date input 日历图标等）跟随主题明暗：未声明时浏览器按浅色
+     UA 渲染，暗黑模式下黑图标在深底上不可见 */
+  :root {
+    color-scheme: light;
+  }
+  :root.dark {
+    color-scheme: dark;
   }
 }
 

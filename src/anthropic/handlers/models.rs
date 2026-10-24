@@ -52,7 +52,12 @@ pub(crate) async fn fetch_models_dynamic(state: &AppState) -> Vec<Model> {
     let refreshed: Option<Vec<Model>> = match provider.token_manager().list_available_models().await
     {
         Ok(resp) if !resp.models.is_empty() => {
-            Some(resp.models.iter().map(available_model_to_model).collect())
+            let models: Vec<Model> = resp.models.iter().map(available_model_to_model).collect();
+            Some(if models_official_aliases_enabled() {
+                with_official_aliases(models)
+            } else {
+                models
+            })
         }
         Ok(_) => {
             tracing::warn!("上游模型列表为空，回退缓存/静态表");
@@ -65,6 +70,58 @@ pub(crate) async fn fetch_models_dynamic(state: &AppState) -> Vec<Model> {
     };
 
     resolve_after_refresh(&state.model_cache, refreshed)
+}
+
+/// `/v1/models` 官方连字符别名开关（config `modelsOfficialAliases`，默认 false）
+static MODELS_OFFICIAL_ALIASES: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 设置官方别名开关（main.rs 启动时按 config 调用）
+pub fn set_models_official_aliases(enabled: bool) {
+    MODELS_OFFICIAL_ALIASES.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn models_official_aliases_enabled() -> bool {
+    MODELS_OFFICIAL_ALIASES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 4.5 代际在 Anthropic 官方只有带日期的模型 ID（Kiro 点号 ID → 官方 ID）
+const DATED_OFFICIAL_IDS: &[(&str, &str)] = &[
+    ("claude-sonnet-4.5", "claude-sonnet-4-5-20250929"),
+    ("claude-opus-4.5", "claude-opus-4-5-20251101"),
+    ("claude-haiku-4.5", "claude-haiku-4-5-20251001"),
+];
+
+/// 为上游点号模型 ID 追加 Anthropic 官方连字符别名（紧跟在原条目之后）。
+///
+/// Kiro `ListAvailableModels` 返回 `claude-opus-4.6` / `claude-opus-5.5` 这类点号 ID，
+/// 而客户端与下游网关（如 sub2api 按 /v1/models 生成账号模型映射）使用官方
+/// `claude-opus-4-6` / `claude-opus-5-5`。只暴露点号 ID 时，按官方名请求的模型
+/// 在网关侧匹配不到本账号。`map_model` 对两种写法映射一致，别名可直接请求。
+/// 4.5 代际额外追加带日期的官方 ID；已存在的 ID 不重复追加。
+pub(crate) fn with_official_aliases(models: Vec<Model>) -> Vec<Model> {
+    let mut seen: std::collections::HashSet<String> = models.iter().map(|m| m.id.clone()).collect();
+    let mut out = Vec::with_capacity(models.len() * 2);
+    for model in models {
+        let mut aliases = Vec::new();
+        if model.id.starts_with("claude-") && model.id.contains('.') {
+            aliases.push(model.id.replace('.', "-"));
+        }
+        if let Some((_, dated)) = DATED_OFFICIAL_IDS.iter().find(|(id, _)| *id == model.id) {
+            aliases.push((*dated).to_string());
+        }
+        let aliases: Vec<Model> = aliases
+            .into_iter()
+            .filter(|id| seen.insert(id.clone()))
+            .map(|id| Model {
+                id,
+                ..model.clone()
+            })
+            .collect();
+        out.push(model);
+        out.extend(aliases);
+    }
+    out
 }
 
 /// 缓存命中判定（纯逻辑，无网络）：存在且未超过 TTL 时返回克隆的模型列表。
@@ -516,5 +573,105 @@ pub async fn get_model(
             )),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+
+    fn m(id: &str) -> Model {
+        Model {
+            id: id.to_string(),
+            object: "model".to_string(),
+            created: 0,
+            owned_by: guess_owned_by(id).to_string(),
+            display_name: id.to_string(),
+            model_type: "chat".to_string(),
+            max_tokens: 128000,
+        }
+    }
+
+    fn ids(models: &[Model]) -> Vec<&str> {
+        models.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn adds_hyphen_alias_after_dotted_claude_id() {
+        let out = with_official_aliases(vec![m("claude-opus-5.5"), m("claude-opus-5"), m("auto")]);
+        assert_eq!(
+            ids(&out),
+            [
+                "claude-opus-5.5",
+                "claude-opus-5-5",
+                "claude-opus-5",
+                "auto"
+            ]
+        );
+        assert_eq!(out[1].max_tokens, out[0].max_tokens);
+        assert_eq!(out[1].display_name, "claude-opus-5.5");
+    }
+
+    #[test]
+    fn non_claude_dotted_ids_untouched() {
+        let out =
+            with_official_aliases(vec![m("gpt-5.6-sol"), m("deepseek-3.2"), m("minimax-m2.5")]);
+        assert_eq!(ids(&out), ["gpt-5.6-sol", "deepseek-3.2", "minimax-m2.5"]);
+    }
+
+    #[test]
+    fn four_five_gets_dated_official_id() {
+        let out = with_official_aliases(vec![m("claude-haiku-4.5")]);
+        assert_eq!(
+            ids(&out),
+            [
+                "claude-haiku-4.5",
+                "claude-haiku-4-5",
+                "claude-haiku-4-5-20251001"
+            ]
+        );
+    }
+
+    #[test]
+    fn existing_alias_not_duplicated() {
+        let out = with_official_aliases(vec![m("claude-opus-4.6"), m("claude-opus-4-6")]);
+        assert_eq!(ids(&out), ["claude-opus-4.6", "claude-opus-4-6"]);
+    }
+
+    /// 别名必须与原 ID 映射到同一个 Kiro 模型，否则暴露出去的别名请求会打到别的模型
+    #[test]
+    fn every_alias_maps_to_same_kiro_model() {
+        let upstream = [
+            "claude-opus-5.5",
+            "claude-sonnet-5.5",
+            "claude-opus-4.8",
+            "claude-opus-4.7",
+            "claude-opus-4.6",
+            "claude-sonnet-4.6",
+            "claude-opus-4.5",
+            "claude-sonnet-4.5",
+            "claude-haiku-4.5",
+        ];
+        let out = with_official_aliases(upstream.iter().map(|id| m(id)).collect());
+        for model in &out {
+            let base = upstream
+                .iter()
+                .find(|u| {
+                    model.id == **u
+                        || model.id == u.replace('.', "-")
+                        || DATED_OFFICIAL_IDS
+                            .iter()
+                            .any(|(d, a)| d == *u && *a == model.id)
+                })
+                .unwrap_or_else(|| panic!("unexpected id {}", model.id));
+            assert_eq!(
+                crate::anthropic::converter::map_model(&model.id),
+                crate::anthropic::converter::map_model(base),
+                "{} 与 {} 映射不一致",
+                model.id,
+                base
+            );
+        }
+        assert_eq!(out.len(), upstream.len() * 2 + 3);
     }
 }

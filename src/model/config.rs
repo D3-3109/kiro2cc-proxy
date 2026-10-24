@@ -44,6 +44,11 @@ fn default_true() -> bool {
     true
 }
 
+/// 0 = 按模型使用 Anthropic 官方最小可缓存长度（见 `cache::breakpoint::min_cacheable_tokens`）
+fn default_prompt_cache_min_tokens() -> i32 {
+    0
+}
+
 fn default_fingerprint_enabled() -> bool {
     true
 }
@@ -163,6 +168,29 @@ pub struct Config {
     #[serde(default)]
     pub client_token_passthrough: bool,
 
+    /// 按 Anthropic cache_control 断点规则模拟缓存记账（见 `cache::breakpoint`）
+    ///
+    /// 开启后 cache_read / cache_creation 按请求里的断点、20 block 回看、TTL 计算，
+    /// 取代"除最后一条外全部算缓存读、写入恒为 0"的前缀估算。默认 false 保持既有行为。
+    #[serde(default)]
+    pub prompt_cache_accounting: bool,
+
+    /// 断点模拟最小可缓存长度的全局覆盖（token）。默认 0 = 按模型取官方值
+    /// （512 / 1024 / 2048 / 4096 不等）；> 0 时对所有模型统一使用该值
+    #[serde(default = "default_prompt_cache_min_tokens")]
+    pub prompt_cache_min_tokens: i32,
+
+    /// `/v1/models` 是否为点号模型 ID 追加官方连字符别名（如 `claude-opus-4.6` →
+    /// `claude-opus-4-6`）。供按模型列表生成映射的下游网关使用；默认 false，
+    /// 避免 Claude Code 模型选择器出现重复项
+    #[serde(default)]
+    pub models_official_aliases: bool,
+
+    /// 对客户端上报的 output_tokens 是否包含 thinking（Anthropic 官方口径为包含）。
+    /// 默认 false 保持既有行为（仅可见输出）。
+    #[serde(default)]
+    pub output_tokens_include_thinking: bool,
+
     /// Suggestion Mode 输入建议请求放行开关
     ///
     /// Claude Code 每轮主对话后会自动发起输入建议请求（末条消息以 `[SUGGESTION MODE`
@@ -175,10 +203,12 @@ pub struct Config {
     /// 思考内容文本化展示（仅 Claude Code 客户端）
     ///
     /// Claude Code 默认隐藏/折叠 thinking，长推理期间界面像卡住。开启后，出站 SSE 的
-    /// thinking 块被改写为 markdown 引用文本块，以 ANSI 变暗（灰色）样式逐行流式输出
-    /// （类似 Kiro CLI 的展示；转义字符是否生效取决于客户端渲染）；
-    /// 回传的历史里这些文本会被自动剥离，上游看不到。默认 true（文本化展示）。
-    /// 副作用：客户端自己的上下文会包含这些文本，auto-compact 会更早触发。
+    /// thinking 块被改写为 text 块逐行流式输出（类似 Kiro CLI 的展示），样式按客户端入口选择：
+    /// 终端入口（`cli`）用 ANSI 变暗斜体（灰色）；Claude Desktop、`local-agent` 等其他入口不解析
+    /// ANSI，改用无转义的 Markdown 引用块 + 斜体（每行 `> *内容*`）近似变暗。
+    /// 回传的历史里这些文本会被自动剥离，上游看不到；代理上报的 input_tokens 不含它们，output_tokens 默认也不含（见 outputTokensIncludeThinking）。
+    /// 默认 true（文本化展示）。
+    /// 副作用：客户端本地的消息列表仍包含这些文本，其本地估算与自身 compact 的输入会相应变长。
     #[serde(default = "default_true")]
     pub thinking_as_text: bool,
 
@@ -209,6 +239,13 @@ pub struct Config {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_file: Option<String>,
+
+    /// 是否在日志中输出 DEBUG 级别事件（控制台 / 日志文件 / Admin 日志页三处一致）
+    ///
+    /// 默认 false 保持 info 级过滤。可在 Admin 设置页热切换并写回 config.json；
+    /// 开启时在 RUST_LOG 基础上追加全局 debug 指令，target 定向指令仍优先。
+    #[serde(default)]
+    pub debug_logs: bool,
 
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
@@ -289,11 +326,16 @@ impl Default for Config {
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
             client_token_passthrough: false,
+            prompt_cache_accounting: false,
+            prompt_cache_min_tokens: default_prompt_cache_min_tokens(),
+            models_official_aliases: false,
+            output_tokens_include_thinking: false,
             forward_suggestion_mode: false,
             thinking_as_text: true,
             write_chunking_max_lines: default_write_chunking_max_lines(),
             dump_kiro_body: false,
             log_file: None,
+            debug_logs: false,
             config_path: None,
         }
     }
@@ -401,6 +443,26 @@ impl Config {
         {
             self.client_token_passthrough = b;
         }
+        if let Ok(v) = env::var("PROMPT_CACHE_ACCOUNTING")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.prompt_cache_accounting = b;
+        }
+        if let Ok(v) = env::var("PROMPT_CACHE_MIN_TOKENS")
+            && let Ok(n) = v.parse::<i32>()
+        {
+            self.prompt_cache_min_tokens = n;
+        }
+        if let Ok(v) = env::var("MODELS_OFFICIAL_ALIASES")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.models_official_aliases = b;
+        }
+        if let Ok(v) = env::var("OUTPUT_TOKENS_INCLUDE_THINKING")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.output_tokens_include_thinking = b;
+        }
         if let Ok(v) = env::var("FORWARD_SUGGESTION_MODE")
             && let Ok(b) = v.parse::<bool>()
         {
@@ -415,6 +477,11 @@ impl Config {
             && !v.trim().is_empty()
         {
             self.log_file = Some(v);
+        }
+        if let Ok(v) = env::var("DEBUG_LOGS")
+            && let Ok(b) = v.parse::<bool>()
+        {
+            self.debug_logs = b;
         }
         if let Ok(v) = env::var("THINKING_AS_TEXT")
             && let Ok(b) = v.parse::<bool>()
@@ -555,6 +622,22 @@ mod tests {
         let config: Config =
             serde_json::from_str(r#"{"logFile": "app/config/proxy.log"}"#).unwrap();
         assert_eq!(config.log_file.as_deref(), Some("app/config/proxy.log"));
+    }
+
+    #[test]
+    fn test_debug_logs_default_false() {
+        // 缺省该字段时必须为 false（保持 info 级过滤，行为与现状一致）
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert!(!config.debug_logs);
+        assert!(!Config::default().debug_logs);
+    }
+
+    #[test]
+    fn test_debug_logs_deserialize_explicit() {
+        let config: Config = serde_json::from_str(r#"{"debugLogs": true}"#).unwrap();
+        assert!(config.debug_logs);
+        let config: Config = serde_json::from_str(r#"{"debugLogs": false}"#).unwrap();
+        assert!(!config.debug_logs);
     }
 
     #[test]

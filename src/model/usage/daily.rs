@@ -5,6 +5,12 @@ use serde::Serialize;
 use super::pagination::{UsageRecordItem, UsageRecordsPage};
 use super::{UsageRecord, UsageTracker, get_k_ref};
 
+/// 单日明细查询的截断上限（既有行为，保持不变）
+const MAX_DAILY_TOTAL: usize = 2000;
+/// 区间明细查询的截断上限：降序保留最新 10000 条（与单 Key 存量上限
+/// MAX_RECORDS_PER_KEY 同量级；OpenSpec T6 用户裁决值）
+const MAX_RANGE_TOTAL: usize = 10_000;
+
 /// 按日期汇总的用量
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +23,8 @@ pub struct DailySummary {
     pub total_credits_saved: f64,
     /// 累计输入 tokens（含 cache 命中部分）
     pub total_input_tokens: u64,
+    /// 累计输出 tokens
+    pub total_output_tokens: u64,
     /// 累计 cache 命中的输入 tokens（None 按 0 计入）
     pub total_cache_read_tokens: u64,
 }
@@ -38,7 +46,91 @@ pub struct CredentialDaySummary {
     pub total_cache_read_tokens: u64,
 }
 
+/// 指定账号在 CST 最近 N 天（含今日）的用量汇总
+///
+/// 与「累计」汇总同口径：仅统计仍留在明细缓冲内的记录（受 `MAX_RECORDS_PER_KEY`
+/// 裁剪约束），繁忙账号的 7/30 天汇总可能低于真实值。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialRangeSummary {
+    pub credential_id: u64,
+    /// 区间起始 CST 日期（含），格式 YYYY-MM-DD
+    pub from_date: String,
+    /// 区间结束 CST 日期（含），恒为今日
+    pub to_date: String,
+    pub total_requests: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cost: f64,
+    pub total_credits: f64,
+    /// 节省的 credits 总量（仅含有 credits_used 的记录）
+    pub total_credits_saved: f64,
+    /// 累计 cache 命中的输入 tokens（None 按 0 计入）
+    pub total_cache_read_tokens: u64,
+}
+
+/// 指定账号全部留存记录（受 MAX_RECORDS_PER_KEY 裁剪约束）的用量汇总
+///
+/// 与该页「总请求数」同口径：只统计当前仍留在明细缓冲里的记录，
+/// 不含已被裁剪的历史。费用为估算 USD，Credits 真实用量优先、缺失按模型回退估算。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialUsageSummary {
+    pub credential_id: u64,
+    pub total_requests: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cost: f64,
+    pub total_credits: f64,
+    /// 节省的 credits 总量（仅含有 credits_used 的记录）
+    pub total_credits_saved: f64,
+    /// 累计 cache 命中的输入 tokens（None 按 0 计入）
+    pub total_cache_read_tokens: u64,
+}
+
 impl UsageTracker {
+    /// 按账号聚合全部留存记录（不限日期）。
+    ///
+    /// 无记录时返回零值汇总（不报错），与 `get_today_summary_for_credential` 一致。
+    pub fn get_summary_for_credential(&self, credential_id: u64) -> CredentialUsageSummary {
+        let mut requests: u64 = 0;
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        let mut cache_read_tokens: u64 = 0;
+        let mut cost: f64 = 0.0;
+        let mut credits: f64 = 0.0;
+        let mut credits_saved: f64 = 0.0;
+
+        let records = self.records.read();
+        for r in records.iter() {
+            if r.credential_id != Some(credential_id) {
+                continue;
+            }
+            requests += 1;
+            input_tokens = input_tokens.saturating_add(r.input_tokens.max(0) as u64);
+            output_tokens = output_tokens.saturating_add(r.output_tokens.max(0) as u64);
+            cache_read_tokens = cache_read_tokens
+                .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
+            cost += r.estimated_cost;
+            let k_ref = get_k_ref(&r.model);
+            credits += r.credits_used.unwrap_or(r.estimated_cost * k_ref);
+            if let Some(cu) = r.credits_used {
+                credits_saved += r.estimated_cost * k_ref - cu;
+            }
+        }
+
+        CredentialUsageSummary {
+            credential_id,
+            total_requests: requests,
+            total_input_tokens: input_tokens,
+            total_output_tokens: output_tokens,
+            total_cache_read_tokens: cache_read_tokens,
+            total_cost: cost,
+            total_credits: credits,
+            total_credits_saved: credits_saved,
+        }
+    }
+
     /// 按 CST（UTC+8）当前日期聚合指定 credential 的用量。
     ///
     /// 返回结构包含今日的请求数、输入/输出 token、估算费用、credits 用量及节省值。
@@ -97,6 +189,69 @@ impl UsageTracker {
         }
     }
 
+    /// 按 CST（UTC+8）聚合指定 credential 最近 N 天（含今日）的用量。
+    ///
+    /// 区间为 [今日 - (days-1), 今日]，闭区间按 CST 归属日比较；
+    /// 聚合口径与 `get_today_summary_for_credential` 完全一致。
+    /// 统计范围仅限仍留在明细缓冲内的记录（受 `MAX_RECORDS_PER_KEY` 裁剪约束），
+    /// 已被裁剪的历史不计入。
+    /// 无记录时返回零值汇总（不报错）。
+    pub fn get_range_summary_for_credential(
+        &self,
+        credential_id: u64,
+        days: u32,
+    ) -> CredentialRangeSummary {
+        // 防御极大入参：NaiveDate 减法越界会 panic，区间查询无理由超过留存窗口
+        const MAX_RANGE_DAYS: u32 = 366;
+        let days = days.clamp(1, MAX_RANGE_DAYS);
+        let cst = FixedOffset::east_opt(8 * 3600).unwrap();
+        let today = chrono::Utc::now().with_timezone(&cst).date_naive();
+        let from = today - chrono::Duration::days((days - 1) as i64);
+
+        let mut requests: u64 = 0;
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        let mut cache_read_tokens: u64 = 0;
+        let mut cost: f64 = 0.0;
+        let mut credits: f64 = 0.0;
+        let mut credits_saved: f64 = 0.0;
+
+        let records = self.records.read();
+        for r in records.iter() {
+            if r.credential_id != Some(credential_id) {
+                continue;
+            }
+            let date = r.created_at.with_timezone(&cst).date_naive();
+            if date < from || date > today {
+                continue;
+            }
+            requests += 1;
+            input_tokens = input_tokens.saturating_add(r.input_tokens.max(0) as u64);
+            output_tokens = output_tokens.saturating_add(r.output_tokens.max(0) as u64);
+            cache_read_tokens = cache_read_tokens
+                .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
+            cost += r.estimated_cost;
+            let k_ref = get_k_ref(&r.model);
+            credits += r.credits_used.unwrap_or(r.estimated_cost * k_ref);
+            if let Some(cu) = r.credits_used {
+                credits_saved += r.estimated_cost * k_ref - cu;
+            }
+        }
+
+        CredentialRangeSummary {
+            credential_id,
+            from_date: from.format("%Y-%m-%d").to_string(),
+            to_date: today.format("%Y-%m-%d").to_string(),
+            total_requests: requests,
+            total_input_tokens: input_tokens,
+            total_output_tokens: output_tokens,
+            total_cache_read_tokens: cache_read_tokens,
+            total_cost: cost,
+            total_credits: credits,
+            total_credits_saved: credits_saved,
+        }
+    }
+
     /// 按 CST（UTC+8）日期聚合所有记录，返回按日期降序的汇总列表
     pub fn get_daily_summaries(&self) -> Vec<DailySummary> {
         use std::collections::BTreeMap;
@@ -110,6 +265,7 @@ impl UsageTracker {
             credits: f64,
             saved: f64,
             inputs: u64,
+            outputs: u64,
             cache_reads: u64,
         }
         let mut map: BTreeMap<String, DayAgg> = BTreeMap::new();
@@ -129,6 +285,7 @@ impl UsageTracker {
                 entry.saved += r.estimated_cost * get_k_ref(&r.model) - cu;
             }
             entry.inputs = entry.inputs.saturating_add(r.input_tokens.max(0) as u64);
+            entry.outputs = entry.outputs.saturating_add(r.output_tokens.max(0) as u64);
             entry.cache_reads = entry
                 .cache_reads
                 .saturating_add(r.cache_read_input_tokens.unwrap_or(0).max(0) as u64);
@@ -142,6 +299,7 @@ impl UsageTracker {
                 total_credits: agg.credits,
                 total_credits_saved: agg.saved,
                 total_input_tokens: agg.inputs,
+                total_output_tokens: agg.outputs,
                 total_cache_read_tokens: agg.cache_reads,
             })
             .collect();
@@ -150,6 +308,7 @@ impl UsageTracker {
     }
 
     /// 分页查询指定 CST（UTC+8）日期的原始记录，硬限总量 2000 条
+    ///（from == to == date 的薄包装，与区间版共用管线）
     pub fn get_records_paged_by_date(
         &self,
         date: &str,
@@ -157,7 +316,47 @@ impl UsageTracker {
         page_size: usize,
         credential_labels: &std::collections::HashMap<u64, String>,
     ) -> UsageRecordsPage {
-        const MAX_TOTAL: usize = 2000;
+        self.paginate_records_in_range(
+            date,
+            date,
+            page,
+            page_size,
+            credential_labels,
+            MAX_DAILY_TOTAL,
+        )
+    }
+
+    /// 分页查询 CST（UTC+8）闭区间 [from, to]（含两端）的原始记录，
+    /// 按时间降序保留最新 10000 条后再分页
+    pub fn get_records_paged_by_date_range(
+        &self,
+        from: &str,
+        to: &str,
+        page: usize,
+        page_size: usize,
+        credential_labels: &std::collections::HashMap<u64, String>,
+    ) -> UsageRecordsPage {
+        self.paginate_records_in_range(
+            from,
+            to,
+            page,
+            page_size,
+            credential_labels,
+            MAX_RANGE_TOTAL,
+        )
+    }
+
+    /// 单日/区间明细共用管线：CST 日期闭区间过滤（YYYY-MM-DD 字典序即时间序）
+    /// → 降序排序 → 按上限截断 → 分页 → DTO 映射
+    fn paginate_records_in_range(
+        &self,
+        from: &str,
+        to: &str,
+        page: usize,
+        page_size: usize,
+        credential_labels: &std::collections::HashMap<u64, String>,
+        max_total: usize,
+    ) -> UsageRecordsPage {
         let page_size = page_size.clamp(1, 500);
         let cst = FixedOffset::east_opt(8 * 3600).unwrap();
 
@@ -166,11 +365,12 @@ impl UsageTracker {
             records
                 .iter()
                 .filter(|r| {
-                    r.created_at
+                    let d = r
+                        .created_at
                         .with_timezone(&cst)
                         .format("%Y-%m-%d")
-                        .to_string()
-                        == date
+                        .to_string();
+                    from <= d.as_str() && d.as_str() <= to
                 })
                 .cloned()
                 .collect()
@@ -178,7 +378,7 @@ impl UsageTracker {
 
         let mut sorted = owned;
         sorted.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-        sorted.truncate(MAX_TOTAL);
+        sorted.truncate(max_total);
 
         let total = sorted.len();
         if total == 0 {

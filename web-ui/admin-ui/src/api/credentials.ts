@@ -18,6 +18,8 @@ import type {
   UsageRecordsResponse,
   DailySummary,
   CredentialDaySummary,
+  CredentialRangeSummary,
+  CredentialUsageSummary,
   ThrottleLogsResponse,
   FailureLogsResponse,
   ModelsResponse,
@@ -192,6 +194,18 @@ export async function setDumpKiroBody(enabled: boolean): Promise<{ success: bool
   return data
 }
 
+// 获取 DEBUG 日志开关
+export async function getDebugLogs(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>('/config/debug-logs')
+  return data
+}
+
+// 设置 DEBUG 日志开关（全局热生效：控制台 / 日志文件 / 日志页三处一致）
+export async function setDebugLogs(enabled: boolean): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.put<{ success: boolean; message: string }>('/config/debug-logs', { enabled })
+  return data
+}
+
 // ============ 服务器信息 ============
 
 // 获取服务器信息
@@ -271,12 +285,33 @@ export async function getCredentialUsageRecords(
   return data
 }
 
+// 获取单账号全部留存记录的用量汇总（不限日期）
+export async function getCredentialUsageSummary(
+  id: number
+): Promise<CredentialUsageSummary> {
+  const { data } = await api.get<CredentialUsageSummary>(
+    `/credentials/${id}/usage/summary`
+  )
+  return data
+}
+
 // 获取单账号 CST 今日的用量汇总
 export async function getCredentialTodaySummary(
   id: number
 ): Promise<CredentialDaySummary> {
   const { data } = await api.get<CredentialDaySummary>(
     `/credentials/${id}/usage/today`
+  )
+  return data
+}
+
+// 获取单账号 CST 最近 N 天（含今日）的用量汇总（7days / 30days）
+export async function getCredentialRangeSummary(
+  id: number,
+  range: '7days' | '30days'
+): Promise<CredentialRangeSummary> {
+  const { data } = await api.get<CredentialRangeSummary>(
+    `/credentials/${id}/usage/${range}`
   )
   return data
 }
@@ -337,6 +372,19 @@ export async function getDailyUsageRecords(
     `/usage/daily/${date}/records`,
     { params: { page, page_size: pageSize } }
   )
+  return data
+}
+
+// 获取 CST 闭区间 [from, to] 的原始请求记录（降序保留最新 10000 条后分页）
+export async function getUsageRecordsByRange(
+  from: string,
+  to: string,
+  page: number,
+  pageSize: number
+): Promise<UsageRecordsResponse> {
+  const { data } = await api.get<UsageRecordsResponse>('/usage/records', {
+    params: { from, to, page, page_size: pageSize },
+  })
   return data
 }
 

@@ -8,19 +8,22 @@ use axum::{
 
 use super::{
     api_keys::{
-        create_api_key, delete_api_key, get_admin_models, get_all_usage, get_credential_models,
-        get_credential_today_summary, get_credential_usage_records, get_daily_usage,
-        get_daily_usage_records, get_failure_logs, get_key_usage, get_key_usage_records, get_rpm,
-        get_server_info, get_throttle_logs, list_api_keys, reset_key_usage, update_api_key,
+        create_api_key, delete_api_key, get_admin_models, get_all_usage,
+        get_credential_7days_summary, get_credential_30days_summary, get_credential_models,
+        get_credential_today_summary, get_credential_usage_records, get_credential_usage_summary,
+        get_daily_usage, get_daily_usage_records, get_failure_logs, get_key_usage,
+        get_key_usage_records, get_rpm, get_server_info, get_throttle_logs, get_usage_records,
+        list_api_keys, reset_key_usage, update_api_key,
     },
     changelog::get_changelog,
     handlers::{
         add_credential, delete_credential, get_all_credentials, get_auth_keys,
-        get_client_token_passthrough, get_credential_balance, get_dump_kiro_body, get_geo_batch,
-        get_load_balancing_mode, get_runtime_config, get_suggestion_mode, get_thinking_as_text,
-        reset_failure_count, set_auth_keys, set_client_token_passthrough, set_credential_disabled,
-        set_credential_priority, set_dump_kiro_body, set_load_balancing_mode, set_runtime_config,
-        set_suggestion_mode, set_thinking_as_text, update_credential,
+        get_client_token_passthrough, get_credential_balance, get_debug_logs, get_dump_kiro_body,
+        get_geo_batch, get_load_balancing_mode, get_runtime_config, get_suggestion_mode,
+        get_thinking_as_text, reset_failure_count, set_auth_keys, set_client_token_passthrough,
+        set_credential_disabled, set_credential_priority, set_debug_logs, set_dump_kiro_body,
+        set_load_balancing_mode, set_runtime_config, set_suggestion_mode, set_thinking_as_text,
+        update_credential,
     },
     log_handler::{download_logs, snapshot_logs, stream_logs},
     middleware::{AdminState, admin_auth_middleware},
@@ -51,6 +54,18 @@ pub fn create_admin_router(state: AdminState) -> Router {
             "/credentials/{id}/usage/today",
             get(get_credential_today_summary),
         )
+        .route(
+            "/credentials/{id}/usage/7days",
+            get(get_credential_7days_summary),
+        )
+        .route(
+            "/credentials/{id}/usage/30days",
+            get(get_credential_30days_summary),
+        )
+        .route(
+            "/credentials/{id}/usage/summary",
+            get(get_credential_usage_summary),
+        )
         .route("/credentials/{id}/throttle-logs", get(get_throttle_logs))
         .route("/credentials/{id}/failure-logs", get(get_failure_logs))
         .route(
@@ -75,6 +90,10 @@ pub fn create_admin_router(state: AdminState) -> Router {
             get(get_dump_kiro_body).put(set_dump_kiro_body),
         )
         .route(
+            "/config/debug-logs",
+            get(get_debug_logs).put(set_debug_logs),
+        )
+        .route(
             "/config/runtime",
             get(get_runtime_config).put(set_runtime_config),
         )
@@ -92,6 +111,7 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route("/rpm", get(get_rpm))
         .route("/usage/daily", get(get_daily_usage))
         .route("/usage/daily/{date}/records", get(get_daily_usage_records))
+        .route("/usage/records", get(get_usage_records))
         .route("/geo/batch", get(get_geo_batch))
         .layer(middleware::from_fn_with_state(
             state.clone(),

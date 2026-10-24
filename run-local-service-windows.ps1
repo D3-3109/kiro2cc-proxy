@@ -118,12 +118,28 @@ if ($has_admin) {
 Write-Host "=================================================="
 Write-Host ""
 
-# 延迟 2 秒后自动打开管理面板
+# 等待服务就绪后再自动打开管理面板：轮询 /admin 直到可访问再打开，避免固定 sleep 抢在服务监听前打开
 if ($has_admin) {
     Start-Job -ScriptBlock {
         param($port)
-        Start-Sleep -Seconds 2
-        Start-Process "http://127.0.0.1:${port}/admin"
+        $url = "http://127.0.0.1:${port}/admin"
+        $deadline = (Get-Date).AddSeconds(30)
+        # 等效 mac 侧 --noproxy '*'：PS 5.1 无 -NoProxy，需禁用进程级默认代理，
+        # 否则挂系统代理的用户轮询会一直失败白等满 30s
+        [System.Net.WebRequest]::DefaultWebProxy = $null
+        $ready = $false
+        while ((Get-Date) -lt $deadline) {
+            try {
+                $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
+                if ($resp.StatusCode -eq 200) { $ready = $true; break }
+            } catch {}
+            Start-Sleep -Milliseconds 500
+        }
+        # 超时仍未就绪则跳过打开（mac 侧打印提示后仅退出后台轮询子 shell，服务继续前台运行；
+        # 本侧 Job 输出无法实时透传到父控制台，故仅静默跳过、脚本继续运行）
+        if ($ready) {
+            Start-Process $url
+        }
     } -ArgumentList $CONFIGURED_PORT | Out-Null
 }
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # 为 kiro2cc-proxy 安装 Shell 快捷命令
-# 运行一次后即可在任意终端使用 build_kiro2cc_proxy 和 run_kiro2cc_proxy
+# 运行一次后即可在任意终端使用 build_kiro2cc_proxy、build_and_run_kiro2cc_proxy 和 run_kiro2cc_proxy
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -18,6 +18,7 @@ install_to() {
         echo ""
         echo "# kiro2cc-proxy aliases"
         echo "alias build_kiro2cc_proxy='\"$SCRIPT_DIR/build-mac.sh\"'"
+        echo "alias build_and_run_kiro2cc_proxy='\"$SCRIPT_DIR/build-and-run-mac.sh\"'"
         echo "alias run_kiro2cc_proxy='\"$SCRIPT_DIR/run-local-service-mac.sh\"'"
     } >> "$file"
 
@@ -42,5 +43,6 @@ echo "  source ~/.bashrc   # bash 用户"
 echo ""
 echo "之后即可在任意终端中使用："
 echo "  build_kiro2cc_proxy   # 构建项目（等同于 ./build-mac.sh）"
+echo "  build_and_run_kiro2cc_proxy   # 一键构建并启动（等同于 ./build-and-run-mac.sh）"
 echo "  run_kiro2cc_proxy     # 启动服务（等同于 ./run-local-service-mac.sh）"
 echo "=================================================="

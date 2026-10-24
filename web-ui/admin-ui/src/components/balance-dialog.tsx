@@ -8,7 +8,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Progress, QuotaPercentBadge, quotaTone } from '@/components/ui/progress'
-import { useCredentialBalance } from '@/hooks/use-credentials'
+import {
+  useCredential30DaysSummary,
+  useCredential7DaysSummary,
+  useCredentialBalance,
+  useCredentialTodaySummary,
+  useCredentialUsageSummary,
+} from '@/hooks/use-credentials'
 import { ACCOUNT_STATE_VISUAL, deriveAccountState, loginSource } from '@/lib/account-state'
 import { parseError, getSubscriptionColor } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -91,9 +97,65 @@ function CopyButton({ text, title }: { text: string; title: string }) {
   )
 }
 
+/** 使用统计卡片内的单组指标矩阵（累计 / 今日共用），value 为 null/undefined 时显示占位符 */
+function UsageStatsRow({
+  label,
+  stats,
+}: {
+  label: string
+  stats:
+    | {
+        totalRequests: number
+        totalInputTokens: number
+        totalOutputTokens: number
+        totalCost: number
+        totalCredits: number
+      }
+    | null
+    | undefined
+}) {
+  const { t } = useTranslation()
+  // 本地化口径与组件内 formatNumber 保持一致（千分位 + 2 位小数）
+  const formatInt = (n: number) => n.toLocaleString(localeTag())
+  // 花费与 credits 统一 4 位小数，与 usage-log-table.formatCost / 详情页口径一致（保留千分位分组）
+  const formatCost = (n: number) => n.toLocaleString(localeTag(), { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+  const metrics: Array<{ label: string; value: string }> = [
+    { label: t('credentials.usageStatsRequests'), value: stats ? formatInt(stats.totalRequests) : '--' },
+    { label: t('credentials.usageStatsInputTokens'), value: stats ? formatInt(stats.totalInputTokens) : '--' },
+    { label: t('credentials.usageStatsOutputTokens'), value: stats ? formatInt(stats.totalOutputTokens) : '--' },
+    { label: t('credentials.usageStatsCost'), value: stats ? `$${formatCost(stats.totalCost)}` : '--' },
+    // credits 口径与使用日志页 credits 列一致（toFixed(4)）
+    { label: t('credentials.usageStatsCredits'), value: stats ? stats.totalCredits.toFixed(4) : '--' },
+  ]
+
+  return (
+    <div>
+      <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wider text-ink-3">{label}</div>
+      <div className="grid grid-cols-5 divide-x-[0.5px] divide-hairline text-center">
+        {metrics.map((m) => (
+          <div key={m.label} className="min-w-0 px-1">
+            <div className="truncate text-[10px] text-ink-3">{m.label}</div>
+            <div className="truncate font-mono text-[12.5px] font-semibold text-ink" title={m.value}>
+              {m.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function BalanceDialog({ credentialId, credential, open, onOpenChange }: BalanceDialogProps) {
   const { t } = useTranslation()
   const { data: balance, isLoading, error } = useCredentialBalance(credentialId)
+  // 使用统计：复用账号详情页同款 hooks（60s 自动刷新），失败时卡片内显示占位符；
+  // credentialId 为 null 时传 0 仅作哨兵；弹窗关闭后 enabled=false，停止请求与轮询。
+  // 声明顺序与渲染顺序保持一致：累计 → 今日 → 7 天 → 30 天
+  const statsEnabled = open && credentialId != null
+  const { data: usageSummary } = useCredentialUsageSummary(credentialId ?? 0, statsEnabled)
+  const { data: usageToday } = useCredentialTodaySummary(credentialId ?? 0, statsEnabled)
+  const { data: usage7Days } = useCredential7DaysSummary(credentialId ?? 0, statsEnabled)
+  const { data: usage30Days } = useCredential30DaysSummary(credentialId ?? 0, statsEnabled)
 
   const formatTimestamp = (timestamp: number | null) => {
     if (!timestamp) return t('credentials.unknown')
@@ -134,9 +196,10 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-transparent bg-surface">
+      {/* flex 列布局：Header 固定不参与滚动，仅下方内容区滚动 */}
+      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-[536px] p-0 gap-0 sm:p-0 rounded-2xl border-transparent bg-surface">
         {/* 阶梯一：顶栏资产标识与全局状态 */}
-        <DialogHeader className="flex flex-col gap-1 border-b-[0.5px] border-hairline px-[22px] pt-5 pb-4 text-left">
+        <DialogHeader className="flex shrink-0 flex-col gap-1 border-b-[0.5px] border-hairline px-[22px] pt-5 pb-4 text-left">
           {/* pr-6 为右上角关闭按钮让位，避免标题与其重叠 */}
           <div className="flex flex-wrap items-center gap-2 pr-6">
             <DialogTitle className="text-[17px] font-semibold tracking-tight text-ink">
@@ -158,7 +221,8 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
           )}
         </DialogHeader>
 
-        <div className="space-y-4 px-[22px] pt-[18px] pb-[22px]">
+        {/* 隐藏滚动条但保留滚动能力，与编辑账号弹窗口径一致 */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-[22px] pt-[18px] pb-[22px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {/* 加载态：余额查询中，Hero 与错误卡片均不渲染，但账号信息卡片照常显示 */}
           {isLoading && (
             <div className="flex items-center justify-center py-10">
@@ -384,6 +448,35 @@ export function BalanceDialog({ credentialId, credential, open, onOpenChange }: 
               <div className="truncate pt-1 text-[11px] text-ink-3">
                 <span>{t('credentials.lastUsedAtLabel')}: </span>
                 <span className="font-mono text-ink-2">{formatIso(credential.lastUsedAt)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* 阶梯五：使用统计（累计 / 今日 / 7 天 / 30 天），接口失败时占位符降级 */}
+          {credential && (
+            <div className="space-y-3 rounded-lg border border-transparent bg-surface-2 p-3.5">
+              <CardHeader
+                label={t('credentials.usageStatsTitle')}
+                icon={
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
+                  </svg>
+                }
+              />
+
+              <div className="space-y-3 rounded-lg border border-transparent bg-surface p-3">
+                <UsageStatsRow label={t('credentials.usageStatsTotal')} stats={usageSummary} />
+                <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
+                  <UsageStatsRow label={t('credentials.usageStatsToday')} stats={usageToday} />
+                </div>
+                <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
+                  <UsageStatsRow label={t('credentials.usageStats7Days')} stats={usage7Days} />
+                </div>
+                <div className="border-t-[0.5px] border-dashed border-hairline pt-3">
+                  <UsageStatsRow label={t('credentials.usageStats30Days')} stats={usage30Days} />
+                </div>
               </div>
             </div>
           )}

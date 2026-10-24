@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
+use crate::openai::responses_request::NamespaceMap;
+
 use super::nonstream::{
     compaction_item, convert_usage, custom_input_from_json_text, is_truncated, new_id,
 };
@@ -42,7 +44,10 @@ enum OpenKind {
     Reasoning,
     ToolCall {
         call_id: String,
+        /// 回写给客户端的名字：非默认 namespace 的工具是叶子名，其余与上游一致
         name: String,
+        /// 非默认 namespace 的工具所属的 namespace，写入 `function_call.namespace`
+        namespace: Option<String>,
         /// 声明为 `custom` 的工具，收尾时要产出 `custom_tool_call` 而非 `function_call`
         custom: bool,
     },
@@ -71,6 +76,8 @@ pub(crate) struct ResponsesStreamConverter {
     completed_items: Vec<Value>,
     /// 请求侧声明为 `custom` 的工具名
     custom_tools: HashSet<String>,
+    /// 请求侧展开过的非默认 namespace 工具：扁平名 → (namespace, 叶子名)
+    namespaced: NamespaceMap,
     /// 是否为 Codex remote compaction v2 请求
     ///
     /// 为 true 时，`finish()` 将把所有文本内容拼合后包装为 `type: "compaction"` output item，
@@ -93,8 +100,17 @@ impl ResponsesStreamConverter {
             open: HashMap::new(),
             completed_items: Vec::new(),
             custom_tools,
+            namespaced: NamespaceMap::new(),
             is_compaction: false,
         }
+    }
+
+    /// 设置非默认 namespace 工具的映射（扁平名 → (namespace, 叶子名)）
+    ///
+    /// 用 builder 而不是 `new` 的参数：绝大多数调用方（含测试）没有 namespace 工具。
+    pub(crate) fn with_namespaces(mut self, namespaced: NamespaceMap) -> Self {
+        self.namespaced = namespaced;
+        self
     }
 
     /// 创建压缩模式的流式转换器
@@ -544,6 +560,10 @@ impl ResponsesStreamConverter {
     fn open_tool_call(&mut self, index: i64, call_id: String, name: String) -> Vec<String> {
         let mut frames = self.ensure_created();
         let custom = self.custom_tools.contains(&name);
+        let (name, namespace) = match self.namespaced.get(&name) {
+            Some((ns, leaf)) => (leaf.clone(), Some(ns.clone())),
+            None => (name, None),
+        };
         let item_id = new_id(if custom { "ctc" } else { "fc" });
         let output_index = self.take_output_index();
         self.open.insert(
@@ -554,6 +574,7 @@ impl ResponsesStreamConverter {
                 kind: OpenKind::ToolCall {
                     call_id: call_id.clone(),
                     name: name.clone(),
+                    namespace: namespace.clone(),
                     custom,
                 },
                 buffer: String::new(),
@@ -570,14 +591,18 @@ impl ResponsesStreamConverter {
                 "status": "in_progress",
             })
         } else {
-            json!({
+            let mut item = json!({
                 "type": "function_call",
                 "id": item_id,
                 "call_id": call_id,
                 "name": name,
                 "arguments": "",
                 "status": "in_progress",
-            })
+            });
+            if let Some(ns) = &namespace {
+                item["namespace"] = Value::String(ns.clone());
+            }
+            item
         };
         frames.push(self.event(
             "response.output_item.added",
@@ -669,6 +694,7 @@ impl ResponsesStreamConverter {
                 call_id,
                 name,
                 custom: true,
+                ..
             } => {
                 let input = custom_input_from_json_text(&buffer);
                 let done_item = json!({
@@ -709,6 +735,7 @@ impl ResponsesStreamConverter {
             OpenKind::ToolCall {
                 call_id,
                 name,
+                namespace,
                 custom: false,
             } => {
                 // 无参工具的 arguments 必须是合法 JSON，空串会让客户端解析失败
@@ -717,7 +744,7 @@ impl ResponsesStreamConverter {
                 } else {
                     buffer
                 };
-                let done_item = json!({
+                let mut done_item = json!({
                     "type": "function_call",
                     "id": item_id,
                     "call_id": call_id,
@@ -725,6 +752,9 @@ impl ResponsesStreamConverter {
                     "arguments": arguments,
                     "status": "completed",
                 });
+                if let Some(ns) = namespace {
+                    done_item["namespace"] = Value::String(ns);
+                }
                 self.completed_items.push(done_item.clone());
                 vec![
                     self.event(

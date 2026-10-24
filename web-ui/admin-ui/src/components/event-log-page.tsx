@@ -106,7 +106,7 @@ export function EventLogPage({
   }
 
   return (
-    <div>
+    <div className="flex h-[calc(100vh-56px)] min-h-[480px] flex-col">
       {/* 页头（设计稿 .head）：三级面包屑 + 返回钮 + 序号副标题 + 日志类型标签与刷新 */}
       <PageHead
         crumb={[t('dashboard.navMain'), t('dashboard.navCredentials'), title]}
@@ -147,10 +147,10 @@ export function EventLogPage({
       </MetricsBar>
 
       {/* 事件表（.panel + .tscroll + .panel-foot） */}
-      <div className="mt-[15px]">
+      <div className="mt-[15px] flex min-h-0 flex-1 flex-col">
         <h3 className={PANEL_TITLE}>{t(titleKey)}</h3>
-        <section className={PANEL}>
-          <div className="max-h-[70vh] overflow-y-auto">
+        <section className={`${PANEL} flex min-h-0 flex-1 flex-col`}>
+          <div className="relative min-h-0 flex-1 overflow-y-auto">
             <table className="w-full border-separate border-spacing-0">
               <thead>
                 <tr>
