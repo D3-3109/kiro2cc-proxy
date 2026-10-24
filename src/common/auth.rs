@@ -3,7 +3,7 @@
 
 use axum::{
     body::Body,
-    http::{Request, header},
+    http::{HeaderMap, Request, header},
 };
 use subtle::ConstantTimeEq;
 
@@ -13,22 +13,22 @@ use subtle::ConstantTimeEq;
 /// - `x-api-key` header
 /// - `Authorization: Bearer <token>` header
 pub fn extract_api_key(request: &Request<Body>) -> Option<String> {
+    extract_api_key_from_headers(request.headers()).map(str::to_string)
+}
+
+/// 从请求头提取 API Key（`x-api-key` 优先，其次 `Authorization: Bearer`）。
+/// 供拿不到完整 `Request` 的 handler（只有 `HeaderMap` 提取器）复用同一口径。
+pub fn extract_api_key_from_headers(headers: &HeaderMap) -> Option<&str> {
     // 优先检查 x-api-key
-    if let Some(key) = request
-        .headers()
-        .get("x-api-key")
-        .and_then(|v| v.to_str().ok())
-    {
-        return Some(key.to_string());
+    if let Some(key) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        return Some(key);
     }
 
     // 其次检查 Authorization: Bearer
-    request
-        .headers()
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|s| s.to_string())
 }
 
 /// 常量时间字符串比较，防止时序攻击

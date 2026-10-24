@@ -121,20 +121,22 @@ pub async fn snapshot_logs(
     let snapshot = log_capture.snapshot_tail(parse_limit(&params));
     let json = serde_json::to_string(&snapshot).unwrap_or_else(|_| "[]".to_string());
 
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert(
+    let mut resp_headers = axum::http::HeaderMap::new();
+    resp_headers.insert(
         header::CONTENT_TYPE,
         axum::http::HeaderValue::from_static("application/json; charset=utf-8"),
     );
-    (headers, json).into_response()
+    (resp_headers, json).into_response()
 }
 
-/// GET /api/admin/logs/download?api_key=<key>
+/// GET /api/admin/logs/download
 ///
-/// 返回当前 ring buffer 内全部日志，以 .txt 文件形式下载。
+/// 返回当前 ring buffer 内全部日志（不支持 `limit` / 过滤），以 .txt 文件形式下载。
+/// Web UI 的「下载」已改走 `/logs/snapshot` 并在前端按筛选条件组装，本端点保留给脚本 / curl。
 ///
 /// # 安全说明
-/// API Key 以 Query Param 形式传输，必须在 HTTPS 后方使用。
+/// 认证同其他日志端点：`api_key` 查询参数，或 `x-api-key` / `Authorization: Bearer` 头。
+/// 用查询参数时密钥会出现在反代 access log 中，必须在 HTTPS 后方使用；脚本优先用头。
 pub async fn download_logs(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -163,18 +165,18 @@ pub async fn download_logs(
         timestamp
     );
 
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert(
+    let mut resp_headers = axum::http::HeaderMap::new();
+    resp_headers.insert(
         header::CONTENT_TYPE,
         axum::http::HeaderValue::from_static("text/plain; charset=utf-8"),
     );
-    headers.insert(
+    resp_headers.insert(
         header::CONTENT_DISPOSITION,
         axum::http::HeaderValue::from_str(&disposition)
             .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
     );
 
-    (headers, content).into_response()
+    (resp_headers, content).into_response()
 }
 
 /// 认证：`api_key` 查询参数（EventSource 只能用它），或 `x-api-key` / `Bearer` 头（fetch 可用）
@@ -183,16 +185,7 @@ fn check_api_key(
     headers: &HeaderMap,
     params: &HashMap<String, String>,
 ) -> bool {
-    let from_header = headers
-        .get("x-api-key")
-        .and_then(|v| v.to_str().ok())
-        .or_else(|| {
-            headers
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "))
-        });
-    let key = from_header
+    let key = auth::extract_api_key_from_headers(headers)
         .or_else(|| params.get("api_key").map(|s| s.as_str()))
         .unwrap_or("");
     auth::constant_time_eq(key, &state.admin_psw.read())

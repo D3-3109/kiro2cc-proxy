@@ -56,13 +56,18 @@ pub(super) fn build_history(
     // 持续 miss（issue #47：claude-opus-5.5 会话 history[0] 每轮 +50~+970 字节）。
     // 这里把它们从 history[0] 拼接中剔除，并返回给调用方放到当前消息开头——模型仍可见
     // （hook 注入的用户规则不丢失），但不参与缓存 hash。
-    let (stable_system, dynamic_system): (Vec<&str>, Vec<&str>) = match system {
+    let (stable_system, mut dynamic_system): (Vec<&str>, Vec<&str>) = match system {
         Some(blocks) => blocks
             .iter()
             .copied()
             .partition(|s| !is_dynamic_hook_injection(s) && !is_token_budget_reminder(s)),
         None => (Vec::new(), Vec::new()),
     };
+    // 文本前缀只能识别已知的动态块；CC 还会中途追加按路径加载的 rules 等新块（实测一次
+    // 4KB 的 rules 块使 history[0] 重置、单轮多花约 0.5 credits）。再按会话基线把
+    // 「会话开始后才出现」的块也分流出去，与块的文本无关（见 `baseline` 模块）。
+    let (stable_system, new_blocks) = super::baseline::split_new_blocks(session_id, &stable_system);
+    dynamic_system.extend(new_blocks);
     // 全部块都被分流（stable 拼接结果为空，含仅剩空文本块）时按"无系统消息"处理，
     // 保留 thinking 前缀 / 引导语注入
     let stable_content = stable_system.join("\n");

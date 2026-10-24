@@ -26,7 +26,7 @@ const MAX_SESSIONS: usize = 256;
 const MAX_LISTED: usize = 8;
 
 /// 单个系统块的指纹：内容哈希 + 字节长度
-type Fingerprint = (u64, usize);
+pub(super) type Fingerprint = (u64, usize);
 
 static PREV_BLOCKS: OnceLock<Mutex<HashMap<String, Vec<Fingerprint>>>> = OnceLock::new();
 /// 每个会话上一次被分流的动态块数量，用于只在数量变化时写日志
@@ -40,7 +40,7 @@ struct AddedBlock {
     preview: String,
 }
 
-fn fingerprint(block: &str) -> Fingerprint {
+pub(super) fn fingerprint(block: &str) -> Fingerprint {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     block.hash(&mut h);
     (h.finish(), block.len())

@@ -67,7 +67,6 @@ function localClock(timestamp: string, withMs = false): string {
   return withMs ? `${clock}.${pad(d.getMilliseconds(), 3)}` : clock
 }
 
-/** 复制/导出用的完整本地时间戳「YYYY-MM-DD HH:MM:SS.mmm」 */
 /** 「下载」向服务端取回的最大条数，与后端 ring buffer 容量（LOG_CAPTURE_CAPACITY）一致 */
 const DOWNLOAD_LIMIT = 100_000
 
@@ -81,6 +80,7 @@ function matchesFilter(entry: LogEntry, levelFilter: LogLevel | 'ALL', keyword: 
   return true
 }
 
+/** 复制/导出用的完整本地时间戳「YYYY-MM-DD HH:MM:SS.mmm」 */
 function localStamp(timestamp: string): string {
   const ms = Date.parse(timestamp)
   if (Number.isNaN(ms)) return timestamp
@@ -250,6 +250,8 @@ export function LogViewerPage({ embedded, initialLevelFilter = 'ALL', initialKey
     try {
       const res = await fetch(`/api/admin/logs/snapshot?limit=${DOWNLOAD_LIMIT}`, {
         headers: { 'x-api-key': storage.getApiKey() ?? '' },
+        // 反代 / 网络挂起时不让按钮长时间停在禁用态；10 万条约 20MB，慢链路也留足时间
+        signal: AbortSignal.timeout(120_000),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const all = (await res.json()) as LogEntry[]

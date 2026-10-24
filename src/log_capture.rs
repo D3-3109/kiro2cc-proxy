@@ -13,6 +13,15 @@ use tracing_subscriber::layer::Context;
 
 const BROADCAST_CAPACITY: usize = 256;
 
+/// ring buffer 初始预分配条数。容量可达 10 万，按容量预分配会白占约 10MB；
+/// VecDeque 按需倍增，写满后 pop_front / push_back 不再扩容。
+const INITIAL_PREALLOC: usize = 1024;
+
+/// 捕获层单条日志消息的字节上限。容量放大到 10 万条后，个别超大消息（如 DEBUG 下的
+/// websearch MCP 响应体）会让内存占用没有上界。仅截断内存捕获的副本（日志页 / 下载），
+/// 控制台与日志文件仍是完整内容。
+const MAX_MESSAGE_BYTES: usize = 16 * 1024;
+
 #[derive(Clone, Serialize)]
 pub struct LogEntry {
     pub timestamp: String,
@@ -31,7 +40,9 @@ impl LogCapture {
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
-            ring_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
+            ring_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(
+                capacity.min(INITIAL_PREALLOC),
+            ))),
             sender,
             capacity,
         }
@@ -84,6 +95,7 @@ impl<S: Subscriber> Layer<S> for LogCaptureLayer {
 
         let mut message = String::new();
         event.record(&mut MessageVisitor(&mut message));
+        truncate_message(&mut message);
 
         let entry = LogEntry {
             timestamp: chrono::Utc::now()
@@ -105,6 +117,20 @@ impl<S: Subscriber> Layer<S> for LogCaptureLayer {
         // 无接收者时 send 返回 Err，属正常情况，忽略
         let _ = self.sender.send(entry);
     }
+}
+
+/// 超过 `MAX_MESSAGE_BYTES` 的消息截断到最近的字符边界，并附上被截掉的字节数
+fn truncate_message(message: &mut String) {
+    if message.len() <= MAX_MESSAGE_BYTES {
+        return;
+    }
+    let total = message.len();
+    let mut end = MAX_MESSAGE_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message.truncate(end);
+    message.push_str(&format!("…[已截断 {} 字节]", total - end));
 }
 
 struct MessageVisitor<'a>(&'a mut String);
@@ -169,6 +195,28 @@ mod tests {
         let tail = cap.snapshot_tail(3);
         let msgs: Vec<_> = tail.iter().map(|e| e.message.as_str()).collect();
         assert_eq!(msgs, ["m7", "m8", "m9"]);
+    }
+
+    #[test]
+    fn truncate_message_keeps_short_and_cuts_long_on_char_boundary() {
+        let mut short = "abc".to_string();
+        truncate_message(&mut short);
+        assert_eq!(short, "abc");
+
+        // 多字节字符横跨上限：不能切在字符中间，也不能 panic
+        let mut long = "日".repeat(MAX_MESSAGE_BYTES);
+        let total = long.len();
+        truncate_message(&mut long);
+        let kept = long.split('…').next().unwrap();
+        assert!(kept.len() <= MAX_MESSAGE_BYTES);
+        assert!(kept.chars().all(|c| c == '日'));
+        assert!(long.ends_with(&format!("…[已截断 {} 字节]", total - kept.len())));
+    }
+
+    #[test]
+    fn new_does_not_preallocate_full_capacity() {
+        let cap = LogCapture::new(100_000);
+        assert!(cap.ring_buffer.lock().capacity() < 100_000);
     }
 
     #[test]

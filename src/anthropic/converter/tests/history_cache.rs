@@ -838,3 +838,62 @@ fn test_tool_change_event_only_inline_system_keeps_thinking_prefix_without_top_l
         without_event.conversation_state.history.len()
     );
 }
+
+/// 会话中途新增系统块（如按路径加载的 rules）不得改变 history[0]，内容改放当前消息；
+/// 文本不匹配任何已知动态前缀也一样。
+#[test]
+fn test_system_block_added_mid_session_is_diverted_from_history_zero() {
+    use crate::anthropic::types::{Message as AnthropicMessage, Metadata, SystemMessage};
+
+    let base = [
+        format!("base-identity {}", "i".repeat(2000)),
+        format!("base-rules {}", "r".repeat(2000)),
+        format!("base-env {}", "e".repeat(2000)),
+    ];
+    let late_rule = format!(
+        "Contents of /home/u/.claude/rules/ts/style.md:\n\n{}",
+        "s".repeat(400)
+    );
+
+    let make_req = |blocks: Vec<&str>| MessagesRequest {
+        model: "claude-sonnet-4".to_string(),
+        max_tokens: 1024,
+        messages: vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: serde_json::json!("go"),
+        }],
+        stream: false,
+        system: Some(
+            blocks
+                .into_iter()
+                .map(|text| SystemMessage {
+                    text: text.to_string(),
+                })
+                .collect(),
+        ),
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: Some(Metadata {
+            user_id: Some("user_account__session_5a1c0e22-7d3b-4f6a-8c19-0b2d4e6f8a10".to_string()),
+        }),
+    };
+    let current_text = |r: &ConversionResult| {
+        r.conversation_state
+            .current_message
+            .user_input_message
+            .content
+            .clone()
+    };
+
+    let first = convert_request(&make_req(base.iter().map(String::as_str).collect())).unwrap();
+    // 新块插在中间，而不是末尾
+    let with_rule =
+        convert_request(&make_req(vec![&base[0], &base[1], &late_rule, &base[2]])).unwrap();
+
+    assert_eq!(system_history(&first), system_history(&with_rule));
+    assert!(!system_history(&with_rule).contains("Contents of /home"));
+    assert!(current_text(&with_rule).contains("Contents of /home/u/.claude/rules/ts/style.md"));
+    assert!(!current_text(&first).contains("Contents of"));
+}
