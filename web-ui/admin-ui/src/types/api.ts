@@ -205,6 +205,8 @@ export interface ModelItem {
   rate_multiplier?: number | null
   /** 模型发布日期（YYYY-MM-DD）；未登记为 null，前端据此实时计算「最近新增」标记 */
   released_at?: string | null
+  /** 官方模型描述；上游未返回或回退静态表时为 null */
+  description?: string | null
 }
 
 export interface ModelsResponse {

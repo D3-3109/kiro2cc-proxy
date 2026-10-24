@@ -212,6 +212,7 @@ mod tests {
                 .map(|id| AvailableModelInfo {
                     model_id: id.to_string(),
                     model_name: String::new(),
+                    description: None,
                     rate_multiplier: None,
                     token_limits: TokenLimits::default(),
                     additional_model_request_fields_schema: None,

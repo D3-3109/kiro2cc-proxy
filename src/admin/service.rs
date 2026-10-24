@@ -44,6 +44,7 @@ fn live_model_to_admin_item(
         model: crate::anthropic::handlers::available_model_to_model(info),
         rate_multiplier: info.rate_multiplier,
         released_at: release.release_date(&info.model_id),
+        description: info.description.clone(),
     }
 }
 
@@ -58,6 +59,7 @@ fn fallback_model_to_admin_item(
         released_at: release.release_date(&model.id),
         model,
         rate_multiplier: None,
+        description: None,
     }
 }
 
@@ -699,6 +701,7 @@ mod tests {
         AvailableModelInfo {
             model_id: model_id.to_string(),
             model_name: model_name.to_string(),
+            description: None,
             rate_multiplier: rate,
             token_limits: TokenLimits {
                 max_input_tokens: max_in,
@@ -731,6 +734,20 @@ mod tests {
     }
 
     #[test]
+    fn test_live_model_to_admin_item_carries_description() {
+        let mut info = fake_info(
+            "claude-opus-5",
+            "claude-opus-5",
+            Some(2.2),
+            1_000_000,
+            128_000,
+        );
+        info.description = Some("Claude Opus 5 model".to_string());
+        let item = live_model_to_admin_item(&info, &ModelReleaseTracker::in_memory());
+        assert_eq!(item.description.as_deref(), Some("Claude Opus 5 model"));
+    }
+
+    #[test]
     fn test_fallback_model_to_admin_item_clears_rate_multiplier() {
         let model = Model {
             id: "claude-3-5-sonnet-20241022".to_string(),
@@ -745,6 +762,7 @@ mod tests {
         let item = fallback_model_to_admin_item(model, &ModelReleaseTracker::in_memory());
         assert_eq!(item.model.id, expected_id);
         assert_eq!(item.rate_multiplier, None);
+        assert_eq!(item.description, None);
     }
 
     #[test]
@@ -797,6 +815,7 @@ mod tests {
                 },
                 rate_multiplier: None,
                 released_at: None,
+                description: None,
             }
         }
 
@@ -943,6 +962,10 @@ mod tests {
             .expect("claude-opus-5 抓包条目缺失");
         assert_eq!(opus5.model_name, "claude-opus-5");
         assert_eq!(opus5.rate_multiplier, Some(2.2));
+        assert_eq!(
+            opus5.description.as_deref(),
+            Some("Experimental preview of Claude Opus 5 model with 1M context window")
+        );
         assert_eq!(opus5.token_limits.max_input_tokens, 1_000_000);
         assert_eq!(opus5.token_limits.max_output_tokens, 128_000);
         assert!(opus5.additional_model_request_fields_schema.is_some());

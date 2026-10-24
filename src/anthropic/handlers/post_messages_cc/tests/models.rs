@@ -163,6 +163,7 @@ mod tests {
         let info = AvailableModelInfo {
             model_id: "claude-sonnet-4.6".to_string(),
             model_name: "Claude Sonnet 4.6".to_string(),
+            description: None,
             rate_multiplier: Some(1.3),
             token_limits: TokenLimits {
                 max_input_tokens: 1_000_000,

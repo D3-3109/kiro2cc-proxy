@@ -659,6 +659,8 @@ pub struct AdminModelItem {
     pub rate_multiplier: Option<f64>,
     /// 模型发布日期（`YYYY-MM-DD`）；未登记为 None，前端据此实时计算「最近新增」标记
     pub released_at: Option<String>,
+    /// 官方模型描述；上游未返回或回退静态表时为 None
+    pub description: Option<String>,
 }
 
 /// 支持模型列表响应

@@ -22,6 +22,9 @@ pub struct AvailableModelInfo {
     /// Kiro 侧模型显示名称
     #[serde(default)]
     pub model_name: String,
+    /// Kiro 侧模型描述
+    #[serde(default)]
+    pub description: Option<String>,
     /// 官方费率倍率
     #[serde(default)]
     pub rate_multiplier: Option<f64>,

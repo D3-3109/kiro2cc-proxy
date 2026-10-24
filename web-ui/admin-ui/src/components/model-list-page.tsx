@@ -402,6 +402,11 @@ export function ModelListPage() {
                               {model.display_name !== '' && model.display_name !== model.id && (
                                 <span className="truncate text-[11px] text-ink-3">{model.display_name}</span>
                               )}
+                              {model.description && (
+                                <span className="truncate text-[11px] text-ink-3" title={model.description}>
+                                  {model.description}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className={CELL}>
