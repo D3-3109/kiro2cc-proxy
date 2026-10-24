@@ -53,12 +53,7 @@ pub(super) fn build_additional_model_request_fields(
 
     // GPT 系走 reasoning.effort 路径（抓包实测：luna 使用此结构）
     if is_gpt_model(model_id) {
-        let effort = req
-            .output_config
-            .as_ref()
-            .map(|c| c.effort.as_str())
-            .filter(|e| !e.is_empty())
-            .unwrap_or("high");
+        let effort = requested_effort(req).unwrap_or("high");
         return Some(serde_json::json!({ "reasoning": { "effort": effort } }));
     }
 
@@ -85,20 +80,16 @@ pub(super) fn build_additional_model_request_fields(
         fields.insert("thinking".into(), serde_json::json!({ "type": "adaptive" }));
     }
 
-    // effort 透传 + 默认注入：客户端显式携带 output_config 时按原值转发；
-    // 未携带时默认注入 effort="low"。
+    // effort 透传 + 预算推导 + 默认注入：客户端显式携带 output_config 时按原值转发；
+    // 未携带但给了 enabled 预算时按预算推导（见 `effort_from_thinking_budget`）；
+    // 两者皆无时默认注入 effort="low"。
     // 注意：默认注入值历经多次调整——issue #40 曾记录默认注入 effort="high"
     // 导致 sonnet-5 / opus-5 反代链路 TTFB 慢于直连（v3.2.1 改为仅透传修复），
     // 2026-09-15 为对齐 Claude Code 默认推理力度又回退恢复注入（值 high）。
     // 2026-09-24 实测 high 兜底仍使 sonnet-5 显著慢于 opus-5（issue #40 评论
     // 追踪），故兜底值下调为 "low"，在保留"必带 effort 字段"结构的前提下
     // 降低 Kiro 后端推理调度成本。客户端显式携带 output_config 时不受影响。
-    let effort = req
-        .output_config
-        .as_ref()
-        .map(|c| c.effort.as_str())
-        .filter(|e| !e.is_empty())
-        .unwrap_or("low");
+    let effort = requested_effort(req).unwrap_or("low");
     fields.insert(
         "output_config".into(),
         serde_json::json!({ "effort": effort }),
@@ -120,6 +111,43 @@ pub(super) fn build_additional_model_request_fields(
     } else {
         Some(serde_json::Value::Object(fields))
     }
+}
+
+/// effort 档位对应的 thinking 预算锚点
+///
+/// 与 `openai::chat_request::convert_reasoning_effort`（effort → 预算）取值一致，
+/// 两个方向互逆：OpenAI `medium` → 预算 12000 → 推导回 `medium`。
+/// xhigh / max 无公开预算对应值，且预算在反序列化时已截到 24576，不参与推导。
+const EFFORT_BUDGET_ANCHORS: [(&str, i32); 3] =
+    [("low", 4_096), ("medium", 12_000), ("high", 24_576)];
+
+/// 客户端意图的 effort：显式 `output_config.effort` 优先，其次由 thinking 预算推导
+fn requested_effort(req: &MessagesRequest) -> Option<&str> {
+    req.output_config
+        .as_ref()
+        .map(|c| c.effort.as_str())
+        .filter(|e| !e.is_empty())
+        .or_else(|| effort_from_thinking_budget(req))
+}
+
+/// 按 `enabled` thinking 预算取最接近的 effort 档位；无预算（未开启 / adaptive）时为 None
+///
+/// 等距时取较低档，分界即相邻锚点中点：
+/// ```text
+///   budget ≤ 8048          → low
+///   8049 ..= 18288         → medium
+///   budget ≥ 18289         → high
+/// ```
+fn effort_from_thinking_budget(req: &MessagesRequest) -> Option<&'static str> {
+    let budget = req
+        .thinking
+        .as_ref()
+        .filter(|t| t.thinking_type == "enabled")?
+        .budget_tokens;
+    EFFORT_BUDGET_ANCHORS
+        .iter()
+        .min_by_key(|(_, anchor)| budget.abs_diff(*anchor))
+        .map(|(effort, _)| *effort)
 }
 
 /// 从已构建的 additionalModelRequestFields 读出实际发送的 effort

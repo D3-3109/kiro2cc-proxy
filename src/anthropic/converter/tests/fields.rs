@@ -568,3 +568,75 @@ fn test_conversion_result_thinking_budget_follows_injected_tag() {
     let req = wire_record_request("gpt-5.6-luna", Some("sys"), Some(("enabled", 12000)), None);
     assert_eq!(convert_request(&req).unwrap().thinking_budget_tokens, None);
 }
+
+#[test]
+fn test_effort_derived_from_enabled_budget_nearest_anchor() {
+    // 未携带 output_config 时按 enabled 预算取最近档位（锚点 4096 / 12000 / 24576，等距取低档）
+    for (budget, expected) in [
+        (1_024, "low"),
+        (4_096, "low"),
+        (8_048, "low"),
+        (8_049, "medium"),
+        (12_000, "medium"),
+        (18_288, "medium"),
+        (18_289, "high"),
+        (24_576, "high"),
+    ] {
+        for model in ["claude-sonnet-5", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            let req = wire_record_request(model, None, Some(("enabled", budget)), None);
+            assert_eq!(
+                convert_request(&req).unwrap().effort.as_deref(),
+                Some(expected),
+                "model={model} budget={budget}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_effort_derivation_precedence_and_exclusions() {
+    // 显式 output_config.effort 优先于预算推导
+    let req = wire_record_request(
+        "claude-opus-5",
+        None,
+        Some(("enabled", 24_576)),
+        Some("low"),
+    );
+    assert_eq!(
+        convert_request(&req).unwrap().effort.as_deref(),
+        Some("low")
+    );
+
+    // 空串 effort 视为未携带，回落到预算推导
+    let req = wire_record_request("claude-opus-5", None, Some(("enabled", 24_576)), Some(""));
+    assert_eq!(
+        convert_request(&req).unwrap().effort.as_deref(),
+        Some("high")
+    );
+
+    // adaptive 无预算：保持各自兜底
+    let req = wire_record_request("claude-sonnet-5", None, Some(("adaptive", 24_576)), None);
+    assert_eq!(
+        convert_request(&req).unwrap().effort.as_deref(),
+        Some("low")
+    );
+    let req = wire_record_request("gpt-5.6-terra", None, Some(("adaptive", 1_024)), None);
+    assert_eq!(
+        convert_request(&req).unwrap().effort.as_deref(),
+        Some("high")
+    );
+
+    // 预算推导不改变 thinking 文本标签：标签照常注入
+    let req = wire_record_request(
+        "claude-sonnet-5",
+        Some("sys"),
+        Some(("enabled", 24_576)),
+        None,
+    );
+    let result = convert_request(&req).unwrap();
+    assert_eq!(result.thinking_budget_tokens, Some(24_576));
+
+    // 4.5 代际不发 additionalModelRequestFields：无从映射
+    let req = wire_record_request("claude-sonnet-4.5", None, Some(("enabled", 24_576)), None);
+    assert_eq!(convert_request(&req).unwrap().effort, None);
+}
