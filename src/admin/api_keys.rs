@@ -32,6 +32,20 @@ fn record_labels(state: &AdminState) -> RecordLabels {
     }
 }
 
+/// 模型白名单归一：去首尾空白、去空项、去重；结果为空即"不限制"，存为 None
+///
+/// 例：`["  claude-opus-4.8 ", "", "claude-opus-4.8"]` → `Some(["claude-opus-4.8"])`；`[" "]` → `None`
+fn normalize_allowed_models(models: Option<Vec<String>>) -> Option<Vec<String>> {
+    let mut normalized: Vec<String> = Vec::new();
+    for model in models.into_iter().flatten() {
+        let trimmed = model.trim();
+        if !trimmed.is_empty() && !normalized.iter().any(|m| m == trimmed) {
+            normalized.push(trimmed.to_string());
+        }
+    }
+    (!normalized.is_empty()).then_some(normalized)
+}
+
 /// GET /api/admin/server-info
 /// 获取服务器信息
 pub async fn get_server_info(State(_state): State<AdminState>) -> impl IntoResponse {
@@ -75,6 +89,7 @@ pub async fn create_api_key(
         payload.limit_unit,
         payload.duration_days,
         payload.bound_credential_ids,
+        normalize_allowed_models(payload.allowed_models),
     ) {
         Ok(api_key) => (StatusCode::CREATED, Json(api_key)).into_response(),
         Err(e) => {
@@ -105,6 +120,7 @@ pub async fn update_api_key(
         payload.limit_unit,
         payload.duration_days,
         payload.bound_credential_ids,
+        payload.allowed_models.map(normalize_allowed_models),
     ) {
         Ok(Some(api_key)) => Json(api_key).into_response(),
         Ok(None) => {
@@ -682,7 +698,7 @@ mod tests {
             crate::model::api_key::ApiKeyManager::load(guard.0.join("api_keys.json")).unwrap(),
         );
         let key = manager
-            .create("ci-runner".to_string(), None, None, None, None, None)
+            .create("ci-runner".to_string(), None, None, None, None, None, None)
             .unwrap();
         assert_eq!(key.id, 1, "注入记录固定 api_key_id=1，首个 key 应分配到 1");
         let state = state.with_api_key_manager(manager);
@@ -726,5 +742,41 @@ mod tests {
             call_usage_records(empty_admin_state(), "from=2026-10-01&to=2026-10-07").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"]["type"], "internal_error");
+    }
+
+    /// 白名单归一：去空白/空项/重复；全空即"不限制"
+    #[test]
+    fn test_normalize_allowed_models() {
+        let raw = vec![
+            "  claude-opus-4.8 ".to_string(),
+            String::new(),
+            "claude-opus-4.8".to_string(),
+            "gpt-5.6-sol".to_string(),
+        ];
+        assert_eq!(
+            normalize_allowed_models(Some(raw)),
+            Some(vec![
+                "claude-opus-4.8".to_string(),
+                "gpt-5.6-sol".to_string()
+            ])
+        );
+        assert_eq!(normalize_allowed_models(Some(vec![" ".to_string()])), None);
+        assert_eq!(normalize_allowed_models(Some(Vec::new())), None);
+        assert_eq!(normalize_allowed_models(None), None);
+    }
+
+    /// 更新请求：allowedModels 缺失 / null / 有值 三态区分
+    #[test]
+    fn test_update_request_allowed_models_tri_state() {
+        let parse = |json: &str| -> UpdateApiKeyRequest { serde_json::from_str(json).unwrap() };
+        assert_eq!(parse("{}").allowed_models, None);
+        assert_eq!(
+            parse(r#"{"allowedModels":null}"#).allowed_models,
+            Some(None)
+        );
+        assert_eq!(
+            parse(r#"{"allowedModels":["glm-5"]}"#).allowed_models,
+            Some(Some(vec!["glm-5".to_string()]))
+        );
     }
 }

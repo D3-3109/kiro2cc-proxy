@@ -44,6 +44,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
   /** 是否选择"无限额度"，默认开启（不限制消费额度） */
   const [newUnlimited, setNewUnlimited] = useState(true)
   const [newBoundCredentialIds, setNewBoundCredentialIds] = useState<number[]>([])
+  const [newAllowedModels, setNewAllowedModels] = useState<string[]>([])
   const [editName, setEditName] = useState('')
   const [editMode, setEditMode] = useState<'date' | 'quota'>('date')
   const [editDuration, setEditDuration] = useState<number | null | string>(1)
@@ -52,6 +53,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
   const [editExpiryDirty, setEditExpiryDirty] = useState(false)
   const [editDurationUnit, setEditDurationUnit] = useState<'days' | 'hours'>('days')
   const [editBoundCredentialIds, setEditBoundCredentialIds] = useState<number[]>([])
+  const [editAllowedModels, setEditAllowedModels] = useState<string[]>([])
   const [editSpendingLimit, setEditSpendingLimit] = useState(50)
   const [editLimitUnit, setEditLimitUnit] = useState<'usd' | 'credits'>('usd')
   const [copiedId, setCopiedId] = useState<number | null>(null)
@@ -201,6 +203,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             : {}
           : { spendingLimit: newUnlimited ? null : newSpendingLimit, limitUnit: newLimitUnit }),
         boundCredentialIds: newBoundCredentialIds.length > 0 ? newBoundCredentialIds : null,
+        allowedModels: newAllowedModels.length > 0 ? newAllowedModels : null,
       },
       {
         onSuccess: () => {
@@ -214,6 +217,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
           setNewLimitUnit('usd')
           setNewUnlimited(true)
           setNewBoundCredentialIds([])
+          setNewAllowedModels([])
         },
         onError: (err) => toast.error(t('apiKeys.toastCreateFailed', { message: extractErrorMessage(err) })),
       }
@@ -245,6 +249,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
       data.durationDays = null // 清除懒激活
     }
     data.boundCredentialIds = editBoundCredentialIds.length > 0 ? editBoundCredentialIds : null
+    data.allowedModels = editAllowedModels.length > 0 ? editAllowedModels : null
     updateKey(
       { id: editingKey.id, data },
       {
@@ -298,6 +303,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
       }
     }
     setEditBoundCredentialIds(key.boundCredentialIds ?? [])
+    setEditAllowedModels(key.allowedModels ?? [])
   }
 
   const formatDate = (dateStr: string) => {
@@ -776,6 +782,8 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         setNewUnlimited={setNewUnlimited}
         newBoundCredentialIds={newBoundCredentialIds}
         setNewBoundCredentialIds={setNewBoundCredentialIds}
+        newAllowedModels={newAllowedModels}
+        setNewAllowedModels={setNewAllowedModels}
         credentials={credentials?.credentials}
         credentialBalanceMap={credentialBalanceMap}
         createCredDropdownRef={createCredDropdownRef}
@@ -803,6 +811,8 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         setEditDurationUnit={setEditDurationUnit}
         editBoundCredentialIds={editBoundCredentialIds}
         setEditBoundCredentialIds={setEditBoundCredentialIds}
+        editAllowedModels={editAllowedModels}
+        setEditAllowedModels={setEditAllowedModels}
         editSpendingLimit={editSpendingLimit}
         setEditSpendingLimit={setEditSpendingLimit}
         editLimitUnit={editLimitUnit}

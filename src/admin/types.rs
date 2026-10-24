@@ -524,6 +524,9 @@ pub struct CreateApiKeyRequest {
     /// 绑定的账号 ID 列表
     #[serde(default)]
     pub bound_credential_ids: Option<Vec<u64>>,
+    /// 可调用模型白名单（空或缺省表示不限制）
+    #[serde(default)]
+    pub allowed_models: Option<Vec<String>>,
 }
 
 /// 更新 API Key 请求
@@ -551,6 +554,9 @@ pub struct UpdateApiKeyRequest {
     /// 绑定的账号 ID 列表（null 表示清除绑定）
     #[serde(default, deserialize_with = "deserialize_optional_vec_u64")]
     pub bound_credential_ids: Option<Option<Vec<u64>>>,
+    /// 可调用模型白名单（null 表示清除限制）
+    #[serde(default, deserialize_with = "deserialize_optional_vec_string")]
+    pub allowed_models: Option<Option<Vec<String>>>,
 }
 
 /// 区分 JSON 中"字段缺失"与"字段为 null"
@@ -569,6 +575,17 @@ where
 fn deserialize_optional_vec_u64<'de, D>(
     deserializer: D,
 ) -> Result<Option<Option<Vec<u64>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
+}
+
+/// 区分 JSON 中"字段缺失"与"字段为 null"（Vec<String> 版本）
+/// 缺失 → None（不更新），null → Some(None)（清除限制），有值 → Some(Some(models))
+fn deserialize_optional_vec_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Vec<String>>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

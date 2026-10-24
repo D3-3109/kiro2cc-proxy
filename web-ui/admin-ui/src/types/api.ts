@@ -150,6 +150,8 @@ export interface ApiKeyItem {
   durationDays: number | null
   activatedAt: string | null
   boundCredentialIds?: number[]
+  /** 可调用模型白名单；缺省表示不限制 */
+  allowedModels?: string[]
 }
 
 export interface CreateApiKeyRequest {
@@ -159,6 +161,7 @@ export interface CreateApiKeyRequest {
   limitUnit?: 'usd' | 'credits'
   durationDays?: number | null
   boundCredentialIds?: number[] | null
+  allowedModels?: string[] | null
 }
 
 export interface UpdateApiKeyRequest {
@@ -169,6 +172,7 @@ export interface UpdateApiKeyRequest {
   limitUnit?: 'usd' | 'credits'
   durationDays?: number | null
   boundCredentialIds?: number[] | null
+  allowedModels?: string[] | null
 }
 
 // API Key 用量汇总

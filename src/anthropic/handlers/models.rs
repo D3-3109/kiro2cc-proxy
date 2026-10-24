@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 //! 模型列表 Handler：/v1/models 端点，静态列表与上游动态拉取相结合，带 TTL 缓存（CachedModels）。
 
-use crate::anthropic::middleware::AppState;
+use crate::anthropic::middleware::{ApiKeyContext, AppState};
 use crate::anthropic::types::{ErrorResponse, Model, ModelsResponse};
 
 use axum::{
+    Extension,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Json, Response},
@@ -14,13 +15,28 @@ use std::time::Duration;
 /// GET /v1/models
 ///
 /// 返回可用的模型列表（动态来源，带 TTL 缓存 + 静态表回退）
-pub async fn get_models(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn get_models(
+    State(state): State<AppState>,
+    identity: Option<Extension<ApiKeyContext>>,
+) -> impl IntoResponse {
     tracing::info!("Received GET /v1/models request");
 
     Json(ModelsResponse {
         object: "list".to_string(),
-        data: fetch_models_dynamic(&state).await,
+        data: models_visible_to(&state, identity.as_deref()).await,
     })
+}
+
+/// 按 Key 的模型白名单过滤模型列表，客户端只看到可调用的模型
+async fn models_visible_to(state: &AppState, identity: Option<&ApiKeyContext>) -> Vec<Model> {
+    let models = fetch_models_dynamic(state).await;
+    let Some(context) = identity else {
+        return models;
+    };
+    models
+        .into_iter()
+        .filter(|m| context.allows_model(&m.id))
+        .collect()
 }
 
 /// 模型缓存别名，简化签名
@@ -556,12 +572,13 @@ pub(crate) fn available_model_to_model(
 /// 返回指定模型的信息
 pub async fn get_model(
     State(state): State<AppState>,
+    identity: Option<Extension<ApiKeyContext>>,
     axum::extract::Path(model_id): axum::extract::Path<String>,
 ) -> Response {
     tracing::info!(model_id = %model_id, "Received GET /v1/models/:model_id request");
 
-    // 与 /v1/models 相同的动态来源，查找匹配的模型
-    let models = fetch_models_dynamic(&state).await;
+    // 与 /v1/models 相同的动态来源与白名单过滤，查找匹配的模型
+    let models = models_visible_to(&state, identity.as_deref()).await;
     if let Some(model) = models.into_iter().find(|m| m.id == model_id) {
         Json(model).into_response()
     } else {

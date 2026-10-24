@@ -38,6 +38,31 @@ pub struct ApiKeyContext {
     pub id: u32,
     /// 绑定的账号 ID 列表，None 表示不限制
     pub bound_credential_ids: Option<Vec<u64>>,
+    /// 可调用模型白名单（规范模型 ID），None 或空表示不限制
+    pub allowed_models: Option<Vec<String>>,
+}
+
+impl ApiKeyContext {
+    /// 判断该 Key 是否允许调用 `requested_model`
+    ///
+    /// 白名单项与请求模型名都经 `map_model` 归一为规范 ID 再比对，
+    /// 例：白名单 `claude-opus-4.8` 放行 `claude-opus-4-8-20251101`、`claude-opus-4.8-thinking`。
+    pub fn allows_model(&self, requested_model: &str) -> bool {
+        let Some(allowed) = self.allowed_models.as_deref() else {
+            return true;
+        };
+        if allowed.is_empty() {
+            return true;
+        }
+
+        let requested = canonical_model_id(requested_model);
+        allowed.iter().any(|m| canonical_model_id(m) == requested)
+    }
+}
+
+/// 模型名归一为规范 ID；`map_model` 无法识别（空串）时原样返回
+fn canonical_model_id(model: &str) -> String {
+    crate::anthropic::converter::map_model(model).unwrap_or_else(|| model.to_string())
 }
 
 /// 应用共享状态
@@ -171,6 +196,7 @@ pub async fn auth_middleware(
                 spending_limit,
                 limit_unit,
                 bound_credential_ids,
+                allowed_models,
             } => {
                 // 懒激活：首次使用时激活 key
                 if let Err(e) = manager.activate_key(id) {
@@ -214,6 +240,7 @@ pub async fn auth_middleware(
                 request.extensions_mut().insert(ApiKeyContext {
                     id,
                     bound_credential_ids,
+                    allowed_models,
                 });
                 return next.run(request).await;
             }
@@ -258,4 +285,52 @@ pub fn cors_layer() -> tower_http::cors::CorsLayer {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiKeyContext;
+
+    fn context(allowed_models: Option<Vec<&str>>) -> ApiKeyContext {
+        ApiKeyContext {
+            id: 1,
+            bound_credential_ids: None,
+            allowed_models: allowed_models
+                .map(|models| models.into_iter().map(str::to_string).collect()),
+        }
+    }
+
+    #[test]
+    fn test_allows_model_unrestricted_when_none_or_empty() {
+        assert!(context(None).allows_model("claude-opus-4.8"));
+        assert!(context(Some(vec![])).allows_model("claude-opus-4.8"));
+    }
+
+    #[test]
+    fn test_allows_model_matches_canonical_id() {
+        let ctx = context(Some(vec!["claude-opus-4.8", "gpt-5.6-terra"]));
+        assert!(ctx.allows_model("claude-opus-4.8"));
+        assert!(ctx.allows_model("claude-opus-4-8"));
+        assert!(ctx.allows_model("claude-opus-4.8-thinking"));
+        assert!(ctx.allows_model("gpt-5.6-terra"));
+
+        assert!(!ctx.allows_model("claude-opus-4.7"));
+        assert!(!ctx.allows_model("claude-sonnet-4.6"));
+        assert!(!ctx.allows_model("gpt-5.6-sol"));
+    }
+
+    /// 白名单手填连字符/带 -thinking 的写法同样归一后比对
+    #[test]
+    fn test_allows_model_normalizes_whitelist_entries() {
+        let ctx = context(Some(vec!["claude-opus-4-8-thinking"]));
+        assert!(ctx.allows_model("claude-opus-4.8"));
+    }
+
+    /// 未命中内置规则的第三方模型按透传 ID 精确比对
+    #[test]
+    fn test_allows_model_passthrough_model_exact_match() {
+        let ctx = context(Some(vec!["my-custom-model"]));
+        assert!(ctx.allows_model("my-custom-model"));
+        assert!(!ctx.allows_model("other-custom-model"));
+    }
 }

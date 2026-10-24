@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
 import { CredentialMultiSelect } from '@/components/api-keys/credential-multi-select'
+import { ModelMultiSelect } from '@/components/api-keys/model-multi-select'
 
 const quickDurationOptions = [
   { value: 1, unit: 'hours' as const },
@@ -45,6 +46,8 @@ interface CreateKeyDialogProps {
   setNewUnlimited: (v: boolean) => void
   newBoundCredentialIds: number[]
   setNewBoundCredentialIds: (ids: number[]) => void
+  newAllowedModels: string[]
+  setNewAllowedModels: (models: string[]) => void
   credentials: CredentialStatusItem[] | undefined
   credentialBalanceMap: Map<number, BalanceResponse>
   createCredDropdownRef: React.RefObject<HTMLDivElement>
@@ -77,6 +80,8 @@ export function CreateKeyDialog({
   setNewUnlimited,
   newBoundCredentialIds,
   setNewBoundCredentialIds,
+  newAllowedModels,
+  setNewAllowedModels,
   credentials,
   credentialBalanceMap,
   createCredDropdownRef,
@@ -250,6 +255,11 @@ export function CreateKeyDialog({
               />
             </div>
           )}
+          <div>
+            <label className="text-sm font-medium">{t('apiKeys.allowedModelsLabel')}</label>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('apiKeys.allowedModelsHint')}</p>
+            <ModelMultiSelect selected={newAllowedModels} onChange={setNewAllowedModels} />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>

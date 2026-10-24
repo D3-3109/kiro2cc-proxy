@@ -21,7 +21,8 @@ use super::bridge::build_bridge_context;
 use super::error::parse_messages_request;
 use super::helpers::{
     extract_client_ip, extract_user_agent, is_suggestion_mode_request,
-    override_thinking_from_model_name, resolve_thinking_enabled, suggestion_mode_response,
+    override_thinking_from_model_name, reject_disallowed_model, resolve_thinking_enabled,
+    suggestion_mode_response,
 };
 use super::nonstream::handle_non_stream_request;
 use super::stream::handle_stream_request;
@@ -41,6 +42,10 @@ pub async fn post_messages(
         Ok(p) => p,
         Err(resp) => return resp,
     };
+
+    if let Some(resp) = reject_disallowed_model(identity.as_deref(), &payload.model) {
+        return resp;
+    }
 
     // 拦截 Claude Code 输入建议请求（Suggestion Mode）：不转发 Kiro，直接返回空响应。
     // 这类请求携带全量上下文却只产出候选短语，转发会按全价计费且污染 prompt cache。

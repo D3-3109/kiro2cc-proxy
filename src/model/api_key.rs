@@ -42,6 +42,10 @@ pub struct ApiKey {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bound_credential_ids: Option<Vec<u64>>,
+    /// 可调用模型白名单，None 或空列表表示不限制
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_models: Option<Vec<String>>,
 }
 
 fn default_enabled() -> bool {
@@ -63,6 +67,7 @@ impl ApiKey {
         limit_unit: String,
         duration_days: Option<f64>,
         bound_credential_ids: Option<Vec<u64>>,
+        allowed_models: Option<Vec<String>>,
     ) -> Self {
         Self {
             id,
@@ -76,6 +81,7 @@ impl ApiKey {
             duration_days,
             activated_at: None,
             bound_credential_ids,
+            allowed_models,
         }
     }
 
@@ -124,6 +130,7 @@ pub enum ApiKeyAuthResult {
         spending_limit: Option<f64>,
         limit_unit: String,
         bound_credential_ids: Option<Vec<u64>>,
+        allowed_models: Option<Vec<String>>,
     },
     /// Key 已被禁用
     Disabled,
@@ -289,6 +296,7 @@ impl ApiKeyManager {
                         spending_limit: api_key.spending_limit,
                         limit_unit: api_key.limit_unit.clone(),
                         bound_credential_ids: api_key.bound_credential_ids.clone(),
+                        allowed_models: api_key.allowed_models.clone(),
                     }
                 }
             }
@@ -307,6 +315,7 @@ impl ApiKeyManager {
                 spending_limit: api_key.spending_limit,
                 limit_unit: api_key.limit_unit.clone(),
                 bound_credential_ids: api_key.bound_credential_ids.clone(),
+                allowed_models: api_key.allowed_models.clone(),
             },
             None => ApiKeyAuthResult::NotFound,
         }
@@ -326,6 +335,7 @@ impl ApiKeyManager {
         limit_unit: Option<String>,
         duration_days: Option<f64>,
         bound_credential_ids: Option<Vec<u64>>,
+        allowed_models: Option<Vec<String>>,
     ) -> anyhow::Result<ApiKey> {
         // 先分配 id 再取写锁：allocate_new_id 内含 fsync 磁盘写，不应持写锁跨越
         let next_id = self.allocate_new_id();
@@ -337,6 +347,7 @@ impl ApiKeyManager {
             limit_unit.unwrap_or_else(default_limit_unit),
             duration_days,
             bound_credential_ids,
+            allowed_models,
         );
         self.keys.write().push(api_key.clone());
         self.save()?;
@@ -355,6 +366,7 @@ impl ApiKeyManager {
         limit_unit: Option<String>,
         duration_days: Option<Option<f64>>,
         bound_credential_ids: Option<Option<Vec<u64>>>,
+        allowed_models: Option<Option<Vec<String>>>,
     ) -> anyhow::Result<Option<ApiKey>> {
         let mut keys = self.keys.write();
         let Some(api_key) = keys.iter_mut().find(|k| k.id == id) else {
@@ -417,6 +429,9 @@ impl ApiKeyManager {
         }
         if let Some(ids) = bound_credential_ids {
             api_key.bound_credential_ids = ids;
+        }
+        if let Some(models) = allowed_models {
+            api_key.allowed_models = models;
         }
         let updated = api_key.clone();
         drop(keys);
@@ -484,7 +499,7 @@ mod tests {
     }
 
     fn create_key(mgr: &ApiKeyManager, name: &str) -> ApiKey {
-        mgr.create(name.to_string(), None, None, None, None, None)
+        mgr.create(name.to_string(), None, None, None, None, None, None)
             .unwrap()
     }
 
@@ -575,7 +590,17 @@ mod tests {
 
         let before = Utc::now();
         let updated = mgr
-            .update(key.id, None, None, None, None, None, Some(Some(7.0)), None)
+            .update(
+                key.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Some(7.0)),
+                None,
+                None,
+            )
             .unwrap()
             .unwrap();
         let after = Utc::now();
@@ -596,13 +621,33 @@ mod tests {
         let key = create_key(&mgr, "k1");
         // 先禁用
         let disabled = mgr
-            .update(key.id, None, Some(false), None, None, None, None, None)
+            .update(
+                key.id,
+                None,
+                Some(false),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .unwrap()
             .unwrap();
         assert!(disabled.activated_at.is_none());
 
         let updated = mgr
-            .update(key.id, None, None, None, None, None, Some(Some(7.0)), None)
+            .update(
+                key.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Some(7.0)),
+                None,
+                None,
+            )
             .unwrap()
             .unwrap();
 
@@ -622,12 +667,22 @@ mod tests {
         let dir = TempDirGuard::new();
         let mgr = ApiKeyManager::load(dir.keys_path()).unwrap();
         let key = mgr
-            .create("k1".to_string(), None, None, None, Some(3.0), None)
+            .create("k1".to_string(), None, None, None, Some(3.0), None, None)
             .unwrap();
         assert!(key.activated_at.is_none());
 
         let updated = mgr
-            .update(key.id, None, None, None, None, None, Some(Some(7.0)), None)
+            .update(
+                key.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Some(7.0)),
+                None,
+                None,
+            )
             .unwrap()
             .unwrap();
         assert!(
@@ -636,5 +691,65 @@ mod tests {
         );
         assert!(updated.expires_at.is_none());
         assert_eq!(updated.duration_days, Some(7.0));
+    }
+
+    /// allowed_models：创建写入、认证透传、缺失不改、null 清除，并跨重启持久化
+    #[test]
+    fn test_allowed_models_create_update_clear_and_persist() {
+        let dir = TempDirGuard::new();
+        let mgr = ApiKeyManager::load(dir.keys_path()).unwrap();
+        let models = vec!["claude-opus-4.8".to_string()];
+        let key = mgr
+            .create(
+                "k1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(models.clone()),
+            )
+            .unwrap();
+        assert_eq!(key.allowed_models, Some(models.clone()));
+
+        let ApiKeyAuthResult::Valid { allowed_models, .. } = mgr.authenticate(&key.key) else {
+            panic!("新建 key 应认证通过");
+        };
+        assert_eq!(allowed_models, Some(models.clone()));
+
+        // 字段缺失（None）→ 不改
+        let renamed = mgr
+            .update(
+                key.id,
+                Some("k1-renamed".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(renamed.allowed_models, Some(models));
+
+        // null（Some(None)）→ 清除
+        let cleared = mgr
+            .update(key.id, None, None, None, None, None, None, None, Some(None))
+            .unwrap()
+            .unwrap();
+        assert!(cleared.allowed_models.is_none());
+
+        let reloaded = ApiKeyManager::load(dir.keys_path()).unwrap();
+        assert!(reloaded.list()[0].allowed_models.is_none());
+    }
+
+    /// 存量 api_keys.json 无 allowedModels 字段：反序列化为 None（不限制）
+    #[test]
+    fn test_legacy_key_without_allowed_models_deserializes_unrestricted() {
+        let legacy = r#"{"id":1,"key":"sk-x","name":"old","createdAt":"2026-01-01T00:00:00Z"}"#;
+        let key: ApiKey = serde_json::from_str(legacy).unwrap();
+        assert!(key.allowed_models.is_none());
     }
 }

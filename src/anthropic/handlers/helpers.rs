@@ -2,8 +2,9 @@
 //! Handler 杂项工具：剥离 JSON 代码围栏、提取客户端 IP、按模型名覆盖 thinking 开关、/v1/messages/count_tokens 计数端点、suggestion 模式请求识别与快速响应。
 
 use crate::anthropic::converter::is_luna_model;
+use crate::anthropic::middleware::ApiKeyContext;
 use crate::anthropic::types::{
-    CountTokensRequest, CountTokensResponse, MessagesRequest, OutputConfig, Thinking,
+    CountTokensRequest, CountTokensResponse, ErrorResponse, MessagesRequest, OutputConfig, Thinking,
 };
 
 use crate::token;
@@ -11,6 +12,24 @@ use axum::{
     Json as JsonExtractor,
     response::{IntoResponse, Json},
 };
+
+/// 模型白名单拦截：Key 无权调用 `model` 时返回 403，放行时返回 None
+pub(crate) fn reject_disallowed_model(
+    identity: Option<&ApiKeyContext>,
+    model: &str,
+) -> Option<axum::response::Response> {
+    let context = identity?;
+    if context.allows_model(model) {
+        return None;
+    }
+
+    tracing::warn!(api_key_id = context.id, model = %model, "API Key 无权调用该模型");
+    let error = ErrorResponse::new(
+        "forbidden",
+        format!("Model '{}' is not allowed for this API key.", model),
+    );
+    Some((axum::http::StatusCode::FORBIDDEN, Json(error)).into_response())
+}
 
 /// 去除 JSON 响应中模型可能添加的 Markdown 代码围栏
 ///
@@ -377,6 +396,28 @@ mod tests {
             .await
             .unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn reject_disallowed_model_returns_403_only_outside_whitelist() {
+        let ctx = ApiKeyContext {
+            id: 1,
+            bound_credential_ids: None,
+            allowed_models: Some(vec!["claude-opus-4.8".to_string()]),
+        };
+        assert!(reject_disallowed_model(None, "claude-opus-4.7").is_none());
+        assert!(reject_disallowed_model(Some(&ctx), "claude-opus-4-8").is_none());
+
+        let resp = reject_disallowed_model(Some(&ctx), "claude-opus-4.7").expect("应拦截");
+        assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+        let v: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(v["error"]["type"], "forbidden");
+        assert!(
+            v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("claude-opus-4.7")
+        );
     }
 
     #[tokio::test]

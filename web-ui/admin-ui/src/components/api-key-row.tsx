@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useTranslation } from 'react-i18next'
 import {
+  Boxes,
   Check,
   Copy,
   FileText,
@@ -110,6 +111,7 @@ export function ApiKeyRow({
   // 后端返回畸形日期时 getFullYear 等会给出 NaN，静默渲染成 NaN-NaN-NaN
   const activatedValid = !Number.isNaN(activated.getTime())
   const boundTitle = bound.map((b) => (b.balance ? `${b.label} ${b.balance}` : b.label)).join('\n')
+  const allowedModels = apiKey.allowedModels ?? []
 
   return (
     <tr className={`transition-colors hover:bg-surface-2 ${dimmed ? '[&>td:not(:last-child)]:opacity-[.55]' : ''}`}>
@@ -191,6 +193,15 @@ export function ApiKeyRow({
             <span className="truncate">{bound[0].label}</span>
             {bound.length > 1 && <span className="flex-none opacity-70">+{bound.length - 1}</span>}
           </span>
+        )}
+        {allowedModels.length > 0 && (
+          <div
+            className="ml-[5px] inline-flex items-center gap-[5px] whitespace-nowrap text-[10.5px] text-ink-3"
+            title={allowedModels.join('\n')}
+          >
+            <Boxes className="size-[12px] flex-none" strokeWidth={1.7} />
+            {t('apiKeys.allowedModelsCount', { count: allowedModels.length })}
+          </div>
         )}
       </td>
 

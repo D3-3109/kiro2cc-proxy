@@ -123,6 +123,7 @@ mod tests {
     async fn test_get_model_hit() {
         let resp = get_model(
             State(test_state()),
+            None,
             axum::extract::Path("claude-3-5-sonnet-20241022".to_string()),
         )
         .await;
@@ -134,6 +135,7 @@ mod tests {
     async fn test_get_model_not_found() {
         let resp = get_model(
             State(test_state()),
+            None,
             axum::extract::Path("no-such-model-xyz".to_string()),
         )
         .await;

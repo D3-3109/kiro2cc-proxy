@@ -20,7 +20,8 @@ use crate::anthropic::types::ErrorResponse;
 use super::error::parse_messages_request;
 use super::helpers::{
     extract_client_ip, extract_user_agent, is_suggestion_mode_request,
-    override_thinking_from_model_name, resolve_thinking_enabled, suggestion_mode_response,
+    override_thinking_from_model_name, reject_disallowed_model, resolve_thinking_enabled,
+    suggestion_mode_response,
 };
 use super::nonstream::handle_non_stream_request;
 use super::stream::handle_stream_request;
@@ -51,6 +52,10 @@ pub async fn post_messages_cc(
         Ok(p) => p,
         Err(resp) => return resp,
     };
+
+    if let Some(resp) = reject_disallowed_model(identity.as_deref(), &payload.model) {
+        return resp;
+    }
 
     // 拦截 Claude Code 输入建议请求（Suggestion Mode）：不转发 Kiro，直接返回空响应。
     // forward_suggestion_mode=true 时放行（设置页可运行时热切换），正常转发上游。

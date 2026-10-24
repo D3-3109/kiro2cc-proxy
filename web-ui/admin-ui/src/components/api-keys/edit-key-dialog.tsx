@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import type { ApiKeyItem, BalanceResponse, CredentialStatusItem } from '@/types/api'
 import { CredentialMultiSelect } from '@/components/api-keys/credential-multi-select'
+import { ModelMultiSelect } from '@/components/api-keys/model-multi-select'
 import { localeTag } from '@/lib/locale'
 
 const quickDurationOptions = [
@@ -41,6 +42,8 @@ interface EditKeyDialogProps {
   setEditDurationUnit: (v: 'days' | 'hours') => void
   editBoundCredentialIds: number[]
   setEditBoundCredentialIds: (ids: number[]) => void
+  editAllowedModels: string[]
+  setEditAllowedModels: (models: string[]) => void
   editSpendingLimit: number
   setEditSpendingLimit: (v: number) => void
   editLimitUnit: 'usd' | 'credits'
@@ -73,6 +76,8 @@ export function EditKeyDialog({
   setEditDurationUnit,
   editBoundCredentialIds,
   setEditBoundCredentialIds,
+  editAllowedModels,
+  setEditAllowedModels,
   editSpendingLimit,
   setEditSpendingLimit,
   editLimitUnit,
@@ -240,6 +245,11 @@ export function EditKeyDialog({
               />
             </div>
           )}
+          <div>
+            <label className="text-sm font-medium">{t('apiKeys.allowedModelsLabel')}</label>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('apiKeys.allowedModelsHint')}</p>
+            <ModelMultiSelect selected={editAllowedModels} onChange={setEditAllowedModels} />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setEditingKey(null)}>{t('common.cancel')}</Button>
