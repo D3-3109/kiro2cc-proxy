@@ -19,7 +19,9 @@ use super::prompt::{
     is_dynamic_hook_injection, is_token_budget_reminder, normalize_billing_header,
 };
 use super::result::ConversionError;
-use super::thinking::{generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags};
+use super::thinking::{
+    generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags, thinking_prefix_budget,
+};
 
 /// 历史 assistant 文本回传上游前的净化：先整块剥离文本化思考（标记行 + 正文 + 时长行），
 /// 再剥 dim 样式码（含模型模仿产生的字面 `[2m…[0m` 整行包裹），避免上游模型模仿该格式。
@@ -27,6 +29,17 @@ use super::thinking::{generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_th
 fn sanitize_rendered_history_text(text: &str) -> String {
     let stripped = crate::anthropic::stream::strip_rendered_thinking(text);
     crate::anthropic::stream::strip_dim_markers(&stripped).into_owned()
+}
+
+/// `build_history` 产物
+pub(super) struct BuiltHistory {
+    pub history: Vec<Message>,
+    /// 从 history[0] 分流出的动态系统块（放到当前消息开头）
+    pub dynamic_system: String,
+    /// 实际注入 history[0] 的 thinking 文本标签所带预算（未注入为 None）
+    pub injected_thinking_budget: Option<i32>,
+    /// 缓存前缀是否已命中会话级冻结缓存（判定见 [`determine_prefix_cached`]）
+    pub prefix_cached: bool,
 }
 
 /// 构建历史消息
@@ -42,12 +55,15 @@ pub(super) fn build_history(
     system: Option<&[&str]>,
     model_id: &str,
     session_id: &str,
-) -> Result<(Vec<Message>, String, bool), ConversionError> {
+) -> Result<BuiltHistory, ConversionError> {
     let mut history = Vec::new();
     let mut h0_frozen = true;
 
     // 生成 thinking 前缀（仅 luna 不使用 Claude/Kiro 文本控制标签）
+    let thinking_budget = thinking_prefix_budget(req, model_id);
     let thinking_prefix = generate_thinking_prefix(req, model_id);
+    // 客户端自带标签 / 系统消息为空时前缀不注入，预算也不计
+    let mut injected_thinking_budget = None;
     // GPT 系模型在客户端请求 thinking 时，额外注入反伪标签引导语（见函数文档）
     let anti_pseudo_tag_hint = gpt_anti_pseudo_tag_hint(req, model_id);
 
@@ -84,6 +100,7 @@ pub(super) fn build_history(
             // 注入thinking标签到系统消息最前面（如果需要且不存在）
             let static_content = if let Some(ref prefix) = thinking_prefix {
                 if !has_thinking_tags(&system_content) {
+                    injected_thinking_budget = thinking_budget;
                     format!("{}\n{}", prefix, system_content)
                 } else {
                     system_content
@@ -156,6 +173,7 @@ pub(super) fn build_history(
         }
     } else if let Some(ref prefix) = thinking_prefix {
         // 没有系统消息但有thinking配置，插入新的系统消息
+        injected_thinking_budget = thinking_budget;
         let user_msg = HistoryUserMessage::new(prefix.clone(), model_id);
         history.push(Message::User(user_msg));
 
@@ -217,11 +235,12 @@ pub(super) fn build_history(
         history.push(Message::Assistant(auto_assistant));
     }
 
-    Ok((
+    Ok(BuiltHistory {
         history,
-        dynamic_content,
-        determine_prefix_cached(history_end_index > 0, h0_frozen),
-    ))
+        dynamic_system: dynamic_content,
+        injected_thinking_budget,
+        prefix_cached: determine_prefix_cached(history_end_index > 0, h0_frozen),
+    })
 }
 
 /// `prefix_cached` 判定：本请求的缓存前缀（history[0] + 历史轮次）是否已命中会话级冻结缓存。

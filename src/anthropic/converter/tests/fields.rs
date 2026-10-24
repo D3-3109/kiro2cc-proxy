@@ -465,3 +465,106 @@ fn test_additional_fields_skipped_for_unsupported_third_party_models() {
         "minimax-m2.1 实测支持该字段，不应跳过"
     );
 }
+
+fn wire_record_request(
+    model: &str,
+    system: Option<&str>,
+    thinking: Option<(&str, i32)>,
+    effort: Option<&str>,
+) -> MessagesRequest {
+    MessagesRequest {
+        model: model.to_string(),
+        max_tokens: 32000,
+        messages: vec![crate::anthropic::types::Message {
+            role: "user".to_string(),
+            content: serde_json::json!("Hello"),
+        }],
+        stream: false,
+        system: system.map(|s| {
+            vec![crate::anthropic::types::SystemMessage {
+                text: s.to_string(),
+            }]
+        }),
+        tools: None,
+        tool_choice: None,
+        thinking: thinking.map(|(t, budget)| crate::anthropic::types::Thinking {
+            thinking_type: t.to_string(),
+            budget_tokens: budget,
+        }),
+        output_config: effort.map(|e| crate::anthropic::types::OutputConfig {
+            effort: e.to_string(),
+            format: None,
+        }),
+        metadata: None,
+    }
+}
+
+#[test]
+fn test_conversion_result_effort_is_wire_value() {
+    // 客户端未携带 output_config：记录上游实际收到的兜底值 low（而非旧口径的 high）
+    let result =
+        convert_request(&wire_record_request("claude-sonnet-5", None, None, None)).unwrap();
+    assert_eq!(result.effort.as_deref(), Some("low"));
+
+    // 客户端显式携带：原值透传
+    let req = wire_record_request("claude-opus-5", None, None, Some("xhigh"));
+    assert_eq!(
+        convert_request(&req).unwrap().effort.as_deref(),
+        Some("xhigh")
+    );
+
+    // GPT 系走 reasoning.effort，兜底 high
+    let req = wire_record_request("gpt-5.6-terra", None, None, None);
+    assert_eq!(
+        convert_request(&req).unwrap().effort.as_deref(),
+        Some("high")
+    );
+
+    // 4.5 代际整体不发 additionalModelRequestFields：不记录 effort
+    let req = wire_record_request("claude-sonnet-4.5", None, None, Some("high"));
+    assert_eq!(convert_request(&req).unwrap().effort, None);
+}
+
+#[test]
+fn test_conversion_result_thinking_budget_follows_injected_tag() {
+    // enabled + 有系统消息：标签注入 history[0]，预算记录
+    let req = wire_record_request(
+        "claude-sonnet-5",
+        Some("sys"),
+        Some(("enabled", 12000)),
+        None,
+    );
+    assert_eq!(
+        convert_request(&req).unwrap().thinking_budget_tokens,
+        Some(12000)
+    );
+
+    // enabled + 无系统消息：标签单独成条注入，预算记录
+    let req = wire_record_request("claude-sonnet-5", None, Some(("enabled", 4096)), None);
+    assert_eq!(
+        convert_request(&req).unwrap().thinking_budget_tokens,
+        Some(4096)
+    );
+
+    // adaptive：不注入标签，无预算
+    let req = wire_record_request(
+        "claude-sonnet-5",
+        Some("sys"),
+        Some(("adaptive", 20000)),
+        None,
+    );
+    assert_eq!(convert_request(&req).unwrap().thinking_budget_tokens, None);
+
+    // 客户端系统消息已自带 thinking 标签：converter 不注入，预算不计
+    let req = wire_record_request(
+        "claude-sonnet-5",
+        Some("<thinking_mode>enabled</thinking_mode> sys"),
+        Some(("enabled", 12000)),
+        None,
+    );
+    assert_eq!(convert_request(&req).unwrap().thinking_budget_tokens, None);
+
+    // luna 不使用文本标签协议
+    let req = wire_record_request("gpt-5.6-luna", Some("sys"), Some(("enabled", 12000)), None);
+    assert_eq!(convert_request(&req).unwrap().thinking_budget_tokens, None);
+}

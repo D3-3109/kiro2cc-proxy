@@ -2,7 +2,7 @@
 use chrono::FixedOffset;
 use serde::Serialize;
 
-use super::pagination::{UsageRecordItem, UsageRecordsPage};
+use super::pagination::{RecordLabels, UsageRecordItem, UsageRecordsPage};
 use super::{UsageRecord, UsageTracker, get_k_ref};
 
 /// 单日明细查询的截断上限（既有行为，保持不变）
@@ -314,16 +314,9 @@ impl UsageTracker {
         date: &str,
         page: usize,
         page_size: usize,
-        credential_labels: &std::collections::HashMap<u64, String>,
+        labels: &RecordLabels,
     ) -> UsageRecordsPage {
-        self.paginate_records_in_range(
-            date,
-            date,
-            page,
-            page_size,
-            credential_labels,
-            MAX_DAILY_TOTAL,
-        )
+        self.paginate_records_in_range(date, date, page, page_size, labels, MAX_DAILY_TOTAL)
     }
 
     /// 分页查询 CST（UTC+8）闭区间 [from, to]（含两端）的原始记录，
@@ -334,16 +327,9 @@ impl UsageTracker {
         to: &str,
         page: usize,
         page_size: usize,
-        credential_labels: &std::collections::HashMap<u64, String>,
+        labels: &RecordLabels,
     ) -> UsageRecordsPage {
-        self.paginate_records_in_range(
-            from,
-            to,
-            page,
-            page_size,
-            credential_labels,
-            MAX_RANGE_TOTAL,
-        )
+        self.paginate_records_in_range(from, to, page, page_size, labels, MAX_RANGE_TOTAL)
     }
 
     /// 单日/区间明细共用管线：CST 日期闭区间过滤（YYYY-MM-DD 字典序即时间序）
@@ -354,7 +340,7 @@ impl UsageTracker {
         to: &str,
         page: usize,
         page_size: usize,
-        credential_labels: &std::collections::HashMap<u64, String>,
+        labels: &RecordLabels,
         max_total: usize,
     ) -> UsageRecordsPage {
         let page_size = page_size.clamp(1, 500);
@@ -399,34 +385,7 @@ impl UsageTracker {
             .into_iter()
             .skip(start)
             .take(page_size)
-            .map(|r| {
-                let credential_label = r
-                    .credential_id
-                    .and_then(|cid| credential_labels.get(&cid).cloned());
-                let credits_saved = r
-                    .credits_used
-                    .map(|cu| r.estimated_cost * get_k_ref(&r.model) - cu);
-                UsageRecordItem {
-                    model: r.model,
-                    input_tokens: r.input_tokens,
-                    output_tokens: r.output_tokens,
-                    estimated_cost: r.estimated_cost,
-                    credits_used: r.credits_used,
-                    credits_saved,
-                    cache_read_input_tokens: r.cache_read_input_tokens,
-                    cache_creation_input_tokens: r.cache_creation_input_tokens,
-                    created_at: r.created_at,
-                    credential_id: r.credential_id,
-                    credential_label,
-                    client_ip: r.client_ip,
-                    effort: r.effort,
-                    first_token_ms: r.first_token_ms,
-                    duration_ms: r.duration_ms,
-                    thinking_token_count: r.thinking_token_count,
-                    is_stream: r.is_stream,
-                    user_agent: r.user_agent,
-                }
-            })
+            .map(|r| UsageRecordItem::from_record(r, labels))
             .collect();
 
         UsageRecordsPage {

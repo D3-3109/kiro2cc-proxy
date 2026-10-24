@@ -44,6 +44,8 @@
     "cacheHitRateTitle": "缓存命中率 {{rate}}%（缓存读取 / 输入总计）",
     "thinkingLabel": "思考：",
     "thinkingBadge": "深度思考 Tokens",
+    "thinkingBudgetLabel": "思考预算 Tokens",
+    "apiKeyLabel": "API Key",
     "streamBadge": "流式",
     "nonStreamBadge": "非流",
     "totalInputLabel": "输入总计：",

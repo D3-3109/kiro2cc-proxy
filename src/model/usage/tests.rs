@@ -4,10 +4,9 @@
 mod tests {
 
     use crate::model::usage::{
-        RecordOptions, UsageTracker, calculate_cost, get_k_ref, infer_cache_read_from_credits,
-        refine_prefix_cache_read,
+        RecordLabels, RecordOptions, UsageTracker, calculate_cost, get_k_ref,
+        infer_cache_read_from_credits, refine_prefix_cache_read,
     };
-    use std::collections::HashMap;
 
     /// 每个测试使用独立目录隔离明细文件与累计基数文件（api_key_lifetime.json
     /// 固定落在明细同目录，仅隔离文件名会让所有测试共享/互踩同一累计文件）
@@ -135,6 +134,7 @@ mod tests {
             10,
             RecordOptions {
                 effort: Some("xhigh".to_string()),
+                thinking_budget_tokens: Some(12000),
                 ..Default::default()
             },
         );
@@ -157,14 +157,16 @@ mod tests {
                 ..Default::default()
             },
         );
-        let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
+        let page = tracker.get_records_paged(1, 1, 10, &RecordLabels::default());
         assert_eq!(page.records.len(), 3);
         // 有 effort 的记录映射到 UsageRecordItem
-        assert!(
-            page.records
-                .iter()
-                .any(|r| r.effort.as_deref() == Some("xhigh"))
-        );
+        let with_effort = page
+            .records
+            .iter()
+            .find(|r| r.effort.as_deref() == Some("xhigh"))
+            .expect("带 effort 的记录应在分页结果中");
+        // thinking 预算随记录透传到 DTO
+        assert_eq!(with_effort.thinking_budget_tokens, Some(12000));
         // None 兜底：未传 output_config 的旧请求 effort 保持 None
         assert!(page.records.iter().any(|r| r.effort.is_none()));
         // 带耗时的记录：record() 入参 → 分页 DTO 的 Some 值透传（按值 find 定位，
@@ -202,6 +204,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             client_ip: None,
             effort: None,
+            thinking_budget_tokens: None,
             first_token_ms: Some(1234),
             duration_ms: Some(5678),
             thinking_token_count: None,
@@ -251,6 +254,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             client_ip: None,
             effort: None,
+            thinking_budget_tokens: None,
             first_token_ms: None,
             duration_ms: None,
             thinking_token_count: Some(1034),
@@ -294,7 +298,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
+        let page = tracker.get_records_paged(1, 1, 10, &RecordLabels::default());
         assert_eq!(page.records.len(), 1);
         assert_eq!(
             page.records[0].user_agent.as_deref(),
@@ -308,7 +312,7 @@ mod tests {
                 .format("%Y-%m-%d")
                 .to_string()
         };
-        let daily = tracker.get_records_paged_by_date(&cst_today, 1, 10, &HashMap::new());
+        let daily = tracker.get_records_paged_by_date(&cst_today, 1, 10, &RecordLabels::default());
         assert_eq!(daily.records.len(), 1);
         assert_eq!(
             daily.records[0].user_agent.as_deref(),
@@ -335,6 +339,7 @@ mod tests {
             created_at,
             client_ip: None,
             effort: None,
+            thinking_budget_tokens: None,
             first_token_ms: None,
             duration_ms: None,
             thinking_token_count: None,
@@ -375,6 +380,7 @@ mod tests {
             created_at,
             client_ip: None,
             effort: None,
+            thinking_budget_tokens: None,
             first_token_ms: None,
             duration_ms: None,
             thinking_token_count: None,
@@ -401,9 +407,14 @@ mod tests {
         inject_record_at(&tracker, utc_at("2026-10-03T10:00:00Z"));
 
         for date in ["2026-10-01", "2026-10-02", "2026-10-03"] {
-            let daily = tracker.get_records_paged_by_date(date, 1, 10, &HashMap::new());
-            let ranged =
-                tracker.get_records_paged_by_date_range(date, date, 1, 10, &HashMap::new());
+            let daily = tracker.get_records_paged_by_date(date, 1, 10, &RecordLabels::default());
+            let ranged = tracker.get_records_paged_by_date_range(
+                date,
+                date,
+                1,
+                10,
+                &RecordLabels::default(),
+            );
             assert_eq!(ranged.total, daily.total);
             assert_eq!(ranged.total_pages, daily.total_pages);
             assert_eq!(ranged.page, daily.page);
@@ -431,7 +442,7 @@ mod tests {
             "2026-10-04",
             1,
             10,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(page.total, 4);
         assert_eq!(page.total_pages, 1);
@@ -455,7 +466,7 @@ mod tests {
             "2026-10-01",
             1,
             10,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(day1.total, 1);
         assert_eq!(day1.records[0].created_at, utc_at("2026-10-01T15:30:00Z"));
@@ -465,7 +476,7 @@ mod tests {
             "2026-10-02",
             1,
             10,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(day2.total, 1);
         assert_eq!(day2.records[0].created_at, utc_at("2026-10-01T16:30:00Z"));
@@ -475,7 +486,7 @@ mod tests {
             "2026-10-02",
             1,
             10,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(both.total, 2);
         assert_eq!(both.records[0].created_at, utc_at("2026-10-01T16:30:00Z")); // 降序：更晚在前
@@ -494,7 +505,7 @@ mod tests {
             "2026-10-03",
             1,
             10,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert!(page.records.is_empty());
         assert_eq!(page.total, 0);
@@ -517,7 +528,7 @@ mod tests {
             "2026-10-02",
             1,
             0,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(zero.page_size, 1);
         assert_eq!(zero.records.len(), 1);
@@ -528,7 +539,7 @@ mod tests {
             "2026-10-02",
             1,
             9999,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(huge.page_size, 500);
         assert_eq!(huge.records.len(), 3);
@@ -551,7 +562,7 @@ mod tests {
             "2026-10-02",
             1,
             100,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(first.total, 10_000);
         assert_eq!(first.total_pages, 100);
@@ -564,7 +575,7 @@ mod tests {
             "2026-10-02",
             100,
             100,
-            &HashMap::new(),
+            &RecordLabels::default(),
         );
         assert_eq!(last.records.len(), 100);
         assert_eq!(
@@ -572,7 +583,8 @@ mod tests {
             base + chrono::Duration::milliseconds(5)
         ); // 末页末条 = 截断后最旧（i=5，恰被截掉最早 5 条）
 
-        let daily = tracker.get_records_paged_by_date("2026-10-02", 1, 100, &HashMap::new());
+        let daily =
+            tracker.get_records_paged_by_date("2026-10-02", 1, 100, &RecordLabels::default());
         assert_eq!(daily.total, 2000);
         let summaries = tracker.get_daily_summaries();
         assert_eq!(summaries.len(), 1);
@@ -678,7 +690,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let page = tracker.get_records_paged(1, 1, 10, &HashMap::new());
+        let page = tracker.get_records_paged(1, 1, 10, &RecordLabels::default());
         assert_eq!(page.records.len(), 2);
         // 两种取值均透传到 UsageRecordItem（按值断言，不依赖排序）
         assert!(page.records.iter().any(|r| r.is_stream == Some(true)));

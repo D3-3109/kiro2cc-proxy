@@ -47,8 +47,10 @@ pub(crate) async fn handle_stream_request(
     thinking_adaptive_requested: bool,
     // web_search server tool 桥接上下文（None = 非桥接请求，零行为变化）
     bridge_ctx: Option<BridgeContext>,
-    // 请求的 effort 级别（output_config 存在时取值，否则 None），随 usage 记录入库
+    // 实际发往上游的 effort（ConversionResult::effort），随 usage 记录入库
     effort: Option<String>,
+    // converter 注入的 thinking 文本标签预算（ConversionResult::thinking_budget_tokens）
+    thinking_budget_tokens: Option<i32>,
     // 思考文本化的渲染样式（配置开启且客户端支持时为 Some）；是否实际生效还取决于
     // 选中账号后的最终 thinking 状态
     thinking_as_text_allowed: Option<crate::anthropic::stream::ThinkingTextStyle>,
@@ -99,8 +101,8 @@ pub(crate) async fn handle_stream_request(
         );
         let thinking_as_text = thinking_as_text_allowed.filter(|_| thinking_enabled);
 
-        // effort 入库口径与 thinking 裁决联动（口径说明见 resolve_recorded_effort 文档）
-        let effort = super::helpers::resolve_recorded_effort(thinking_enabled, effort);
+        // 账号开关关闭时 provider 已剥离 thinking 文本标签，预算不再生效
+        let thinking_budget_tokens = thinking_budget_tokens.filter(|_| thinking_enabled);
 
         // 创建流处理上下文
         let mut ctx = StreamContext::new_with_thinking(model, input_tokens, thinking_enabled)
@@ -116,6 +118,7 @@ pub(crate) async fn handle_stream_request(
             .with_cache_accounting(cache_accounting)
             .with_conversation_id(conversation_id)
             .with_effort(effort)
+            .with_thinking_budget_tokens(thinking_budget_tokens)
             // 计时起点在 call_api_stream 之前注入（见函数开头注释）
             .with_request_started_at(request_started_at)
             .with_thinking_as_text(thinking_as_text);

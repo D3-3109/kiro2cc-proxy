@@ -250,10 +250,12 @@ pub(crate) async fn handle_non_stream_request(
     thinking_adaptive_requested: bool,
     // web_search server tool 桥接上下文（None = 非桥接请求，零行为变化）
     bridge_ctx: Option<BridgeContext>,
-    // 请求的 effort 级别（output_config 存在时取值，否则 None），随 usage 记录入库
+    // 实际发往上游的 effort（ConversionResult::effort），随 usage 记录入库
     effort: Option<String>,
+    // converter 注入的 thinking 文本标签预算（ConversionResult::thinking_budget_tokens）
+    thinking_budget_tokens: Option<i32>,
     // 客户端侧 thinking 请求状态（resolve_thinking_enabled 的结果，与流式分支同源）；
-    // 与账号开关在下方合成最终裁决，供 effort 入库口径与流式路径保持一致
+    // 与账号开关在下方合成最终裁决，供预算入库口径与流式路径保持一致
     thinking_client_enabled: bool,
     // 客户端 User-Agent（随 usage 记录入库）
     user_agent: Option<String>,
@@ -290,8 +292,8 @@ pub(crate) async fn handle_non_stream_request(
         thinking_client_enabled,
     );
 
-    // effort 入库口径与 thinking 裁决联动（口径说明见 resolve_recorded_effort 文档）
-    let effort = super::helpers::resolve_recorded_effort(thinking_enabled, effort);
+    // 账号开关关闭时 provider 已剥离 thinking 文本标签，预算不再生效
+    let thinking_budget_tokens = thinking_budget_tokens.filter(|_| thinking_enabled);
 
     // 读取响应体
     let body_bytes = match response.bytes().await {
@@ -736,6 +738,7 @@ pub(crate) async fn handle_non_stream_request(
                 cache_read_input_tokens: Some(report_cache_read),
                 cache_creation_input_tokens: Some(report_cache_creation),
                 effort: effort.clone(),
+                thinking_budget_tokens,
                 first_token_ms: None,
                 duration_ms: Some(request_started_at.elapsed().as_millis() as u64),
                 thinking_token_count,

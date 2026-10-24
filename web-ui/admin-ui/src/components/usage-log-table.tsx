@@ -235,6 +235,13 @@ export function UsageLogTable({
                   className={`${CELL} max-w-[132px] truncate text-[11.5px] text-ink-2`}
                   title={record.credentialLabel}
                 >
+                  {/* 发起请求的 API Key（已删除的 Key 无名称，退回 #id） */}
+                  <span
+                    className="mb-px block truncate text-[10.5px] text-ink-3"
+                    title={`${t('common.apiKeyLabel')}: ${record.apiKeyName ?? `#${record.apiKeyId}`}`}
+                  >
+                    {record.apiKeyName ?? `#${record.apiKeyId}`}
+                  </span>
                   {record.credentialLabel ?? <span className="text-ink-3">—</span>}
                   {record.userAgent && (
                     <span
@@ -248,7 +255,7 @@ export function UsageLogTable({
                 <td className={`${CELL} text-[11.5px]`}>
                   <div className="flex flex-col items-start gap-px">
                     <span className={`font-mono ${getModelColor(record.model)}`}>{record.model}</span>
-                    {(record.isStream != null || record.effort) && (
+                    {(record.isStream != null || record.effort || record.thinkingBudgetTokens != null) && (
                       <div className="flex items-center gap-1">
                         {record.isStream != null && (
                           <span
@@ -265,6 +272,14 @@ export function UsageLogTable({
                             title={`effort: ${record.effort}`}
                           >
                             {record.effort}
+                          </span>
+                        )}
+                        {record.thinkingBudgetTokens != null && (
+                          <span
+                            className="font-mono text-[10px] leading-tight tabular-nums text-ink-3"
+                            title={t('common.thinkingBudgetLabel')}
+                          >
+                            {formatTokenCount(record.thinkingBudgetTokens)}
                           </span>
                         )}
                       </div>

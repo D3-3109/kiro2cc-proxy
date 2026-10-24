@@ -43,3 +43,8 @@ server.env
 
 /.history/
 /app/config/kiro-body-dump/
+
+# pnpm
+.pnpm-store/
+**/pnpm-workspace.yaml
+

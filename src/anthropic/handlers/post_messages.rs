@@ -147,6 +147,9 @@ pub async fn post_messages(
     // 客户端是否请求了 thinking adaptive（与账号级开关在 provider 侧共同决定注入）
     let thinking_adaptive_requested = conversion_result.thinking_adaptive_requested;
     let prefix_cached = conversion_result.prefix_cached;
+    // 实际发往上游的 effort 与 thinking 预算（随 usage 记录入库）
+    let effort = conversion_result.effort.clone();
+    let thinking_budget_tokens = conversion_result.thinking_budget_tokens;
 
     // web_search server tool 桥接上下文（D5/D7：未携带时为 None，零行为变化）
     // 必须在 KiroRequest 构建（conversation_state 被 move）前构造
@@ -292,9 +295,6 @@ pub async fn post_messages(
         .map(|f| f.format_type == "json_schema")
         .unwrap_or(false);
 
-    // effort 级别（output_config 整体存在时取 effort 字符串，否则 None）
-    let effort = payload.output_config.as_ref().map(|c| c.effort.clone());
-
     // 思考文本化仅对 Claude Code 客户端生效（OpenAI 兼容端点等保持原生 thinking 语义）
     let thinking_as_text = crate::anthropic::stream::thinking_as_text_enabled()
         .then(|| crate::anthropic::stream::thinking_text_style(&headers))
@@ -319,6 +319,7 @@ pub async fn post_messages(
             thinking_adaptive_requested,
             bridge_ctx,
             effort,
+            thinking_budget_tokens,
             thinking_as_text,
             user_agent,
             cache_accounting,
@@ -345,6 +346,7 @@ pub async fn post_messages(
             thinking_adaptive_requested,
             bridge_ctx,
             effort,
+            thinking_budget_tokens,
             thinking_enabled,
             user_agent,
             cache_accounting,

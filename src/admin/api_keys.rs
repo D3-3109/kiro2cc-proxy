@@ -9,6 +9,8 @@ use axum::{
 };
 use serde::Serialize;
 
+use crate::model::usage::RecordLabels;
+
 use super::{
     middleware::AdminState,
     types::{
@@ -16,6 +18,19 @@ use super::{
         UpdateApiKeyRequest,
     },
 };
+
+/// 用量明细展示用的账号标签与 API Key 名称查表
+fn record_labels(state: &AdminState) -> RecordLabels {
+    let api_keys = state
+        .api_key_manager
+        .as_ref()
+        .map(|m| m.list().into_iter().map(|k| (k.id, k.name)).collect())
+        .unwrap_or_default();
+    RecordLabels {
+        credentials: state.service.credential_labels(),
+        api_keys,
+    }
+}
 
 /// GET /api/admin/server-info
 /// 获取服务器信息
@@ -189,7 +204,7 @@ pub async fn get_key_usage_records(
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(50)
         .min(500);
-    let labels = state.service.credential_labels();
+    let labels = record_labels(&state);
     Json(tracker.get_records_paged(id, page, page_size, &labels)).into_response()
 }
 
@@ -213,7 +228,7 @@ pub async fn get_credential_usage_records(
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(50)
         .min(500);
-    let labels = state.service.credential_labels();
+    let labels = record_labels(&state);
     Json(tracker.get_records_paged_by_credential(id, page, page_size, &labels)).into_response()
 }
 
@@ -347,7 +362,7 @@ pub async fn get_daily_usage_records(
         .get("page_size")
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(50);
-    let labels = state.service.credential_labels();
+    let labels = record_labels(&state);
     Json(tracker.get_records_paged_by_date(&date, page, page_size, &labels)).into_response()
 }
 
@@ -394,7 +409,7 @@ pub async fn get_usage_records(
         .get("page_size")
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(50);
-    let labels = state.service.credential_labels();
+    let labels = record_labels(&state);
     Json(tracker.get_records_paged_by_date_range(from, to, page, page_size, &labels))
         .into_response()
 }
@@ -567,6 +582,7 @@ mod tests {
             created_at,
             client_ip: None,
             effort: None,
+            thinking_budget_tokens: None,
             first_token_ms: None,
             duration_ms: None,
             thinking_token_count: None,
@@ -653,6 +669,28 @@ mod tests {
         assert_eq!(records[1]["credentialLabel"], serde_json::Value::Null);
         // user_agent 透传
         assert_eq!(records[1]["userAgent"], "claude-cli/2.1.5 (external, cli)");
+        // 未配置 ApiKeyManager：仅回传 id，名称缺省
+        assert_eq!(records[0]["apiKeyId"], 1);
+        assert_eq!(records[0]["apiKeyName"], serde_json::Value::Null);
+    }
+
+    /// usage_records：apiKeyName 按 ApiKeyManager 查表解析（查询时解析，改名即生效）
+    #[tokio::test]
+    async fn test_usage_records_api_key_name_resolved() {
+        let (state, tracker, guard) = admin_state_with_usage_tracker();
+        let manager = std::sync::Arc::new(
+            crate::model::api_key::ApiKeyManager::load(guard.0.join("api_keys.json")).unwrap(),
+        );
+        let key = manager
+            .create("ci-runner".to_string(), None, None, None, None, None)
+            .unwrap();
+        assert_eq!(key.id, 1, "注入记录固定 api_key_id=1，首个 key 应分配到 1");
+        let state = state.with_api_key_manager(manager);
+        inject_usage_record(&tracker, utc_at("2026-10-02T02:00:00Z"), None, None);
+
+        let (status, body) = call_usage_records(state, "from=2026-10-02&to=2026-10-02").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["records"][0]["apiKeyName"], "ci-runner");
     }
 
     /// usage_records：page/page_size 缺省默认 1/50；越界 page 钳制到末页

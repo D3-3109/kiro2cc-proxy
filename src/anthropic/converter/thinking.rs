@@ -119,25 +119,28 @@ pub(super) fn gpt_anti_pseudo_tag_hint(
 /// 全部 GPT 系一刀切跳过导致其 thinking 恒不生效，现收窄到 luna，sol/terra 与 Claude
 /// 系一样按 `<thinking_mode>` 文本协议注入。
 pub(super) fn generate_thinking_prefix(req: &MessagesRequest, model_id: &str) -> Option<String> {
+    thinking_prefix_budget(req, model_id).map(|budget| {
+        format!(
+            "<thinking_mode>enabled</thinking_mode><max_thinking_length>{budget}</max_thinking_length>"
+        )
+    })
+}
+
+/// thinking 文本标签携带的预算（`max_thinking_length`）；不注入标签时为 None。
+///
+/// 仅 `enabled` 类型携带预算。adaptive 模式不注入任何 thinking 标签：
+/// Kiro CLI 不注入这些标签，让 Kiro 后端用自身默认行为控制 thinking。
+/// 此前注入 <thinking_mode>adaptive</thinking_mode> 会触发 Kiro 后端
+/// 额外的 thinking 调度路径，显著增加 TTFB（实测根因）。
+pub(super) fn thinking_prefix_budget(req: &MessagesRequest, model_id: &str) -> Option<i32> {
     if is_luna_model(model_id) {
         return None;
     }
 
-    if let Some(t) = &req.thinking {
-        if t.thinking_type == "enabled" {
-            return Some(format!(
-                "<thinking_mode>enabled</thinking_mode><max_thinking_length>{}</max_thinking_length>",
-                t.budget_tokens
-            ));
-        } else if t.thinking_type == "adaptive" {
-            // adaptive 模式不注入任何 thinking 标签到 system 消息：
-            // Kiro CLI 不注入这些标签，让 Kiro 后端用自身默认行为控制 thinking。
-            // 此前注入 <thinking_mode>adaptive</thinking_mode> 会触发 Kiro 后端
-            // 额外的 thinking 调度路径，显著增加 TTFB（实测根因）。
-            return None;
-        }
-    }
-    None
+    req.thinking
+        .as_ref()
+        .filter(|t| t.thinking_type == "enabled")
+        .map(|t| t.budget_tokens)
 }
 
 /// 检查内容是否已包含thinking标签

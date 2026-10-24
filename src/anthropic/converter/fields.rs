@@ -121,3 +121,14 @@ pub(super) fn build_additional_model_request_fields(
         Some(serde_json::Value::Object(fields))
     }
 }
+
+/// 从已构建的 additionalModelRequestFields 读出实际发送的 effort
+/// （Claude 系 `output_config.effort`，GPT 系 `reasoning.effort`）
+pub(super) fn wire_effort(fields: Option<&serde_json::Value>) -> Option<String> {
+    let fields = fields?;
+    fields
+        .pointer("/output_config/effort")
+        .or_else(|| fields.pointer("/reasoning/effort"))
+        .and_then(|e| e.as_str())
+        .map(str::to_string)
+}

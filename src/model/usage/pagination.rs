@@ -8,13 +8,12 @@ use super::{UsageRecord, UsageTracker, get_k_ref};
 impl UsageTracker {
     /// 分页查询指定 API Key 的原始请求记录（按 created_at 降序）
     /// page 从 1 开始，小于 1 的值视为 1
-    /// credential_labels: 账号 ID -> 显示标签（email 或 nickname）
     pub fn get_records_paged(
         &self,
         api_key_id: u32,
         page: usize,
         page_size: usize,
-        credential_labels: &HashMap<u64, String>,
+        labels: &RecordLabels,
     ) -> UsageRecordsPage {
         if page_size == 0 {
             return UsageRecordsPage {
@@ -59,34 +58,7 @@ impl UsageTracker {
             .into_iter()
             .skip(start)
             .take(page_size)
-            .map(|r| {
-                let credential_label = r
-                    .credential_id
-                    .and_then(|cid| credential_labels.get(&cid).cloned());
-                let credits_saved = r
-                    .credits_used
-                    .map(|cu| r.estimated_cost * get_k_ref(&r.model) - cu);
-                UsageRecordItem {
-                    model: r.model,
-                    input_tokens: r.input_tokens,
-                    output_tokens: r.output_tokens,
-                    estimated_cost: r.estimated_cost,
-                    credits_used: r.credits_used,
-                    credits_saved,
-                    cache_read_input_tokens: r.cache_read_input_tokens,
-                    cache_creation_input_tokens: r.cache_creation_input_tokens,
-                    created_at: r.created_at,
-                    credential_id: r.credential_id,
-                    credential_label,
-                    client_ip: r.client_ip,
-                    effort: r.effort,
-                    first_token_ms: r.first_token_ms,
-                    duration_ms: r.duration_ms,
-                    thinking_token_count: r.thinking_token_count,
-                    is_stream: r.is_stream,
-                    user_agent: r.user_agent,
-                }
-            })
+            .map(|r| UsageRecordItem::from_record(r, labels))
             .collect();
 
         UsageRecordsPage {
@@ -97,6 +69,15 @@ impl UsageTracker {
             total_pages,
         }
     }
+}
+
+/// 记录展示用的 ID → 名称查表（查询时解析、不落库：改名后历史记录同步显示新名）
+#[derive(Debug, Default)]
+pub struct RecordLabels {
+    /// 账号 ID → 显示标签（nickname / email / #id）
+    pub credentials: HashMap<u64, String>,
+    /// API Key ID → 名称
+    pub api_keys: HashMap<u32, String>,
 }
 
 /// 分页查询结果
@@ -132,6 +113,11 @@ pub struct UsageRecordItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credits_saved: Option<f64>,
     pub created_at: DateTime<Utc>,
+    /// 发起请求的 API Key ID
+    pub api_key_id: u32,
+    /// API Key 名称（Key 已删除或查询方未提供名称表时为 None）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_name: Option<String>,
     /// 使用的账号 ID（None 表示旧数据或主密钥请求）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<u64>,
@@ -141,9 +127,12 @@ pub struct UsageRecordItem {
     /// 客户端 IP（None 表示旧数据或未知）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_ip: Option<String>,
-    /// 请求的 effort 级别（None 表示旧数据或客户端未传 output_config）
+    /// 实际发往上游的 effort 级别（None 表示未发送）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// 实际生效的 thinking 预算 tokens（None 表示旧数据或未携带预算）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget_tokens: Option<i32>,
     /// 首 token 延迟（毫秒，None 表示旧数据或非流式请求）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_token_ms: Option<u64>,
@@ -168,7 +157,7 @@ impl UsageTracker {
         credential_id: u64,
         page: usize,
         page_size: usize,
-        credential_labels: &HashMap<u64, String>,
+        labels: &RecordLabels,
     ) -> UsageRecordsPage {
         if page_size == 0 {
             return UsageRecordsPage {
@@ -211,34 +200,7 @@ impl UsageTracker {
             .into_iter()
             .skip(start)
             .take(page_size)
-            .map(|r| {
-                let credential_label = r
-                    .credential_id
-                    .and_then(|cid| credential_labels.get(&cid).cloned());
-                let credits_saved = r
-                    .credits_used
-                    .map(|cu| r.estimated_cost * get_k_ref(&r.model) - cu);
-                UsageRecordItem {
-                    model: r.model,
-                    input_tokens: r.input_tokens,
-                    output_tokens: r.output_tokens,
-                    estimated_cost: r.estimated_cost,
-                    credits_used: r.credits_used,
-                    credits_saved,
-                    cache_read_input_tokens: r.cache_read_input_tokens,
-                    cache_creation_input_tokens: r.cache_creation_input_tokens,
-                    created_at: r.created_at,
-                    credential_id: r.credential_id,
-                    credential_label,
-                    client_ip: r.client_ip,
-                    effort: r.effort,
-                    first_token_ms: r.first_token_ms,
-                    duration_ms: r.duration_ms,
-                    thinking_token_count: r.thinking_token_count,
-                    is_stream: r.is_stream,
-                    user_agent: r.user_agent,
-                }
-            })
+            .map(|r| UsageRecordItem::from_record(r, labels))
             .collect();
 
         UsageRecordsPage {
@@ -247,6 +209,42 @@ impl UsageTracker {
             page,
             page_size,
             total_pages,
+        }
+    }
+}
+
+impl UsageRecordItem {
+    /// 存储记录 → 对外 DTO（三个分页入口共用；名称按 `labels` 查表）
+    pub(super) fn from_record(r: UsageRecord, labels: &RecordLabels) -> Self {
+        let credential_label = r
+            .credential_id
+            .and_then(|cid| labels.credentials.get(&cid).cloned());
+        let api_key_name = labels.api_keys.get(&r.api_key_id).cloned();
+        let credits_saved = r
+            .credits_used
+            .map(|cu| r.estimated_cost * get_k_ref(&r.model) - cu);
+        UsageRecordItem {
+            model: r.model,
+            input_tokens: r.input_tokens,
+            output_tokens: r.output_tokens,
+            estimated_cost: r.estimated_cost,
+            credits_used: r.credits_used,
+            credits_saved,
+            cache_read_input_tokens: r.cache_read_input_tokens,
+            cache_creation_input_tokens: r.cache_creation_input_tokens,
+            created_at: r.created_at,
+            api_key_id: r.api_key_id,
+            api_key_name,
+            credential_id: r.credential_id,
+            credential_label,
+            client_ip: r.client_ip,
+            effort: r.effort,
+            thinking_budget_tokens: r.thinking_budget_tokens,
+            first_token_ms: r.first_token_ms,
+            duration_ms: r.duration_ms,
+            thinking_token_count: r.thinking_token_count,
+            is_stream: r.is_stream,
+            user_agent: r.user_agent,
         }
     }
 }

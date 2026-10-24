@@ -8,8 +8,8 @@ use crate::kiro::model::requests::conversation::{
     ConversationState, CurrentMessage, UserInputMessage, UserInputMessageContext,
 };
 
-use super::fields::build_additional_model_request_fields;
-use super::history::build_history;
+use super::fields::{build_additional_model_request_fields, wire_effort};
+use super::history::{BuiltHistory, build_history};
 use super::message::{process_message_content, process_message_content_with_tool_filter};
 use super::model::map_model;
 use super::prompt::{append_output_format_instruction, append_recent_knowledge_hints};
@@ -184,7 +184,12 @@ pub(super) fn convert_request_with_chunking(
     }
 
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
-    let (mut history, dynamic_system, prefix_cached) = build_history(
+    let BuiltHistory {
+        mut history,
+        dynamic_system,
+        injected_thinking_budget,
+        prefix_cached,
+    } = build_history(
         req,
         &messages,
         system.as_deref(),
@@ -289,6 +294,7 @@ pub(super) fn convert_request_with_chunking(
         .with_history(history);
 
     let additional_model_request_fields = build_additional_model_request_fields(req, &model_id);
+    let effort = wire_effort(additional_model_request_fields.as_ref());
     let is_compact = is_compact_request(&req.messages);
     if is_compact {
         tracing::info!(
@@ -307,6 +313,8 @@ pub(super) fn convert_request_with_chunking(
             .map(|t| t.thinking_type == "adaptive")
             .unwrap_or(false),
         prefix_cached,
+        effort,
+        thinking_budget_tokens: injected_thinking_budget,
     })
 }
 

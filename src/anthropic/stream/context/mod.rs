@@ -91,8 +91,10 @@ pub struct StreamContext {
     prefix_estimated_tokens: Option<i32>,
     /// 断点缓存记账（promptCacheAccounting 开启时注入）—— 优先级高于前缀估算
     cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
-    /// 请求的 effort 级别（output_config 存在时取值），随 usage 记录入库
+    /// 实际发往上游的 effort，随 usage 记录入库
     effort: Option<String>,
+    /// 实际生效的 thinking 文本标签预算，随 usage 记录入库
+    thinking_budget_tokens: Option<i32>,
     /// 思考文本化转换器（None = 关闭，出站事件原样输出）
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
     /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
@@ -147,6 +149,7 @@ impl StreamContext {
             prefix_estimated_tokens: None,
             cache_accounting: None,
             effort: None,
+            thinking_budget_tokens: None,
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
             request_started_at: None,
             first_token_at: None,
@@ -220,6 +223,12 @@ impl StreamContext {
     /// 设置 effort 级别（随 usage 记录入库）
     pub fn with_effort(mut self, effort: Option<String>) -> Self {
         self.effort = effort;
+        self
+    }
+
+    /// 设置 thinking 预算 tokens（随 usage 记录入库）
+    pub fn with_thinking_budget_tokens(mut self, budget: Option<i32>) -> Self {
+        self.thinking_budget_tokens = budget;
         self
     }
 
@@ -1039,6 +1048,7 @@ impl StreamContext {
                     cache_read_input_tokens: tracked_cache_read,
                     cache_creation_input_tokens: report_cache_creation,
                     effort: self.effort.clone(),
+                    thinking_budget_tokens: self.thinking_budget_tokens,
                     first_token_ms,
                     duration_ms,
                     thinking_token_count: (thinking_tokens > 0).then_some(thinking_tokens),

@@ -234,7 +234,8 @@ mod tests {
             );
         ctx.mark_first_token();
         let _ = ctx.generate_final_events();
-        let page = tracker.get_records_paged(1, 1, 10, &std::collections::HashMap::new());
+        let page =
+            tracker.get_records_paged(1, 1, 10, &crate::model::usage::RecordLabels::default());
         assert_eq!(page.records.len(), 1);
         assert!(page.records[0].first_token_ms.is_none());
         assert!(page.records[0].duration_ms.is_none());
@@ -294,7 +295,12 @@ mod tests {
             }
 
             // 1. 验证 UsageTracker 落库的 cache_read_input_tokens 已按 creditsUsed 反推下修
-            let page = tracker.get_records_paged(key_id, 1, 10, &std::collections::HashMap::new());
+            let page = tracker.get_records_paged(
+                key_id,
+                1,
+                10,
+                &crate::model::usage::RecordLabels::default(),
+            );
             assert_eq!(page.records.len(), 1);
             let recorded_read = page.records[0].cache_read_input_tokens.unwrap();
             if continued {

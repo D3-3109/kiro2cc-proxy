@@ -44,6 +44,8 @@
     "cacheHitRateTitle": "Cache hit rate {{rate}}% (cache read / total input)",
     "thinkingLabel": "Thinking: ",
     "thinkingBadge": "Thinking tokens",
+    "thinkingBudgetLabel": "Thinking budget tokens",
+    "apiKeyLabel": "API Key",
     "streamBadge": "Stream",
     "nonStreamBadge": "Non-stream",
     "totalInputLabel": "Total Input: ",

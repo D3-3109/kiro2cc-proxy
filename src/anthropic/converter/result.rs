@@ -31,6 +31,12 @@ pub struct ConversionResult {
     /// 新窗口首条消息或 `history[0]` 首次出现/漂移重置时为 `false`，handler 层据此将
     /// `prefix_estimated_tokens` 置 0，避免把首条消息尚未建立缓存的 `system + tools` 误计入 `cache_read`。
     pub prefix_cached: bool,
+    /// 实际发往上游的 effort（`output_config.effort` / GPT 系 `reasoning.effort`；未发送为 None）
+    pub effort: Option<String>,
+    /// 实际注入 history[0] 的 thinking 文本标签预算（`max_thinking_length`；未注入为 None）
+    ///
+    /// provider 按选中账号的 thinking 开关可能剥离该标签，调用方需结合裁决结果使用。
+    pub thinking_budget_tokens: Option<i32>,
 }
 
 /// 转换错误

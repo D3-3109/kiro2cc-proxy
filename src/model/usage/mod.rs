@@ -52,9 +52,14 @@ pub struct UsageRecord {
     /// 客户端 IP（None 表示旧数据或未知）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_ip: Option<String>,
-    /// 请求的 effort 级别（low/medium/high/xhigh/max；None 表示旧数据或客户端未传 output_config）
+    /// 实际发往上游的 effort 级别（low/medium/high/xhigh/max；None 表示未发送）。
+    /// 2026-10-24 前的旧数据为客户端请求值（未携带时补记 high），与上游实际值可能不符
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// 实际生效的 thinking 预算 tokens（文本标签 `max_thinking_length`；None 表示旧数据
+    /// 或未携带预算，如 adaptive 模式）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget_tokens: Option<i32>,
     /// 首 token 延迟（请求开始到首个上游业务数据事件，毫秒；None 表示旧数据或非流式请求）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_token_ms: Option<u64>,
@@ -88,6 +93,7 @@ pub struct RecordOptions {
     pub cache_read_input_tokens: Option<i32>,
     pub cache_creation_input_tokens: Option<i32>,
     pub effort: Option<String>,
+    pub thinking_budget_tokens: Option<i32>,
     pub first_token_ms: Option<u64>,
     pub duration_ms: Option<u64>,
     pub thinking_token_count: Option<i32>,
@@ -377,6 +383,7 @@ impl UsageTracker {
             cache_read_input_tokens,
             cache_creation_input_tokens,
             effort,
+            thinking_budget_tokens,
             first_token_ms,
             duration_ms,
             thinking_token_count,
@@ -399,6 +406,7 @@ impl UsageTracker {
             created_at: Utc::now(),
             client_ip,
             effort,
+            thinking_budget_tokens,
             first_token_ms,
             duration_ms,
             thinking_token_count,
@@ -631,7 +639,7 @@ mod tests;
 #[allow(unused_imports)] // 类型归属 daily.rs，经 mod 再导出保持原模块路径
 pub(crate) use daily::{CredentialDaySummary, CredentialRangeSummary, DailySummary};
 #[allow(unused_imports)]
-pub(crate) use pagination::{UsageRecordItem, UsageRecordsPage};
+pub(crate) use pagination::{RecordLabels, UsageRecordItem, UsageRecordsPage};
 #[allow(unused_imports)]
 pub(crate) use pricing::{
     MIN_INFER_INPUT_TOKENS, ModelPricing, get_model_pricing, infer_cache_read_from_credits,

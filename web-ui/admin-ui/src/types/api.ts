@@ -255,10 +255,13 @@ export interface UsageRecord {
   cacheReadInputTokens?: number
   cacheCreationInputTokens?: number
   createdAt: string
+  apiKeyId: number
+  apiKeyName?: string
   credentialId?: number
   credentialLabel?: string
   clientIp?: string
   effort?: string
+  thinkingBudgetTokens?: number
   firstTokenMs?: number
   durationMs?: number
   thinkingTokenCount?: number

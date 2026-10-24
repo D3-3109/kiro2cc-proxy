@@ -118,7 +118,7 @@ pub async fn get_usage_records(
         ctx.key_id,
         page,
         page_size,
-        &std::collections::HashMap::new(),
+        &crate::model::usage::RecordLabels::default(),
     ))
 }
 
