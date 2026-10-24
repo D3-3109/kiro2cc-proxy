@@ -6,6 +6,7 @@
 //! - `schema`: JSON Schema 规范化（$ref 展开、Kiro 严格模式清洗）
 //! - `cache`: 会话级 history[0] 冻结缓存基建
 //! - `prompt`: 计费头规范化、输出格式与近期知识提示注入
+//! - `drift_diag`: history[0] 漂移诊断（DEBUG 日志，列出新增/消失的系统块）
 //! - `model`: Anthropic 模型名 → Kiro 模型 ID 映射
 //! - `result`: ConversionResult / ConversionError
 //! - `session`: 会话 ID 提取/派生、compact 压缩请求检测
@@ -21,6 +22,7 @@
 
 mod cache;
 mod convert;
+mod drift_diag;
 mod fields;
 mod history;
 mod message;

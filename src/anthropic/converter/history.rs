@@ -66,6 +66,7 @@ pub(super) fn build_history(
     // 全部块都被分流（stable 拼接结果为空，含仅剩空文本块）时按"无系统消息"处理，
     // 保留 thinking 前缀 / 引导语注入
     let stable_content = stable_system.join("\n");
+    super::drift_diag::log_diverted(session_id, &dynamic_system);
     let system_present =
         system.is_some() && (dynamic_system.is_empty() || !stable_content.is_empty());
     let dynamic_content = dynamic_system.join("\n\n");
@@ -110,6 +111,7 @@ pub(super) fn build_history(
 
                 if let Some(entry) = map.get_mut(&h0_key) {
                     entry.last_used = Instant::now();
+                    super::drift_diag::observe(session_id, &stable_system, false);
                     tracing::info!(
                         "[exp2] history[0] frozen hash={} len={} session={}",
                         &h0_key[h0_key.len().saturating_sub(16)..],
@@ -118,6 +120,7 @@ pub(super) fn build_history(
                     );
                     entry.value.clone()
                 } else {
+                    super::drift_diag::observe(session_id, &stable_system, true);
                     tracing::info!(
                         "[exp2] history[0] first hash={} len={} session={}",
                         &h0_key[h0_key.len().saturating_sub(16)..],

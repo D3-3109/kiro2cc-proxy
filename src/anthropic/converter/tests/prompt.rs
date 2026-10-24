@@ -263,6 +263,7 @@ fn dynamic_hook_predicate_matches_expected_shapes() {
         "Stop hook feedback: x",
         "The following deferred tools are now available via ToolSearch.",
         "The following MCP servers are still connecting — x",
+        "The task tools haven't been used recently. If you're working on tasks that would",
     ] {
         assert!(p(yes), "应识别为动态块: {yes}");
     }

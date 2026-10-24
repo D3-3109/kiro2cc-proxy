@@ -33,14 +33,17 @@ pub(super) fn normalize_billing_header(content: String) -> String {
 ///   PreToolUse / PostToolUse / Stop
 /// - `The following deferred tools are now available...`
 /// - `The following MCP servers are still connecting...`
+/// - `The task tools haven't been used recently...`（CC 的任务工具提醒，约 421 字节；
+///   每次触发都会再追加一条，实测使 history[0] 每次 +422 字节而重置前缀缓存）
 ///
 /// 刻意不含 SessionStart：它只在会话开头注入一次（可达数 KB 的稳定内容），留在
 /// history[0] 可被缓存；移到尾部反而每轮都要按未缓存计费。
 pub(super) fn is_dynamic_hook_injection(s: &str) -> bool {
     const HOOK_EVENTS: [&str; 4] = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"];
-    const NOTICE_PREFIXES: [&str; 2] = [
+    const NOTICE_PREFIXES: [&str; 3] = [
         "The following deferred tools are now available",
         "The following MCP servers are still connecting",
+        "The task tools haven't been used recently",
     ];
 
     let t = s.trim_start();
