@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useTranslation } from 'react-i18next'
-import { Brain, Loader2, SearchX } from 'lucide-react'
+import { Brain, DatabaseZap, Loader2, SearchX } from 'lucide-react'
 import { CELL, TH_BASE } from '@/components/table-kit'
 import { formatDateTime, formatTokenCount } from '@/lib/locale'
 import type { GeoInfo } from '@/hooks/use-ip-geo'
@@ -35,6 +35,20 @@ export function formatCost(cost: number): string {
 /** UA 短标识：取首个空格前段（如 claude-cli/2.1.5），完整原文走 title 悬停展示 */
 function uaShort(ua: string): string {
   return ua.split(/\s+/)[0] || ua
+}
+
+/**
+ * 缓存命中率 = 缓存读取 / 输入总计。
+ *
+ * 分母取 `inputTokens`（输入总计，本身已含缓存读取），与同一单元格第三、四行
+ * 展示的「缓存读取」和「输入总计」同源，保证三个数字互相自洽。旧记录可能缺
+ * `cacheReadInputTokens`（按 0 计）；`inputTokens` 为 0 时无意义，返回 null 不渲染。
+ */
+export function cacheHitRate(record: UsageRecord): number | null {
+  const total = record.inputTokens
+  if (!total || total <= 0) return null
+  const read = record.cacheReadInputTokens ?? 0
+  return Math.min(100, Math.max(0, (read / total) * 100))
 }
 
 /**
@@ -187,6 +201,7 @@ export function UsageLogTable({
           /* records are returned newest-first by the API */
           records.map((record, idx) => {
             const geo = record.clientIp ? geoMap.get(record.clientIp) : undefined
+            const hitRate = cacheHitRate(record)
             return (
               <tr key={`${record.createdAt}-${record.model}-${idx}`} className="transition-colors hover:bg-surface-2">
                 <td className={`${CELL} whitespace-nowrap text-[11.5px] text-ink-2`}>
@@ -273,6 +288,15 @@ export function UsageLogTable({
                       <span className="font-mono tabular-nums">
                         {formatTokenCount(record.cacheReadInputTokens ?? 0)}
                       </span>
+                      {hitRate != null && (
+                        <span
+                          className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-brand-soft px-1.5 py-px align-middle font-mono text-[10px] font-semibold tabular-nums text-brand"
+                          title={t('common.cacheHitRateTitle', { rate: hitRate.toFixed(1) })}
+                        >
+                          <DatabaseZap className="size-3" aria-hidden="true" />
+                          {Math.round(hitRate)}%
+                        </span>
+                      )}
                     </span>
                     <span className="font-medium text-ink">
                       {t('common.totalInputLabel')}

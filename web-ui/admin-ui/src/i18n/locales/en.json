@@ -41,6 +41,7 @@
     "inputTokensLabel": "Input Tokens: ",
     "outputTokensLabel": "Output Tokens: ",
     "cacheReadLabel": "Cache Read: ",
+    "cacheHitRateTitle": "Cache hit rate {{rate}}% (cache read / total input)",
     "thinkingLabel": "Thinking: ",
     "thinkingBadge": "Thinking tokens",
     "streamBadge": "Stream",

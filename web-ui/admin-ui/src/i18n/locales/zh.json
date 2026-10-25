@@ -41,6 +41,7 @@
     "inputTokensLabel": "输入 Tokens：",
     "outputTokensLabel": "输出 Tokens：",
     "cacheReadLabel": "缓存读取：",
+    "cacheHitRateTitle": "缓存命中率 {{rate}}%（缓存读取 / 输入总计）",
     "thinkingLabel": "思考：",
     "thinkingBadge": "深度思考 Tokens",
     "streamBadge": "流式",
