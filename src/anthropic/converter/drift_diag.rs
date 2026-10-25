@@ -1,13 +1,13 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! history[0] 漂移诊断（仅 DEBUG 日志，不影响请求内容）
+//! history[0] 漂移诊断（INFO 日志，不影响请求内容）
 //!
 //! 同一会话内 history[0] 的缓存 key 变化（`[exp2] history[0] first`）意味着上游前缀缓存
 //! 整段失效。本模块记录每个会话上一次的稳定系统块指纹，key 变化时列出相对上一次
 //! 新增 / 消失的系统块（序号、长度、前 80 个字符），用来识别 CC 追加了什么内容、
 //! 该不该归入动态块（见 `prompt::is_dynamic_hook_injection`）。
 //!
-//! 预览会把系统块的开头原文（80 / 40 个字符）写进日志，因此只在 DEBUG 级别输出
-//! （Admin 设置页的 `debugLogs` 开关）；DEBUG 未启用时整个模块零开销。
+//! 预览会把系统块的开头原文（80 / 40 个字符）写进 INFO 日志，
+//! 不依赖 Admin 设置页的 `debugLogs` 开关；INFO 未启用时跳过诊断。
 //! 输出量很小：只在 key 变化、或分流块数量变化时各写一行。
 
 use std::collections::HashMap;
@@ -80,7 +80,7 @@ fn preview(block: &str, max_chars: usize) -> String {
 /// 记录本次请求的稳定系统块；`key_changed` 为 true（history[0] 缓存 key 首次出现）且该会话
 /// 之前有记录时，输出新增 / 消失块。
 pub(super) fn observe(session_id: &str, stable_blocks: &[&str], key_changed: bool) {
-    if !tracing::enabled!(tracing::Level::DEBUG) {
+    if !tracing::enabled!(tracing::Level::INFO) {
         return;
     }
     // 与 history[0] 的 key 同口径：先规范化 cch，避免计费哈希的逐轮变化被当成漂移
@@ -109,7 +109,7 @@ pub(super) fn observe(session_id: &str, stable_blocks: &[&str], key_changed: boo
         .take(MAX_LISTED)
         .map(|b| format!("#{}({}B) {:?}", b.index, b.len, b.preview))
         .collect();
-    tracing::debug!(
+    tracing::info!(
         session = %session_id,
         blocks = current.len(),
         added = added.len(),
@@ -124,7 +124,7 @@ pub(super) fn observe(session_id: &str, stable_blocks: &[&str], key_changed: boo
 /// 用来确认分流规则确实命中（例如任务工具提醒）。同一会话内只在分流块数量变化时输出，
 /// 避免动态块持续存在时每轮刷屏；无动态块且数量未变化时不输出。
 pub(super) fn log_diverted(session_id: &str, dynamic_blocks: &[&str]) {
-    if !tracing::enabled!(tracing::Level::DEBUG) {
+    if !tracing::enabled!(tracing::Level::INFO) {
         return;
     }
     {
@@ -146,7 +146,7 @@ pub(super) fn log_diverted(session_id: &str, dynamic_blocks: &[&str]) {
         .take(MAX_LISTED)
         .map(|b| format!("({}B) {:?}", b.len(), preview(b, DIVERTED_PREVIEW_CHARS)))
         .collect();
-    tracing::debug!(
+    tracing::info!(
         session = %session_id,
         diverted = dynamic_blocks.len(),
         "[drift] 动态系统块已分流出 history[0]：[{}]",
@@ -220,7 +220,7 @@ mod tests {
         let buf = BufWriter::default();
         let writer = buf.clone();
         let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
+            .with_max_level(tracing::Level::INFO)
             .with_ansi(false)
             .with_writer(move || writer.clone())
             .finish();
@@ -244,7 +244,7 @@ mod tests {
         let buf = BufWriter::default();
         let writer = buf.clone();
         let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
+            .with_max_level(tracing::Level::INFO)
             .with_ansi(false)
             .with_writer(move || writer.clone())
             .finish();
