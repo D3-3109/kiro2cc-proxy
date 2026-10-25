@@ -106,6 +106,8 @@ pub struct StreamContext {
     pub(crate) request_started_at: Option<Instant>,
     /// 首个上游业务事件时刻（keepalive 不计；None = 尚未收到或未注入起点）
     pub(crate) first_token_at: Option<Instant>,
+    /// 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
+    conversation_id: Option<String>,
 }
 
 impl StreamContext {
@@ -155,12 +157,19 @@ impl StreamContext {
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
             request_started_at: None,
             first_token_at: None,
+            conversation_id: None,
         }
     }
 
     /// 注入请求计时起点（进入 handler 时调用；首个客户端可见 SSE 产出时计算首字延迟）
     pub fn with_request_started_at(mut self, started_at: Instant) -> Self {
         self.request_started_at = Some(started_at);
+        self
+    }
+
+    /// 注入会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
+    pub fn with_conversation_id(mut self, conversation_id: Option<String>) -> Self {
+        self.conversation_id = conversation_id;
         self
     }
 
@@ -962,6 +971,22 @@ impl StreamContext {
             self.derive_report_cache_usage(final_input_tokens, self.metering_usage);
         let (report_cache_creation, report_cache_read) = (Some(cache_creation), Some(cache_read));
         let tracked_cache_read = Some(tracked_read);
+
+        // cache-miss 诊断：credits 反推实际生效（metering 真值未透传、无断点账本、
+        // 非桥接续流）且命中率低于阈值时输出，量化本次结算并登记会话注册表
+        crate::cache::cache_miss_diag::maybe_log(
+            self.conversation_id.as_deref().unwrap_or(""),
+            &self.model,
+            self.prefix_estimated_tokens.unwrap_or(0),
+            final_input_tokens,
+            billed_output_tokens,
+            self.metering_usage,
+            self.metering_cache_read_tokens.is_none()
+                && self.cache_accounting.is_none()
+                && self.prefix_estimated_tokens.is_some()
+                && !self.has_continuation,
+            self.credential_id.unwrap_or(0),
+        );
 
         // 记录用量（内部记录使用真实值）
         if let (Some(tracker), Some(key_id)) = (&self.usage_tracker, self.api_key_id) {

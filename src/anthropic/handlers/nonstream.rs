@@ -258,6 +258,8 @@ pub(crate) async fn handle_non_stream_request(
     user_agent: Option<String>,
     // 断点缓存记账（promptCacheAccounting 开启时为 Some）
     cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
+    // 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
+    conversation_id: Option<String>,
 ) -> Response {
     // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
     let request_started_at = std::time::Instant::now();
@@ -658,6 +660,18 @@ pub(crate) async fn handle_non_stream_request(
             metering_usage
         },
     ));
+    // cache-miss 诊断：credits 反推实际生效（metering 真值未透传、无断点账本、
+    // 非桥接续流）且命中率低于阈值时输出，量化本次结算并登记会话注册表
+    crate::cache::cache_miss_diag::maybe_log(
+        conversation_id.as_deref().unwrap_or(""),
+        model,
+        prefix_estimated_tokens,
+        final_input_tokens,
+        billed_output_tokens,
+        metering_usage,
+        metering_cache_read_tokens.is_none() && cache_accounting.is_none() && !has_continuation,
+        credential_id,
+    );
     let fingerprint_usage = match (fp_tracker.as_ref(), fp_profile.as_ref()) {
         (Some(tracker), Some(profile)) => {
             let account_id = credential_id.to_string();

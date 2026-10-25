@@ -633,5 +633,7 @@ pub(crate) use daily::{CredentialDaySummary, CredentialRangeSummary, DailySummar
 #[allow(unused_imports)]
 pub(crate) use pagination::{UsageRecordItem, UsageRecordsPage};
 #[allow(unused_imports)]
-pub(crate) use pricing::{ModelPricing, get_model_pricing, infer_cache_read_from_credits};
+pub(crate) use pricing::{
+    MIN_INFER_INPUT_TOKENS, ModelPricing, get_model_pricing, infer_cache_read_from_credits,
+};
 pub(crate) use pricing::{calculate_cost, get_k_ref, refine_prefix_cache_read};

@@ -10,6 +10,7 @@
 //! `simulation` 模拟与 `fingerprint` 追踪降级为兜底分支。
 
 pub mod breakpoint;
+pub mod cache_miss_diag;
 pub mod fingerprint;
 pub mod simulation;
 

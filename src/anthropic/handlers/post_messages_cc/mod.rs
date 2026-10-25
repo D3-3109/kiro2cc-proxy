@@ -159,6 +159,9 @@ pub async fn post_messages_cc(
         bound_ids.clone(),
     );
 
+    // 会话 conversationId（cache-miss 诊断用）；须在 conversation_state move 前取出
+    let conversation_id = Some(conversion_result.conversation_state.conversation_id.clone());
+
     // 构建 Kiro 请求
     let kiro_request = KiroRequest {
         conversation_state: conversion_result.conversation_state,
@@ -280,6 +283,7 @@ pub async fn post_messages_cc(
             thinking_as_text,
             user_agent,
             cache_accounting,
+            conversation_id,
         )
         .await
     } else {
@@ -305,6 +309,7 @@ pub async fn post_messages_cc(
             thinking_enabled,
             user_agent,
             cache_accounting,
+            conversation_id,
         )
         .await
     }

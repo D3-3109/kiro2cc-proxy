@@ -25,7 +25,7 @@ const HAIKU_55_LONG_CONTEXT_THRESHOLD: i32 = 100_000;
 ///
 /// 输入过短时，输入积分占总 `creditsUsed` 比重过小，输出分词微差除以较小的
 /// `0.90 * r_miss` 会被放大，故低于 4096 tokens 直接保留静态前缀估算。
-const MIN_INFER_INPUT_TOKENS: i32 = 4096;
+pub(crate) const MIN_INFER_INPUT_TOKENS: i32 = 4096;
 
 /// Kiro 上游缓存读取相对未命中输入单价的节省比例（按 10% 计费，节省 90%）。
 const CACHE_READ_SAVINGS_RATIO: f64 = 0.90;

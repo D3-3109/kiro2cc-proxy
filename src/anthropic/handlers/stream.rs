@@ -54,6 +54,8 @@ pub(crate) async fn handle_stream_request(
     user_agent: Option<String>,
     // 断点缓存记账（promptCacheAccounting 开启时为 Some）
     cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
+    // 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
+    conversation_id: Option<String>,
 ) -> Response {
     // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
@@ -106,6 +108,7 @@ pub(crate) async fn handle_stream_request(
         .with_prompt_cache_usage(prompt_cache_usage)
         .with_prefix_estimated_tokens(prefix_estimated_tokens)
         .with_cache_accounting(cache_accounting)
+        .with_conversation_id(conversation_id)
         .with_effort(effort)
         // 计时起点在 call_api_stream 之前注入（见函数开头注释）
         .with_request_started_at(request_started_at)

@@ -4,6 +4,37 @@
 mod tests {
     use crate::anthropic::stream::{StreamContext, context_window_for_model};
 
+    /// 捕获 INFO 级 tracing 输出（同步闭包），返回 (闭包返回值, 日志文本)
+    fn capture_info_logs<T>(f: impl FnOnce() -> T) -> (T, String) {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct BufWriter(Arc<Mutex<Vec<u8>>>);
+        impl Write for BufWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buf = BufWriter::default();
+        let writer = buf.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let result = tracing::subscriber::with_default(subscriber, f);
+        (
+            result,
+            String::from_utf8(buf.0.lock().unwrap().clone()).unwrap(),
+        )
+    }
+
     #[test]
     fn test_empty_response_detected() {
         // 上游完全没发任何内容事件 → is_empty_response 为 true
@@ -210,6 +241,7 @@ mod tests {
         for (continued, key_id) in [(false, 1), (true, 2)] {
             let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
                 .with_prefix_estimated_tokens(53_650)
+                .with_conversation_id(Some(format!("miss-diag-integration-{key_id}")))
                 .with_usage_tracking(
                     Some(std::sync::Arc::clone(&tracker)),
                     Some(key_id),
@@ -238,7 +270,18 @@ mod tests {
             if continued {
                 ctx.mark_continuation();
             }
-            let final_events = ctx.generate_final_events();
+            // [cache-miss] 诊断：非续流轮 credits 反推生效（命中率 ~39%）应触发一次；
+            // 续流轮回退静态前缀（inference_applied=false）不触发
+            let (final_events, diag_out) = capture_info_logs(|| ctx.generate_final_events());
+            if continued {
+                assert!(!diag_out.contains("[cache-miss]"), "{diag_out}");
+            } else {
+                assert_eq!(diag_out.matches("[cache-miss]").count(), 1, "{diag_out}");
+                assert!(
+                    diag_out.contains("session=miss-diag-integration-1"),
+                    "{diag_out}"
+                );
+            }
 
             // 1. 验证 UsageTracker 落库的 cache_read_input_tokens 已按 creditsUsed 反推下修
             let page = tracker.get_records_paged(key_id, 1, 10, &std::collections::HashMap::new());
