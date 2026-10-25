@@ -270,16 +270,19 @@ export function UsageLogTable({
                         {formatTokenCount(Math.max(0, record.inputTokens - (record.cacheReadInputTokens ?? 0)))}
                       </span>
                     </span>
-                    <span className={(record.thinkingTokenCount ?? 0) > 0 ? 'flex items-center gap-2' : undefined}>
+                    <span className={(record.thinkingTokenCount ?? 0) > 0 ? 'flex items-center gap-1.5' : undefined}>
                       <span>
                         {t('common.outputTokensLabel')}
                         <span className="font-mono tabular-nums">{formatTokenCount(record.outputTokens)}</span>
                       </span>
                       {record.thinkingTokenCount != null && record.thinkingTokenCount > 0 && (
-                        <span className="inline-flex items-center gap-0.5 text-warn" title={t('common.thinkingBadge')}>
+                        <span
+                          className="inline-flex items-center gap-0.5 rounded-full bg-warn-soft px-1.5 py-px font-mono text-[10px] font-semibold tabular-nums text-warn"
+                          title={t('common.thinkingBadge')}
+                        >
                           <span className="sr-only">{t('common.thinkingLabel')}</span>
                           <Brain className="size-3" aria-hidden="true" />
-                          <span className="font-mono tabular-nums">{formatTokenCount(record.thinkingTokenCount)}</span>
+                          <span>{formatTokenCount(record.thinkingTokenCount)}</span>
                         </span>
                       )}
                     </span>
