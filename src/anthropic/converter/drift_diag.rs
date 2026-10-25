@@ -2,9 +2,15 @@
 //! history[0] 漂移诊断（INFO 日志，不影响请求内容）
 //!
 //! 同一会话内 history[0] 的缓存 key 变化（`[exp2] history[0] first`）意味着上游前缀缓存
-//! 整段失效。本模块记录每个会话上一次的稳定系统块指纹，key 变化时列出相对上一次
-//! 新增 / 消失的系统块（序号、长度、前 80 个字符），用来识别 CC 追加了什么内容、
-//! 该不该归入动态块（见 `prompt::is_dynamic_hook_injection`）。
+//! 整段失效。本模块记录每个会话最近几类请求的稳定系统块指纹，key 变化时列出相对
+//! 「最相似的一类」新增 / 消失的系统块（序号、长度、前 80 个字符），用来识别 CC 追加了
+//! 什么内容、该不该归入动态块（见 `prompt::is_dynamic_hook_injection`）。
+//!
+//! 同一会话（同一 `metadata.user_id`）里会夹杂辅助请求（标题生成、额度探测、子代理等），
+//! 它们的系统提示与主对话几乎没有重叠、各自有独立的 history[0] 缓存。若只保留「上一次」
+//! 一份快照，主请求首次出现时会被拿去和辅助请求比较，产生「新增 4 块 / 消失 2 块」的误报。
+//! 所以每个会话保留至多 `MAX_SNAPSHOTS_PER_SESSION` 份快照，按重叠字节数匹配；与所有
+//! 快照都几乎无重叠时单独标注为「新请求类型」，不再当作漂移。
 //!
 //! 预览会把系统块的开头原文（80 / 40 个字符）写进 INFO 日志，
 //! 不依赖 Admin 设置页的 `debugLogs` 开关；INFO 未启用时跳过诊断。
@@ -24,11 +30,13 @@ const DIVERTED_PREVIEW_CHARS: usize = 40;
 const MAX_SESSIONS: usize = 256;
 /// 单次日志最多列出的新增 / 消失块数
 const MAX_LISTED: usize = 8;
+/// 每个会话最多保留的快照数（主对话 + 若干类辅助 / 子代理请求）
+const MAX_SNAPSHOTS_PER_SESSION: usize = 4;
 
 /// 单个系统块的指纹：内容哈希 + 字节长度
 pub(super) type Fingerprint = (u64, usize);
 
-static PREV_BLOCKS: OnceLock<Mutex<HashMap<String, Vec<Fingerprint>>>> = OnceLock::new();
+static PREV_BLOCKS: OnceLock<Mutex<HashMap<String, Vec<Vec<Fingerprint>>>>> = OnceLock::new();
 /// 每个会话上一次被分流的动态块数量，用于只在数量变化时写日志
 static PREV_DIVERTED: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
 
@@ -77,8 +85,42 @@ fn preview(block: &str, max_chars: usize) -> String {
     block.trim_start().chars().take(max_chars).collect()
 }
 
+/// 与某份快照的匹配结果
+enum Matched {
+    /// 该会话此前没有任何快照
+    First,
+    /// 与某份快照重叠足够多，视为同一类请求；携带被替换掉的旧快照
+    Related(Vec<Fingerprint>),
+    /// 与已有快照几乎无重叠；携带已有快照数
+    Unrelated(usize),
+}
+
+fn total_len(fps: &[Fingerprint]) -> usize {
+    fps.iter().map(|f| f.1).sum()
+}
+
+/// 两组指纹按多重集求交，返回共有块的总字节数
+fn shared_bytes(prev: &[Fingerprint], cur: &[Fingerprint]) -> usize {
+    let mut remaining: Vec<Option<Fingerprint>> = prev.iter().copied().map(Some).collect();
+    let mut shared = 0;
+    for fp in cur {
+        if let Some(slot) = remaining.iter_mut().find(|s| **s == Some(*fp)) {
+            *slot = None;
+            shared += fp.1;
+        }
+    }
+    shared
+}
+
+/// 共有字节数不少于较小一方总字节数的 1/3，视为同一类请求。
+/// 真漂移（追加 / 改写少数块）重叠接近 100%；辅助请求（约 1KB）对主对话（数十 KB）接近 0。
+fn is_related(prev: &[Fingerprint], cur: &[Fingerprint], shared: usize) -> bool {
+    shared * 3 >= total_len(prev).min(total_len(cur))
+}
+
 /// 记录本次请求的稳定系统块；`key_changed` 为 true（history[0] 缓存 key 首次出现）且该会话
-/// 之前有记录时，输出新增 / 消失块。
+/// 之前有记录时：与某份快照足够相似则输出新增 / 消失块，与所有快照都几乎无重叠则输出
+/// 「新请求类型」提示（多为辅助 / 子代理请求，不是漂移）。
 pub(super) fn observe(session_id: &str, stable_blocks: &[&str], key_changed: bool) {
     if !tracing::enabled!(tracing::Level::INFO) {
         return;
@@ -89,35 +131,72 @@ pub(super) fn observe(session_id: &str, stable_blocks: &[&str], key_changed: boo
         .map(|b| normalize_billing_header((*b).to_string()))
         .collect();
     let fps: Vec<Fingerprint> = current.iter().map(|b| fingerprint(b)).collect();
+    let cur_total = total_len(&fps);
 
-    let map = PREV_BLOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
-    if map.len() >= MAX_SESSIONS && !map.contains_key(session_id) {
-        map.clear();
-    }
-    let prev = map.insert(session_id.to_string(), fps);
+    let matched = {
+        let map = PREV_BLOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= MAX_SESSIONS && !map.contains_key(session_id) {
+            map.clear();
+        }
+        let snaps = map.entry(session_id.to_string()).or_default();
+        let best = snaps
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, shared_bytes(p, &fps)))
+            .max_by_key(|&(_, shared)| shared);
+        match best {
+            Some((i, shared)) if is_related(&snaps[i], &fps, shared) => {
+                Matched::Related(std::mem::replace(&mut snaps[i], fps))
+            }
+            Some(_) => {
+                let known = snaps.len();
+                if known >= MAX_SNAPSHOTS_PER_SESSION {
+                    snaps.remove(0);
+                }
+                snaps.push(fps);
+                Matched::Unrelated(known)
+            }
+            None => {
+                snaps.push(fps);
+                Matched::First
+            }
+        }
+    };
 
     if !key_changed {
         return;
     }
-    let Some(prev) = prev else {
-        return;
-    };
-    let (added, removed) = diff_blocks(&prev, &current);
-    let listed: Vec<String> = added
-        .iter()
-        .take(MAX_LISTED)
-        .map(|b| format!("#{}({}B) {:?}", b.index, b.len, b.preview))
-        .collect();
-    tracing::info!(
-        session = %session_id,
-        blocks = current.len(),
-        added = added.len(),
-        removed = removed.len(),
-        removed_lens = ?removed.iter().take(MAX_LISTED).collect::<Vec<_>>(),
-        "[drift] history[0] 缓存 key 变化，相对上一次的系统块差异：新增 [{}]",
-        listed.join(" | ")
-    );
+    match matched {
+        Matched::First => {}
+        Matched::Unrelated(known) => {
+            tracing::info!(
+                session = %session_id,
+                blocks = current.len(),
+                total_bytes = cur_total,
+                known_kinds = known,
+                "[drift] 会话内出现与已知系统块几乎无重叠的新请求类型（多为辅助 / 子代理请求，\
+                 各自独立缓存 history[0]，不是漂移；主请求的系统提示整段被替换时也会走到这里）"
+            );
+        }
+        Matched::Related(prev) => {
+            let (added, removed) = diff_blocks(&prev, &current);
+            let listed: Vec<String> = added
+                .iter()
+                .take(MAX_LISTED)
+                .map(|b| format!("#{}({}B) {:?}", b.index, b.len, b.preview))
+                .collect();
+            tracing::info!(
+                session = %session_id,
+                blocks = current.len(),
+                added = added.len(),
+                removed = removed.len(),
+                removed_lens = ?removed.iter().take(MAX_LISTED).collect::<Vec<_>>(),
+                "[drift] history[0] 缓存 key 变化，相对上一次的系统块差异：新增 [{}]",
+                listed.join(" | ")
+            );
+        }
+    }
 }
 
 /// 记录本次请求中被分流为动态块（不进 history[0]）的系统块：块数、各块字节长度与前 40 个字符。
@@ -237,6 +316,61 @@ mod tests {
         assert_eq!(out.matches("[drift]").count(), 1, "{out}");
         assert!(out.contains("APPENDED-BY-CC reminder"), "{out}");
         assert!(out.contains("added=1"), "{out}");
+    }
+
+    fn capture<F: FnOnce()>(f: F) -> String {
+        let buf = BufWriter::default();
+        let writer = buf.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        String::from_utf8(buf.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[test]
+    fn shared_bytes_counts_multiset_overlap() {
+        let a = fps(&["aaaa", "bb", "bb"]);
+        assert_eq!(shared_bytes(&a, &fps(&["bb", "aaaa"])), 6);
+        assert_eq!(shared_bytes(&a, &fps(&["bb", "bb", "bb"])), 4);
+        assert_eq!(shared_bytes(&a, &fps(&["zz"])), 0);
+    }
+
+    #[test]
+    fn auxiliary_request_is_not_reported_as_drift_of_main_request() {
+        let main_a = "M".repeat(6000);
+        let main_b = "N".repeat(4000);
+        let aux = "short auxiliary prompt ".repeat(50);
+        let out = capture(|| {
+            let sid = "drift-aux-session";
+            // 先到的辅助请求（如标题生成）：会话首次出现，无输出
+            observe(sid, &[&aux], true);
+            // 主请求首次出现：与辅助请求无重叠 → 新请求类型，而不是「新增 / 消失」
+            observe(sid, &[&main_a, &main_b], true);
+            // 辅助请求再次出现但 key 未变：只更新快照
+            observe(sid, &[&aux], false);
+            // 主请求中途真的追加了一块：必须和主请求快照比较（added=1 removed=0）
+            observe(sid, &[&main_a, &main_b, "APPENDED-BY-CC reminder"], true);
+        });
+        assert_eq!(out.matches("新请求类型").count(), 1, "{out}");
+        assert_eq!(out.matches("缓存 key 变化").count(), 1, "{out}");
+        assert!(out.contains("added=1"), "{out}");
+        assert!(out.contains("removed=0"), "{out}");
+        assert!(out.contains("APPENDED-BY-CC reminder"), "{out}");
+    }
+
+    #[test]
+    fn snapshots_per_session_are_capped() {
+        let sid = "drift-cap-session";
+        capture(|| {
+            for i in 0..(MAX_SNAPSHOTS_PER_SESSION + 3) {
+                observe(sid, &[&format!("kind-{i}-").repeat(500)], true);
+            }
+        });
+        let map = PREV_BLOCKS.get().unwrap().lock().unwrap();
+        assert_eq!(map.get(sid).unwrap().len(), MAX_SNAPSHOTS_PER_SESSION);
     }
 
     #[test]

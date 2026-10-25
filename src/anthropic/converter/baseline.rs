@@ -116,7 +116,7 @@ pub(super) fn split_new_blocks<'a>(
         return (stable, added);
     }
 
-    tracing::debug!(
+    tracing::info!(
         session = %session_id,
         blocks = blocks.len(),
         known_baselines = entry.value.len(),
