@@ -207,12 +207,12 @@ mod tests {
         let path = dir.join("api_key_usage.json");
         let tracker = std::sync::Arc::new(crate::model::usage::UsageTracker::load(&path).unwrap());
 
-        for continued in [false, true] {
+        for (continued, key_id) in [(false, 1), (true, 2)] {
             let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
                 .with_prefix_estimated_tokens(53_650)
                 .with_usage_tracking(
                     Some(std::sync::Arc::clone(&tracker)),
-                    Some(1),
+                    Some(key_id),
                     Some(7),
                     None,
                     None,
@@ -241,8 +241,8 @@ mod tests {
             let final_events = ctx.generate_final_events();
 
             // 1. 验证 UsageTracker 落库的 cache_read_input_tokens 已按 creditsUsed 反推下修
-            let page = tracker.get_records_paged(1, 1, 10, &std::collections::HashMap::new());
-            assert_eq!(page.records.len(), if continued { 2 } else { 1 });
+            let page = tracker.get_records_paged(key_id, 1, 10, &std::collections::HashMap::new());
+            assert_eq!(page.records.len(), 1);
             let recorded_read = page.records[0].cache_read_input_tokens.unwrap();
             if continued {
                 assert_eq!(recorded_read, 53_650);

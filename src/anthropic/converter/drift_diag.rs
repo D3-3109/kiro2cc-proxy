@@ -12,9 +12,9 @@
 //! 所以每个会话保留至多 `MAX_SNAPSHOTS_PER_SESSION` 份快照，按重叠字节数匹配；与所有
 //! 快照都几乎无重叠时单独标注为「新请求类型」，不再当作漂移。
 //!
-//! 预览会把系统块的开头原文（80 / 40 个字符）写进 INFO 日志，
+//! INFO 记录诊断摘要和系统块开头原文预览（80 / 40 个字符）。
 //! 不依赖 Admin 设置页的 `debugLogs` 开关；INFO 未启用时跳过诊断。
-//! 输出量很小：只在 key 变化、或分流块数量变化时各写一行。
+//! 只在 key 变化、或分流块数量变化时各输出一行。
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -199,7 +199,8 @@ pub(super) fn observe(session_id: &str, stable_blocks: &[&str], key_changed: boo
     }
 }
 
-/// 记录本次请求中被分流为动态块（不进 history[0]）的系统块：块数、各块字节长度与前 40 个字符。
+/// 记录本次请求中被分流为动态块（不进 history[0]）的系统块：INFO 记录块数、各块字节长度
+/// 与前 40 个字符的原文预览。
 /// 用来确认分流规则确实命中（例如任务工具提醒）。同一会话内只在分流块数量变化时输出，
 /// 避免动态块持续存在时每轮刷屏；无动态块且数量未变化时不输出。
 pub(super) fn log_diverted(session_id: &str, dynamic_blocks: &[&str]) {
@@ -315,14 +316,19 @@ mod tests {
         let out = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
         assert_eq!(out.matches("[drift]").count(), 1, "{out}");
         assert!(out.contains("APPENDED-BY-CC reminder"), "{out}");
+        assert!(out.contains("#1(23B)"), "{out}");
         assert!(out.contains("added=1"), "{out}");
     }
 
     fn capture<F: FnOnce()>(f: F) -> String {
+        capture_at(tracing::Level::INFO, f)
+    }
+
+    fn capture_at<F: FnOnce()>(level: tracing::Level, f: F) -> String {
         let buf = BufWriter::default();
         let writer = buf.clone();
         let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(level)
             .with_ansi(false)
             .with_writer(move || writer.clone())
             .finish();
@@ -392,6 +398,35 @@ mod tests {
         assert_eq!(out.matches("[drift]").count(), 1, "{out}");
         assert!(out.contains("diverted=1"), "{out}");
         assert!(out.contains("The task tools haven't been used"), "{out}");
+        assert!(out.contains("(49B)"), "{out}");
+    }
+
+    #[test]
+    fn info_logs_include_previews_without_duplicates_at_debug() {
+        let out = capture_at(tracing::Level::DEBUG, || {
+            let sid = "drift-debug-preview-session";
+            observe(sid, &["core prompt"], true);
+            observe(sid, &["core prompt", "PRIVATE-STABLE-PREVIEW"], true);
+            log_diverted(sid, &["PRIVATE-DYNAMIC-PREVIEW"]);
+        });
+        let info: Vec<&str> = out.lines().filter(|line| line.contains(" INFO ")).collect();
+        let debug: Vec<&str> = out
+            .lines()
+            .filter(|line| line.contains(" DEBUG "))
+            .collect();
+        assert_eq!(info.len(), 2, "{out}");
+        assert!(debug.is_empty(), "{out}");
+        assert_eq!(out.matches("[drift]").count(), 2, "{out}");
+        assert!(
+            info.iter()
+                .any(|line| line.contains("PRIVATE-STABLE-PREVIEW")),
+            "{out}"
+        );
+        assert!(
+            info.iter()
+                .any(|line| line.contains("PRIVATE-DYNAMIC-PREVIEW")),
+            "{out}"
+        );
     }
 
     #[test]
