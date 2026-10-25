@@ -42,8 +42,9 @@ pub(super) fn build_history(
     system: Option<&[&str]>,
     model_id: &str,
     session_id: &str,
-) -> Result<(Vec<Message>, String), ConversionError> {
+) -> Result<(Vec<Message>, String, bool), ConversionError> {
     let mut history = Vec::new();
+    let mut h0_frozen = true;
 
     // 生成 thinking 前缀（仅 luna 不使用 Claude/Kiro 文本控制标签）
     let thinking_prefix = generate_thinking_prefix(req, model_id);
@@ -125,6 +126,7 @@ pub(super) fn build_history(
                     );
                     entry.value.clone()
                 } else {
+                    h0_frozen = false;
                     super::drift_diag::observe(session_id, &stable_system, true);
                     tracing::info!(
                         "[exp2] history[0] first hash={} len={} session={}",
@@ -215,7 +217,30 @@ pub(super) fn build_history(
         history.push(Message::Assistant(auto_assistant));
     }
 
-    Ok((history, dynamic_content))
+    Ok((
+        history,
+        dynamic_content,
+        determine_prefix_cached(history_end_index > 0, h0_frozen),
+    ))
+}
+
+/// `prefix_cached` 判定：本请求的缓存前缀（history[0] + 历史轮次）是否已命中会话级冻结缓存。
+///
+/// 完整判定矩阵（`h0_frozen` 仅在 `system_present && !stable_content.is_empty()`
+/// 分支走 `PREV_H0` 查表时才可能被置 `false`，其余分支保持初始值 `true`）：
+///
+/// | system_present | stable_content | h0_frozen 取值 | prefix_cached 决定因素 |
+/// |---|---|---|---|
+/// | true  | 非空 | PREV_H0 查表实际结果 | 历史轮次 × 查表命中 |
+/// | true  | 空（全被分流） | 恒 true | 仅历史轮次 |
+/// | false | —    | 恒 true | 仅历史轮次 |
+///
+/// 「无 system 分支仅由历史轮次门控」的前提：Anthropic Messages 协议无状态，客户端
+/// 每次请求全量重发历史，无 system 会话的前缀（tools + 历史）跨轮次字节稳定，
+/// 第 2 轮起计入 cache_read 是正确近似；若未来引入增量发送模式需重新评估。
+/// 详见 `result.rs::ConversionResult::prefix_cached` 文档。
+fn determine_prefix_cached(has_history_turns: bool, h0_frozen: bool) -> bool {
+    has_history_turns && h0_frozen
 }
 
 /// 合并多个 user 消息

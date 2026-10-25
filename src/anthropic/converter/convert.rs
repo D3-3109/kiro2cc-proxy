@@ -184,7 +184,7 @@ pub(super) fn convert_request_with_chunking(
     }
 
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
-    let (mut history, dynamic_system) = build_history(
+    let (mut history, dynamic_system, prefix_cached) = build_history(
         req,
         &messages,
         system.as_deref(),
@@ -306,6 +306,7 @@ pub(super) fn convert_request_with_chunking(
             .as_ref()
             .map(|t| t.thinking_type == "adaptive")
             .unwrap_or(false),
+        prefix_cached,
     })
 }
 

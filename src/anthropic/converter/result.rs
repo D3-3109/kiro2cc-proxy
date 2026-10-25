@@ -24,6 +24,13 @@ pub struct ConversionResult {
     /// 账号在 provider 阶段才确定，converter 阶段先记录该意图，
     /// 由 provider 按目标账号的 `thinking_adaptive` 开关决定是否注入。
     pub thinking_adaptive_requested: bool,
+    /// 本次请求的缓存前缀（`history[0]` + 历史对话轮次）是否已命中会话级冻结缓存。
+    ///
+    /// 仅当存在历史对话轮次（去除内联 system 与末尾 prefill 后 `messages.len() > 1`）
+    /// 且 `history[0]` 命中 `PREV_H0`（无系统消息时仅要求存在历史轮次）时为 `true`。
+    /// 新窗口首条消息或 `history[0]` 首次出现/漂移重置时为 `false`，handler 层据此将
+    /// `prefix_estimated_tokens` 置 0，避免把首条消息尚未建立缓存的 `system + tools` 误计入 `cache_read`。
+    pub prefix_cached: bool,
 }
 
 /// 转换错误

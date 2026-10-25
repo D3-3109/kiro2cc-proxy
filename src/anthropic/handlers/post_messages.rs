@@ -146,6 +146,7 @@ pub async fn post_messages(
     let is_compact_request = conversion_result.is_compact_request;
     // 客户端是否请求了 thinking adaptive（与账号级开关在 provider 侧共同决定注入）
     let thinking_adaptive_requested = conversion_result.thinking_adaptive_requested;
+    let prefix_cached = conversion_result.prefix_cached;
 
     // web_search server tool 桥接上下文（D5/D7：未携带时为 None，零行为变化）
     // 必须在 KiroRequest 构建（conversation_state 被 move）前构造
@@ -219,17 +220,9 @@ pub async fn post_messages(
     });
 
     // 估算"缓存前缀" token 数（system + tools + history 除最后一条 user 外的全部）
-    // 必须在 count_all_tokens 消费 payload 之前先借用计算。
-    let prefix_estimated_tokens = {
-        let n = payload.messages.len();
-        let prior: &[_] = if n > 0 {
-            &payload.messages[..n - 1]
-        } else {
-            &[]
-        };
-        token::count_prefix_tokens(payload.system.as_deref(), prior, payload.tools.as_deref())
-            as i32
-    };
+    // 必须在 count_all_tokens 消费 payload 之前先借用计算（口径与门控见 helpers::estimate_prefix_tokens）
+    let (raw_prefix_tokens, prefix_estimated_tokens) =
+        super::helpers::estimate_prefix_tokens(&payload, prefix_cached);
 
     // 估算输入 tokens（复用上方已计算的 prefix_estimated_tokens，避免重复编码历史消息）
     // 先取出 thinking_enabled 判断所需字段，避免 payload.tools 等被移动后无法整体借用
@@ -273,7 +266,7 @@ pub async fn post_messages(
         payload.system,
         payload.messages,
         payload.tools,
-        prefix_estimated_tokens as u64,
+        raw_prefix_tokens,
     ) as i32;
 
     // 提取用量追踪信息
