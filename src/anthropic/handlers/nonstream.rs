@@ -68,9 +68,9 @@ fn drop_thinking_blocks(content: &mut Vec<serde_json::Value>) {
     content.retain(|b| b["type"] != "thinking");
 }
 
-/// 统计剔除后仍存留的 thinking 块 token（BPE 真值口径，与 estimate_output_tokens 同族）。
-/// 须在 `drop_thinking_blocks` 之后调用：被剔除内容客户端不可见，不计——
-/// 与流式「客户端实际收到」口径对齐。无 thinking 块或仅有 0 token 空块
+/// 统计传入内容中的 thinking 块 token（BPE 口径）。
+/// 计费统计传入剔除前内容；落库观测统计传入剔除后内容。
+/// 无 thinking 块或仅有 0 token 空块
 /// （signature-only）时返回 None（未产生有效思考，与流式落库语义一致）。
 fn count_thinking_tokens(content: &[serde_json::Value]) -> Option<i32> {
     let mut total = 0i32;
@@ -83,6 +83,34 @@ fn count_thinking_tokens(content: &[serde_json::Value]) -> Option<i32> {
     }
     // 与流式 `(tokens > 0).then_some(tokens)` 对齐：signature-only 空块（0 token）落 None
     (total > 0).then_some(total)
+}
+
+/// 分离客户端输出、计费输出与存留 thinking 观测值。
+fn finalize_non_stream_output_usage(
+    mut content: Vec<serde_json::Value>,
+    thinking_suppressed: bool,
+    intercepted_input_chars: i64,
+    include_thinking: bool,
+) -> (Vec<serde_json::Value>, i32, i32, Option<i32>) {
+    let billed_thinking_tokens = count_thinking_tokens(&content).unwrap_or(0);
+    if thinking_suppressed {
+        drop_thinking_blocks(&mut content);
+    }
+    let thinking_token_count = count_thinking_tokens(&content);
+    let visible_output_tokens =
+        token::estimate_output_tokens(&content) + ((intercepted_input_chars + 3) / 4) as i32;
+    let billed_output_tokens = visible_output_tokens + billed_thinking_tokens;
+    let output_tokens = if include_thinking {
+        visible_output_tokens + thinking_token_count.unwrap_or(0)
+    } else {
+        visible_output_tokens
+    };
+    (
+        content,
+        output_tokens,
+        billed_output_tokens,
+        thinking_token_count,
+    )
 }
 
 fn flush_native_reasoning(
@@ -303,6 +331,7 @@ pub(crate) async fn handle_non_stream_request(
         .map(|ctx| ctx.max_uses.unwrap_or(5).clamp(0, 5) as usize)
         .unwrap_or(0);
     let mut rounds_used: usize = 0;
+    let mut has_continuation = false;
     // 已截获完成、待执行的搜索队列（每轮事件读取完毕后按截获顺序逐个执行
     // MCP → 续请求；Collecting 期间上游连发多次 web_search 时不丢失）
     let mut pending_search: VecDeque<PendingSearch> = VecDeque::new();
@@ -505,6 +534,7 @@ pub(crate) async fn handle_non_stream_request(
                     }
                 };
                 // 演进基底更新为本轮续请求所用状态（下一轮基于它演进）
+                has_continuation = true;
                 evolution_base = Some(kiro_request.conversation_state);
             }
             Err(e) => {
@@ -560,35 +590,21 @@ pub(crate) async fn handle_non_stream_request(
     }
 
     // 构建响应内容
-    let (mut content, thinking_only) = build_non_stream_content_with_native(
+    let (content, thinking_only) = build_non_stream_content_with_native(
         native_thinking_blocks,
         &thinking_content,
         &text_content,
         tool_uses,
     );
 
-    // 账号关闭 thinking：构建完成后再剔除推理块。必须在构建之后——纯推理响应的占位
-    // 正文与 max_tokens 兜底依赖"收到过推理"的判定，先清空会变成 content=[] 的空成功响应
-    if thinking_suppressed {
-        drop_thinking_blocks(&mut content);
-    }
-
-    // 统计剔除后仍存留的 thinking 块 token（落库观测字段，见 count_thinking_tokens）
-    let thinking_token_count = count_thinking_tokens(&content);
-
-    // 估算输出 tokens——必须先于可见性块拼接（H2）：server_tool_use /
-    // web_search_tool_result 是桥接可见性元数据，不代表模型真实输出量。
-    // 截获的 web_search input 单独叠加（S2，对齐流式 output_chars_other 口径）：
-    // 上游已生成这段内容即已计费，但可见性元数据本身不计入
-    let mut output_tokens = token::estimate_output_tokens(&content);
-    if intercepted_input_chars > 0 {
-        // 与流式同口径（非中文桶 `(chars+3)/4`，见 tokens_from_chars）
-        output_tokens += ((intercepted_input_chars + 3) / 4) as i32;
-    }
-    // 官方口径：output_tokens 含 thinking（outputTokensIncludeThinking 开启时）
-    if super::super::stream::output_tokens_include_thinking() {
-        output_tokens += thinking_token_count.unwrap_or(0);
-    }
+    // 构建后再过滤，保留纯推理响应占位；可见性元数据不计入模型输出。
+    let (mut content, output_tokens, billed_output_tokens, thinking_token_count) =
+        finalize_non_stream_output_usage(
+            content,
+            thinking_suppressed,
+            intercepted_input_chars,
+            super::super::stream::output_tokens_include_thinking(),
+        );
 
     // web_search 桥接可见性块前置于 thinking/text/tool_use（D5 非流式顺序：
     // server_tool_use → web_search_tool_result 逐轮交错在前，无裸 tool_use 块）
@@ -629,8 +645,19 @@ pub(crate) async fn handle_non_stream_request(
         _ => None,
     };
     // 显式注入：handler 始终算出了 prefix_estimated_tokens（可能为 0），
-    // 直接用 Some 让 select_final_usage 选用 prefix 分支而非降级到 fingerprint/模拟
-    let prefix_estimated = Some(prefix_estimated_tokens.max(0));
+    // 结合 metering_usage 反推校准后以 Some 传入 select_final_usage 选用 prefix 分支
+    let prefix_estimated = Some(crate::model::usage::refine_prefix_cache_read(
+        model,
+        prefix_estimated_tokens,
+        final_input_tokens,
+        billed_output_tokens,
+        // 多轮累计输出与末轮积分不匹配，仅退回静态前缀，不改积分落库。
+        if has_continuation {
+            None
+        } else {
+            metering_usage
+        },
+    ));
     let fingerprint_usage = match (fp_tracker.as_ref(), fp_profile.as_ref()) {
         (Some(tracker), Some(profile)) => {
             let account_id = credential_id.to_string();
@@ -863,5 +890,72 @@ mod native_tests {
             None,
             "signature-only 空块应落 None 而非 Some(0)"
         );
+    }
+
+    #[test]
+    fn test_nonstream_prefix_estimated_refined_with_thinking_billed_output() {
+        let final_input_tokens = 53_776;
+        let prefix_estimated_tokens = 53_650;
+        for native in [false, true] {
+            let thinking = "reasoning ".repeat(146);
+            let native_blocks = if native {
+                vec![json!({"type": "thinking", "thinking": thinking, "signature": "sig"})]
+            } else {
+                Vec::new()
+            };
+            let (content, _) = build_non_stream_content_with_native(
+                native_blocks,
+                if native { "" } else { &thinking },
+                "answer",
+                Vec::new(),
+            );
+            let visible = token::estimate_output_tokens(&content) + 2;
+            let billed = visible + count_thinking_tokens(&content).unwrap();
+            let credits = (1.6978 * final_input_tokens as f64 + 19.1873 * billed as f64
+                - 0.90 * 1.6978 * 20_000.0)
+                / 1_000_000.0;
+            for suppressed in [false, true] {
+                for include_thinking in [false, true] {
+                    let (filtered, output, billed_output, observed) =
+                        finalize_non_stream_output_usage(
+                            content.clone(),
+                            suppressed,
+                            5,
+                            include_thinking,
+                        );
+                    assert_eq!(billed_output, billed);
+                    assert_eq!(
+                        observed,
+                        if suppressed {
+                            None
+                        } else {
+                            Some(billed - visible)
+                        }
+                    );
+                    assert_eq!(
+                        output,
+                        if include_thinking && !suppressed {
+                            billed
+                        } else {
+                            visible
+                        }
+                    );
+                    assert_eq!(
+                        filtered.iter().any(|block| block["type"] == "thinking"),
+                        !suppressed
+                    );
+                    assert_eq!(
+                        crate::model::usage::refine_prefix_cache_read(
+                            "claude-haiku-5-5",
+                            prefix_estimated_tokens,
+                            final_input_tokens,
+                            billed_output,
+                            Some(credits),
+                        ),
+                        20_000
+                    );
+                }
+            }
+        }
     }
 }

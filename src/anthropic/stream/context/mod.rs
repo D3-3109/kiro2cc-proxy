@@ -81,6 +81,8 @@ pub struct StreamContext {
     prompt_cache_usage: PromptCacheUsage,
     /// 从 meteringEvent 获取的真实 credits 消耗
     pub metering_usage: Option<f64>,
+    /// 已成功接入桥接续流，累计输出不能与末轮积分用于反推。
+    has_continuation: bool,
     /// 从 meteringEvent 获取的 cache read tokens（Kiro 透传时有值）
     metering_cache_read_tokens: Option<i32>,
     /// 从 meteringEvent 获取的 cache creation tokens（Kiro 透传时有值）
@@ -143,6 +145,7 @@ impl StreamContext {
             user_agent: None,
             prompt_cache_usage: PromptCacheUsage::uncached(input_tokens),
             metering_usage: None,
+            has_continuation: false,
             metering_cache_read_tokens: None,
             metering_cache_creation_tokens: None,
             context_usage_percentage: None,
@@ -180,6 +183,10 @@ impl StreamContext {
     pub fn with_prefix_estimated_tokens(mut self, prefix: i32) -> Self {
         self.prefix_estimated_tokens = Some(prefix);
         self
+    }
+
+    pub(crate) fn mark_continuation(&mut self) {
+        self.has_continuation = true;
     }
 
     /// 注入断点缓存记账（None 时维持前缀估算路径）
@@ -240,10 +247,15 @@ impl StreamContext {
     ///
     /// 优先级：
     ///   1. Kiro metering 透传 cache_read/creation（实测当前版本不透传，保留兜底；
-    ///      message_start 阶段 metering 事件尚未到达，天然落到 2）
-    ///   2. 前缀估算 prefix_estimated_tokens.min(input_tokens)  ← 主路径
-    ///   3. PromptCacheUsage 模拟值（仅当前缀未注入）
-    pub(crate) fn derive_report_cache_usage(&self, input_tokens: i32) -> (i32, i32, i32) {
+    ///      message_start 阶段 metering 事件尚未到达，天然落到 2/3）
+    ///   2. 断点缓存记账 cache_accounting（promptCacheAccounting 开启时）
+    ///   3. 前缀估算混合校准 refine_prefix_cache_read（credits_used 仅传入落库路径）← 主路径
+    ///   4. PromptCacheUsage 模拟值（仅当前缀未注入）
+    pub(crate) fn derive_report_cache_usage(
+        &self,
+        input_tokens: i32,
+        credits_used: Option<f64>,
+    ) -> (i32, i32, i32) {
         if let (Some(read), Some(creation)) = (
             self.metering_cache_read_tokens,
             self.metering_cache_creation_tokens,
@@ -258,7 +270,17 @@ impl StreamContext {
                 u.cache_read_input_tokens,
             )
         } else if let Some(prefix) = self.prefix_estimated_tokens {
-            let read = prefix.max(0).min(input_tokens);
+            let read = crate::model::usage::refine_prefix_cache_read(
+                &self.model,
+                prefix,
+                input_tokens,
+                self.output_tokens(),
+                if self.has_continuation {
+                    None
+                } else {
+                    credits_used
+                },
+            );
             (input_tokens.saturating_sub(read), 0, read)
         } else {
             let sim = self.prompt_cache_usage.scale_to(input_tokens);
@@ -274,7 +296,7 @@ impl StreamContext {
     pub fn create_message_start_event(&self) -> serde_json::Value {
         // 与末尾 message_delta 共用派生逻辑，避免 cache_* 口径不一致
         let input = cap_input_tokens(self.input_tokens, self.input_tokens, &self.model);
-        let (non_cached, cache_creation, cache_read) = self.derive_report_cache_usage(input);
+        let (non_cached, cache_creation, cache_read) = self.derive_report_cache_usage(input, None);
         json!({
             "type": "message_start",
             "message": {
@@ -933,10 +955,13 @@ impl StreamContext {
             self.visible_output_tokens()
         };
 
-        // 派生逻辑见 derive_report_cache_usage（与 message_start 共用同一口径）
+        // message_delta 与 message_start 共用静态口径；UsageTracker 落库采用 creditsUsed 校准值
         let (report_input, cache_creation, cache_read) =
-            self.derive_report_cache_usage(final_input_tokens);
+            self.derive_report_cache_usage(final_input_tokens, None);
+        let (_, _, tracked_read) =
+            self.derive_report_cache_usage(final_input_tokens, self.metering_usage);
         let (report_cache_creation, report_cache_read) = (Some(cache_creation), Some(cache_read));
+        let tracked_cache_read = Some(tracked_read);
 
         // 记录用量（内部记录使用真实值）
         if let (Some(tracker), Some(key_id)) = (&self.usage_tracker, self.api_key_id) {
@@ -959,7 +984,7 @@ impl StreamContext {
                 self.metering_usage,
                 credits_per_ktok,
                 effective_rate,
-                report_cache_read,
+                tracked_cache_read,
                 report_cache_creation,
                 key_id,
                 self.credential_id
@@ -986,7 +1011,7 @@ impl StreamContext {
                     credential_id: self.credential_id,
                     client_ip: self.client_ip.clone(),
                     credits_used: self.metering_usage,
-                    cache_read_input_tokens: report_cache_read,
+                    cache_read_input_tokens: tracked_cache_read,
                     cache_creation_input_tokens: report_cache_creation,
                     effort: self.effort.clone(),
                     first_token_ms,

@@ -502,6 +502,7 @@ pub(crate) fn harvest_bridge_round(
 ) -> BridgeRoundHarvest {
     match outcome {
         BridgeRoundOutcome::Continued(response, new_decoder, search_results) => {
+            ctx.mark_continuation();
             let events = build_web_search_result_events(ctx, result_tool_use_id, &search_results);
             // 续流的首个事件前先补发本轮配对结果块，保持块序：
             // server_tool_use → web_search_tool_result → 续流内容

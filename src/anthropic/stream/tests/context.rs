@@ -199,4 +199,135 @@ mod tests {
         assert!(page.records[0].duration_ms.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[tokio::test]
+    async fn test_stream_context_refines_cache_read_from_metering_credits() {
+        let dir = std::env::temp_dir().join(format!("kiro2cc_ctx_refine_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api_key_usage.json");
+        let tracker = std::sync::Arc::new(crate::model::usage::UsageTracker::load(&path).unwrap());
+
+        for continued in [false, true] {
+            let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
+                .with_prefix_estimated_tokens(53_650)
+                .with_usage_tracking(
+                    Some(std::sync::Arc::clone(&tracker)),
+                    Some(1),
+                    Some(7),
+                    None,
+                    None,
+                );
+
+            // message_start 阶段尚未收到 meteringEvent，保持静态前缀估算 53_650
+            let (_, _, start_cache_read) = ctx.derive_report_cache_usage(53_776, None);
+            assert_eq!(start_cache_read, 53_650);
+            let _ = ctx.generate_initial_events();
+
+            // 模拟 346 tokens 输出（346 * 4 = 1384 个英文字符）与部分缓存失效的 meteringEvent
+            ctx.output_chars_other = 346 * 4;
+            let metering_event = crate::kiro::model::events::Event::Metering(
+                crate::kiro::model::events::MeteringEvent {
+                    usage: 0.06617,
+                    unit_plural: "credits".to_string(),
+                    unit: String::new(),
+                    cache_read_input_tokens: None,
+                    cache_creation_input_tokens: None,
+                },
+            );
+            let _ = ctx.process_kiro_event(&metering_event);
+            if continued {
+                ctx.mark_continuation();
+            }
+            let final_events = ctx.generate_final_events();
+
+            // 1. 验证 UsageTracker 落库的 cache_read_input_tokens 已按 creditsUsed 反推下修
+            let page = tracker.get_records_paged(1, 1, 10, &std::collections::HashMap::new());
+            assert_eq!(page.records.len(), if continued { 2 } else { 1 });
+            let recorded_read = page.records[0].cache_read_input_tokens.unwrap();
+            if continued {
+                assert_eq!(recorded_read, 53_650);
+            } else {
+                assert!((20_000..=22_500).contains(&recorded_read));
+            }
+            assert_eq!(page.records[0].credits_used, Some(0.06617));
+
+            // 2. 末尾 message_delta 保持静态前缀口径，与 message_start 一致
+            let delta_evt = final_events
+                .iter()
+                .find(|e| e.event == "message_delta")
+                .unwrap();
+            let delta_read = delta_evt.data["usage"]["cache_read_input_tokens"]
+                .as_i64()
+                .unwrap() as i32;
+            assert_eq!(
+                delta_read,
+                crate::anthropic::stream::calib::scale_for_client(53_650, "claude-haiku-5-5")
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_stream_context_accounting_precedes_credit_inference() {
+        use crate::cache::breakpoint::{BreakpointCache, CacheAccounting};
+        use crate::kiro::model::events::{Event, MeteringEvent};
+
+        let cache = std::sync::Arc::new(BreakpointCache::new(1, None));
+        let body = bytes::Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "model": "claude-haiku-5-5",
+                "system": [{
+                    "type": "text",
+                    "text": "stable prefix ".repeat(100),
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"}
+                }],
+                "messages": [{"role": "user", "content": "question"}]
+            }))
+            .unwrap(),
+        );
+        for cached in [false, true] {
+            let accounting = CacheAccounting::from_request(
+                &cache,
+                body.clone(),
+                "test-key".into(),
+                "claude-haiku-5-5".into(),
+            )
+            .await
+            .unwrap();
+            let expected = accounting.usage_for(53_776);
+            if cached {
+                assert!(expected.cache_read_input_tokens > 0);
+            } else {
+                assert!(expected.cache_creation_input_tokens > 0);
+            }
+            let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
+                .with_prefix_estimated_tokens(53_650)
+                .with_cache_accounting(Some(accounting.clone()));
+            for continued in [false, true] {
+                if continued {
+                    ctx.mark_continuation();
+                }
+                assert_eq!(
+                    ctx.derive_report_cache_usage(53_776, Some(9.99)),
+                    (
+                        expected.input_tokens,
+                        expected.cache_creation_input_tokens,
+                        expected.cache_read_input_tokens
+                    )
+                );
+            }
+            ctx.process_kiro_event(&Event::Metering(MeteringEvent {
+                usage: 9.99,
+                unit_plural: "credits".into(),
+                unit: String::new(),
+                cache_read_input_tokens: Some(600),
+                cache_creation_input_tokens: Some(200),
+            }));
+            assert_eq!(
+                ctx.derive_report_cache_usage(53_776, Some(9.99)),
+                (52_976, 200, 600)
+            );
+            accounting.commit();
+        }
+    }
 }

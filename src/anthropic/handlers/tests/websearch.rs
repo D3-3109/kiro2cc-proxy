@@ -105,7 +105,12 @@ mod tests {
     fn test_harvest_bridge_round_continued_pairs_result_block() {
         // Continued → 先发配对结果块（finished=false），结果块与 server_tool_use
         // 成对，且不含 error/message_stop 收尾事件
-        let mut ctx = StreamContext::new_with_thinking("claude-sonnet-4", 1000, false);
+        let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
+            .with_prefix_estimated_tokens(53_650);
+        assert_eq!(
+            ctx.derive_report_cache_usage(53_776, Some(9.99)),
+            (53_776, 0, 0)
+        );
         let response = reqwest::Response::from(http::Response::new(body_dummy_bytes()));
         let outcome = BridgeRoundOutcome::Continued(
             response,
@@ -114,6 +119,10 @@ mod tests {
         );
 
         let harvest = harvest_bridge_round(outcome, "tu-cont-1", &mut ctx);
+        assert_eq!(
+            ctx.derive_report_cache_usage(53_776, Some(9.99)),
+            (126, 0, 53_650)
+        );
         assert!(!harvest.finished, "Continued 应换入续流，finished=false");
         assert_eq!(
             harvest.events.len(),

@@ -21,17 +21,36 @@ fn is_haiku_55(model_lower: &str) -> bool {
 /// （非超出部分累进）。低档 $0.10/$0.50，高档 $0.50/$2.50。
 const HAIKU_55_LONG_CONTEXT_THRESHOLD: i32 = 100_000;
 
+/// 触发 `creditsUsed` 缓存读取反推的最小输入 token 阈值。
+///
+/// 输入过短时，输入积分占总 `creditsUsed` 比重过小，输出分词微差除以较小的
+/// `0.90 * r_miss` 会被放大，故低于 4096 tokens 直接保留静态前缀估算。
+const MIN_INFER_INPUT_TOKENS: i32 = 4096;
+
+/// Kiro 上游缓存读取相对未命中输入单价的节省比例（按 10% 计费，节省 90%）。
+const CACHE_READ_SAVINGS_RATIO: f64 = 0.90;
+
+/// Haiku 5.5 常态档（<= 100K）实测 credits/MTok 费率：(r_miss, r_out)。
+const HAIKU_55_CREDIT_RATES_STANDARD: (f64, f64) = (1.6978, 19.1873);
+
+/// Haiku 5.5 长上下文档（> 100K）实测 credits/MTok 费率：(r_miss, r_out)。
+const HAIKU_55_CREDIT_RATES_LONG_CONTEXT: (f64, f64) = (6.7830, 93.9200);
+
+/// Opus 4.5+ 定价：$5 / $25。fable 仅在反推路径沿用此档。
+const OPUS_PRICING: ModelPricing = ModelPricing {
+    input_per_mtok: 5.0,
+    output_per_mtok: 25.0,
+};
+
 /// 根据模型名获取定价
 pub(crate) fn get_model_pricing(model: &str) -> ModelPricing {
-    let model_lower = model.to_lowercase();
+    pricing_of_lower(&model.to_lowercase())
+}
 
+fn pricing_of_lower(model_lower: &str) -> ModelPricing {
     if model_lower.contains("opus") {
-        // Opus 4.5+: $5 / $25
-        ModelPricing {
-            input_per_mtok: 5.0,
-            output_per_mtok: 25.0,
-        }
-    } else if is_haiku_55(&model_lower) {
+        OPUS_PRICING
+    } else if is_haiku_55(model_lower) {
         // Haiku 5.5: $0.10 / $0.50（≤100K 低档，官方称覆盖约 90% 请求量）。
         // >100K 的高档由 calculate_cost 按整档跳价处理（本函数不持有 token 数）。
         ModelPricing {
@@ -55,12 +74,16 @@ pub(crate) fn get_model_pricing(model: &str) -> ModelPricing {
 }
 
 /// 平台级 credits/USD 换算率，按模型档位差异化（代理实测 2026-06-25）。
-/// 仅 usage 报表 credits_saved 字段使用（estimated_cost × k_ref - credits_used）。
-/// cache_read 派生已切换为前缀估算路径，不再依赖此值。
+/// 供 usage 报表 credits_saved（estimated_cost × k_ref - credits_used）与
+/// creditsUsed 缓存读取反推（get_claude_credit_rates）共用。
 /// 2026-06-30 重校：按 opus 版本分档，基于实测 d=0.50 缓存折扣反推。
+/// 此处保留历史标定背景；这些值未按当前反推使用的 d=0.90 重新标定。
 /// 2026-07-25 追加 opus-5 与 4.7/4.8 同档。
 pub(crate) fn get_k_ref(model: &str) -> f64 {
-    let m = model.to_lowercase();
+    k_ref_of_lower(&model.to_lowercase())
+}
+
+fn k_ref_of_lower(m: &str) -> f64 {
     if m.contains("opus-4-7")
         || m.contains("opus-4.7")
         || m.contains("opus-4-8")
@@ -111,4 +134,91 @@ pub(crate) fn calculate_cost(model: &str, input_tokens: i32, output_tokens: i32)
     let input_cost = (input_tokens as f64 / 1_000_000.0) * pricing.input_per_mtok;
     let output_cost = (output_tokens as f64 / 1_000_000.0) * pricing.output_per_mtok;
     input_cost + output_cost
+}
+
+/// 判断模型是否属于 Claude 系列（排除 GPT / 第三方模型）。
+fn is_claude_model(model_lower: &str) -> bool {
+    model_lower.contains("claude")
+        || model_lower.contains("sonnet")
+        || model_lower.contains("opus")
+        || model_lower.contains("haiku")
+        || model_lower.contains("fable")
+}
+
+/// 获取 Claude 模型的 `(r_miss, r_out)`（单位：credits / MTok）。
+///
+/// - `claude-haiku-5-5` 使用实测标定的 `<= 100K` / `> 100K` 双档参数；
+/// - 其余 Claude 模型沿用定价与历史 k_ref 派生，属于尚未实测标定的费率假设；
+/// - 非 Claude 模型返回 `None`（跳过反推）。
+fn get_claude_credit_rates(model: &str, input_tokens: i32) -> Option<(f64, f64)> {
+    let model_lower = model.to_lowercase();
+    if !is_claude_model(&model_lower) {
+        return None;
+    }
+    if is_haiku_55(&model_lower) {
+        if input_tokens > HAIKU_55_LONG_CONTEXT_THRESHOLD {
+            Some(HAIKU_55_CREDIT_RATES_LONG_CONTEXT)
+        } else {
+            Some(HAIKU_55_CREDIT_RATES_STANDARD)
+        }
+    } else {
+        // fable 仅反推路径按 opus 价，calculate_cost 口径保持不变
+        let pricing = if model_lower.contains("fable") {
+            OPUS_PRICING
+        } else {
+            pricing_of_lower(&model_lower)
+        };
+        let k_ref = k_ref_of_lower(&model_lower);
+        Some((
+            pricing.input_per_mtok * k_ref,
+            pricing.output_per_mtok * k_ref,
+        ))
+    }
+}
+
+/// 由上游 `meteringEvent.usage`（`credits_used`）反推缓存读取 token 数。
+///
+/// 公式：`clamp(round((r_miss * I + r_out * O_billed - credits_used * 1e6) / (0.90 * r_miss)), 0, I)`。
+/// 仅对 Claude 系列模型且 `input_tokens >= 4096`、`credits_used > 0` 生效。
+pub(crate) fn infer_cache_read_from_credits(
+    model: &str,
+    input_tokens: i32,
+    billed_output_tokens: i32,
+    credits_used: f64,
+) -> Option<i32> {
+    if input_tokens < MIN_INFER_INPUT_TOKENS || !credits_used.is_finite() || credits_used <= 0.0 {
+        return None;
+    }
+    let (r_miss, r_out) = get_claude_credit_rates(model, input_tokens)?;
+    let input = input_tokens as f64;
+    let output = billed_output_tokens.max(0) as f64;
+    let expected_no_cache_micro = r_miss * input + r_out * output;
+    let actual_micro = credits_used * 1_000_000.0;
+    let saved_micro = expected_no_cache_micro - actual_micro;
+    let raw_read = (saved_micro / (CACHE_READ_SAVINGS_RATIO * r_miss)).round() as i64;
+    Some(raw_read.clamp(0, input_tokens as i64) as i32)
+}
+
+/// 结合静态前缀上界与 `creditsUsed` 反推值校准最终 `cache_read_input_tokens`。
+///
+/// - `prefix_estimated_tokens <= 0`（首轮或 `history[0]` 重置）时锁定为 `0`；
+/// - 满足反推条件时取 `min(prefix_estimated_tokens, inferred_read, final_input_tokens)`；
+/// - 其余情况（`< 4096`、无 `credits_used`、非 Claude 模型）保留 `min(prefix_estimated_tokens, final_input_tokens)`。
+pub(crate) fn refine_prefix_cache_read(
+    model: &str,
+    prefix_estimated_tokens: i32,
+    final_input_tokens: i32,
+    billed_output_tokens: i32,
+    credits_used: Option<f64>,
+) -> i32 {
+    if prefix_estimated_tokens <= 0 || final_input_tokens <= 0 {
+        return 0;
+    }
+    let capped_prefix = prefix_estimated_tokens.min(final_input_tokens);
+    match credits_used.and_then(|cu| {
+        infer_cache_read_from_credits(model, final_input_tokens, billed_output_tokens, cu)
+    }) {
+        Some(inferred) => capped_prefix.min(inferred),
+        None => capped_prefix,
+    }
 }
