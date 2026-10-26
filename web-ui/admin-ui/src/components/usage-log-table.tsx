@@ -70,7 +70,7 @@ export function cacheHitRate(record: UsageRecord): number | null {
  * - 已知具体模型 → `getKRef(model)`，与后端同档位
  * - 只有跨模型聚合总费用（汇总卡）→ `fallbackCredits`，退化为单一均值除数
  */
-const USD_TO_CREDITS_RATE = 0.72
+export const USD_TO_CREDITS_RATE = 0.72
 
 export function fallbackCredits(cost: number): number {
   return cost / USD_TO_CREDITS_RATE

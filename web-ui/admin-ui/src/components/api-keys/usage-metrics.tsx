@@ -1,11 +1,46 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 // API Keys 指标条区块（自 api-keys-panel.tsx 拆出，纯代码搬移）
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { Delta, FootSep, Metric, MetricAside, MetricFoot, MetricValue, MetricsBar, Ring, Sparkline } from '@/components/metrics'
 import { formatTokenCount, localeTag } from '@/lib/locale'
 import { quotaTone } from '@/components/api-key-row'
 import type { KeyStatusFilter } from '@/components/api-keys/panel-constants'
 import type { DailySummary } from '@/types/api'
+
+/** 所有配额型 Key 的合计，credits 与 USD 两种口径并列 */
+export interface QuotaTotals {
+  usedCredits: number
+  usedUsd: number
+  remainingCredits: number
+  remainingUsd: number
+  totalCredits: number
+  totalUsd: number
+}
+
+type TopQuota = NonNullable<UsageMetricsProps['topQuota']>
+
+/** 悬停详情：占用最高的 Key、credits/USD 两种口径的合计与估算说明（每项一行） */
+function quotaTooltip(t: TFunction, topQuota: TopQuota, totals: QuotaTotals): string {
+  const topKeyUsage =
+    topQuota.unit === 'credits'
+      ? t('apiKeys.metricQuotaUsedCredits', { used: topQuota.used.toFixed(1), limit: topQuota.limit })
+      : t('apiKeys.metricQuotaUsedUsd', { used: topQuota.used.toFixed(2), limit: topQuota.limit })
+  return [
+    `Key ${topQuota.name} · ${topKeyUsage}`,
+    t('apiKeys.metricQuotaTotalsCredits', {
+      used: totals.usedCredits.toFixed(1),
+      remaining: totals.remainingCredits.toFixed(1),
+      total: totals.totalCredits.toFixed(1),
+    }),
+    t('apiKeys.metricQuotaTotalsUsd', {
+      used: totals.usedUsd.toFixed(2),
+      remaining: totals.remainingUsd.toFixed(2),
+      total: totals.totalUsd.toFixed(2),
+    }),
+    t('apiKeys.metricQuotaTotalsHint'),
+  ].join('\n')
+}
 
 interface UsageMetricsProps {
   statusCounts: Record<KeyStatusFilter, number>
@@ -17,6 +52,7 @@ interface UsageMetricsProps {
   todayStats: DailySummary | null
   sinceLabel: string | null
   topQuota: { name: string; used: number; limit: number; unit: 'usd' | 'credits'; percent: number } | null
+  quotaTotals: QuotaTotals | null
 }
 
 export function ApiKeysUsageMetrics({
@@ -29,6 +65,7 @@ export function ApiKeysUsageMetrics({
   todayStats,
   sinceLabel,
   topQuota,
+  quotaTotals,
 }: UsageMetricsProps) {
   const { t } = useTranslation()
 
@@ -111,21 +148,32 @@ export function ApiKeysUsageMetrics({
           </Metric>
 
           <Metric label={t('apiKeys.metricQuotaLabel')}>
-            <MetricValue
-              value={topQuota === null ? '—' : String(Math.round(topQuota.percent))}
-              unit={topQuota === null ? undefined : '%'}
-            />
-            {topQuota === null ? (
+            {/* pr-14 为右侧 Ring 留位，避免长 Key 名与之重叠 */}
+            <div className="pr-14">
+              <MetricValue
+                value={topQuota === null ? '—' : String(Math.round(topQuota.percent))}
+                unit={topQuota === null ? undefined : '%'}
+                trailing={
+                  topQuota === null ? undefined : (
+                    <span
+                      className="min-w-0 truncate rounded-[6px] bg-surface-3 px-[7px] py-0.5 text-[11px] font-semibold text-ink-3"
+                      title={topQuota.name}
+                    >
+                      {topQuota.name}
+                    </span>
+                  )
+                }
+              />
+            </div>
+            {topQuota === null || quotaTotals === null ? (
               <div className="mt-[3px] text-[11px] text-ink-3">{t('apiKeys.metricQuotaEmpty')}</div>
             ) : (
-              <div className="mt-[3px] truncate pr-14 text-[11px] text-ink-3">
-                Key <b className="font-medium text-ink-2">{topQuota.name}</b>
-                {' · '}
-                <span className={`font-semibold ${quotaTone(topQuota.percent).text}`}>
-                  {topQuota.unit === 'credits'
-                    ? t('apiKeys.metricQuotaUsedCredits', { used: topQuota.used.toFixed(1), limit: topQuota.limit })
-                    : t('apiKeys.metricQuotaUsedUsd', { used: topQuota.used.toFixed(2), limit: topQuota.limit })}
-                </span>
+              <div className="mt-[3px] truncate pr-14 text-[11px] text-ink-3" title={quotaTooltip(t, topQuota, quotaTotals)}>
+                {t('apiKeys.metricQuotaTotalsCompact', {
+                  used: quotaTotals.usedUsd.toFixed(2),
+                  remaining: quotaTotals.remainingUsd.toFixed(2),
+                  total: quotaTotals.totalUsd.toFixed(2),
+                })}
               </div>
             )}
             <MetricAside>

@@ -24,7 +24,8 @@ import { copyToClipboard as writeToClipboard } from '@/lib/clipboard'
 import { importToCcSwitch, type CcSwitchApp } from '@/lib/ccswitch'
 import { localeTag } from '@/lib/locale'
 import type { ApiKeyItem, UsageSummary } from '@/types/api'
-import { ApiKeysUsageMetrics } from '@/components/api-keys/usage-metrics'
+import { ApiKeysUsageMetrics, type QuotaTotals } from '@/components/api-keys/usage-metrics'
+import { USD_TO_CREDITS_RATE, fallbackCredits } from '@/components/usage-log-table'
 import { EXPIRING_SOON_MS, ITEMS_PER_PAGE, formatLocalDate, type KeyStatusFilter, type SortBy } from '@/components/api-keys/panel-constants'
 
 interface ApiKeysPanelProps {
@@ -424,6 +425,27 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
     null
   )
 
+  // 配额合计：已用取实际统计（credits 与 USD 各自真实值）；剩余/总额度按 Key 原生单位累计，
+  // 跨单位部分用固定汇率估算。剩余按 Key 逐个钳到 0，超额 Key 不会抵扣其他 Key 的余量
+  const quotaTotals = allKeys.reduce<QuotaTotals | null>((prev, k) => {
+    if (k.spendingLimit == null || k.spendingLimit <= 0) return prev
+    const u = usageMap.get(k.id)
+    const isCredits = k.limitUnit === 'credits'
+    const usedNative = isCredits ? u?.totalCredits ?? 0 : u?.totalCost ?? 0
+    const remainingNative = Math.max(0, k.spendingLimit - usedNative)
+    const toCredits = (native: number) => (isCredits ? native : fallbackCredits(native))
+    const toUsd = (native: number) => (isCredits ? native * USD_TO_CREDITS_RATE : native)
+    const acc = prev ?? { usedCredits: 0, usedUsd: 0, remainingCredits: 0, remainingUsd: 0, totalCredits: 0, totalUsd: 0 }
+    return {
+      usedCredits: acc.usedCredits + (u?.totalCredits ?? 0),
+      usedUsd: acc.usedUsd + (u?.totalCost ?? 0),
+      remainingCredits: acc.remainingCredits + toCredits(remainingNative),
+      remainingUsd: acc.remainingUsd + toUsd(remainingNative),
+      totalCredits: acc.totalCredits + toCredits(k.spendingLimit),
+      totalUsd: acc.totalUsd + toUsd(k.spendingLimit),
+    }
+  }, null)
+
   const statusSegments: SegmentedOption<KeyStatusFilter>[] = [
     { key: 'all', label: t('credentials.filterAll'), count: statusCounts.all },
     { key: 'active', label: t('apiKeys.statusActive'), pipClass: 'bg-ok', count: statusCounts.active },
@@ -659,6 +681,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         todayStats={todayStats}
         sinceLabel={sinceLabel}
         topQuota={topQuota}
+        quotaTotals={quotaTotals}
       />
 
       {/* 操作条（设计稿 .actionbar）：危险操作用竖分隔线隔离并染红；「导出配置」依赖未实现的后端能力，不渲染 */}
