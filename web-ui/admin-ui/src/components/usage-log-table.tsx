@@ -38,6 +38,15 @@ function uaShort(ua: string): string {
 }
 
 /**
+ * 缓存命中百分比胶囊的展示开关。
+ *
+ * meteringEvent 当前不返回 cache_read 真值，命中率由 credits 反推；反推在
+ * 「实际 credits 高于全未命中基线」时被 clamp 成 0%，会把缓存写入轮误显成 0%。
+ * 口径校准前先隐藏，改回 true 即可恢复（图标、函数、i18n 键均保留）。
+ */
+const SHOW_CACHE_HIT_RATE = false
+
+/**
  * 缓存命中率 = 缓存读取 / 输入总计。
  *
  * 分母取 `inputTokens`（输入总计，本身已含缓存读取），与同一单元格第三、四行
@@ -291,7 +300,7 @@ export function UsageLogTable({
                       <span className="font-mono tabular-nums">
                         {formatTokenCount(record.cacheReadInputTokens ?? 0)}
                       </span>
-                      {hitRate != null && (
+                      {SHOW_CACHE_HIT_RATE && hitRate != null && (
                         <span
                           className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-brand-soft px-1.5 py-px align-middle font-mono text-[10px] font-semibold tabular-nums text-brand"
                           title={t('common.cacheHitRateTitle', { rate: hitRate.toFixed(1) })}
