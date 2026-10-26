@@ -669,8 +669,10 @@ pub(crate) async fn handle_non_stream_request(
         final_input_tokens,
         billed_output_tokens,
         metering_usage,
-        metering_cache_read_tokens.is_none() && cache_accounting.is_none() && !has_continuation,
+        // 与实际用量选路（metering_pair）同口径：read/creation 任一缺失即无完整真值
+        metering_pair.is_none() && cache_accounting.is_none() && !has_continuation,
         credential_id,
+        request_started_at,
     );
     let fingerprint_usage = match (fp_tracker.as_ref(), fp_profile.as_ref()) {
         (Some(tracker), Some(profile)) => {

@@ -981,11 +981,15 @@ impl StreamContext {
             final_input_tokens,
             billed_output_tokens,
             self.metering_usage,
-            self.metering_cache_read_tokens.is_none()
+            // 与 derive_report_cache_usage 同口径：read+creation 双 Some 才算完整
+            // metering 真值（任一缺失则反推实际生效，诊断不应被关闭）
+            (self.metering_cache_read_tokens.is_none()
+                || self.metering_cache_creation_tokens.is_none())
                 && self.cache_accounting.is_none()
                 && self.prefix_estimated_tokens.is_some()
                 && !self.has_continuation,
             self.credential_id.unwrap_or(0),
+            self.request_started_at.unwrap_or_else(Instant::now),
         );
 
         // 记录用量（内部记录使用真实值）
