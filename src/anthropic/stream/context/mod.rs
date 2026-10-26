@@ -11,7 +11,6 @@ use crate::kiro::model::events::Event;
 use crate::model::usage::UsageTracker;
 
 use super::calib::{cap_input_tokens, scale_for_client};
-use super::helpers::count_token_chars;
 use super::state::{SseEvent, SseStateManager};
 use super::thinking::{
     find_char_boundary, find_real_thinking_end_tag, find_real_thinking_end_tag_at_buffer_end,
@@ -34,14 +33,10 @@ pub struct StreamContext {
     pub input_tokens: i32,
     /// 从 contextUsageEvent 计算的实际输入 tokens
     pub context_input_tokens: Option<i32>,
-    /// 计费口径的输出字符累计（含 thinking），中文桶。见 `output_tokens()`
-    pub output_chars_cn: i64,
-    /// 计费口径的输出字符累计（含 thinking），非中文桶
-    pub output_chars_other: i64,
-    /// 上报口径的输出字符累计（不含 thinking），中文桶。见 `visible_output_tokens()`
-    pub visible_chars_cn: i64,
-    /// 上报口径的输出字符累计（不含 thinking），非中文桶
-    pub visible_chars_other: i64,
+    /// 计费口径的输出全文缓冲（含 thinking），收尾一次性 BPE 编码。见 `output_tokens()`
+    pub output_full_text: String,
+    /// 上报口径的输出全文缓冲（不含 thinking），收尾一次性 BPE 编码。见 `visible_output_tokens()`
+    pub visible_full_text: String,
     /// 客户端实际收到的 thinking 全文缓存（BPE 真值统计口径，
     /// 落库时一次性 count_tokens）。见 `thinking_token_count()`
     pub thinking_full_text: String,
@@ -124,10 +119,8 @@ impl StreamContext {
             message_id: format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")),
             input_tokens,
             context_input_tokens: None,
-            output_chars_cn: 0,
-            output_chars_other: 0,
-            visible_chars_cn: 0,
-            visible_chars_other: 0,
+            output_full_text: String::new(),
+            visible_full_text: String::new(),
             thinking_full_text: String::new(),
             tool_block_indices: HashMap::new(),
             thinking_enabled,
@@ -260,10 +253,14 @@ impl StreamContext {
     ///   2. 断点缓存记账 cache_accounting（promptCacheAccounting 开启时）
     ///   3. 前缀估算混合校准 refine_prefix_cache_read（credits_used 仅传入落库路径）← 主路径
     ///   4. PromptCacheUsage 模拟值（仅当前缀未注入）
+    ///
+    /// `billed_output_tokens` 由调用方传入（BPE 全文编码 O(n)，收尾路径算一次复用，
+    /// 避免重复编码；message_start 阶段传 0 —— 彼时全文为空，编码结果本就是 0）。
     pub(crate) fn derive_report_cache_usage(
         &self,
         input_tokens: i32,
         credits_used: Option<f64>,
+        billed_output_tokens: i32,
     ) -> (i32, i32, i32) {
         if let (Some(read), Some(creation)) = (
             self.metering_cache_read_tokens,
@@ -283,7 +280,7 @@ impl StreamContext {
                 &self.model,
                 prefix,
                 input_tokens,
-                self.output_tokens(),
+                billed_output_tokens,
                 if self.has_continuation {
                     None
                 } else {
@@ -305,7 +302,8 @@ impl StreamContext {
     pub fn create_message_start_event(&self) -> serde_json::Value {
         // 与末尾 message_delta 共用派生逻辑，避免 cache_* 口径不一致
         let input = cap_input_tokens(self.input_tokens, self.input_tokens, &self.model);
-        let (non_cached, cache_creation, cache_read) = self.derive_report_cache_usage(input, None);
+        let (non_cached, cache_creation, cache_read) =
+            self.derive_report_cache_usage(input, None, 0);
         json!({
             "type": "message_start",
             "message": {
@@ -465,10 +463,9 @@ impl StreamContext {
             return Vec::new();
         }
 
-        // 累加字符数而非 token —— 取整统一留到 output_tokens() 收尾做一次
-        let (cn, other) = count_token_chars(content);
-        self.output_chars_cn += cn;
-        self.output_chars_other += other;
+        // 缓冲全文而非逐段编码 —— BPE 统一留到 output_tokens() 收尾做一次：
+        // 跨 chunk 的 BPE 合并（如标签 `<th` + `inking>`）无法拆开分段累加
+        self.output_full_text.push_str(content);
 
         let mut events = self.finish_native_thinking();
         // 如果启用了thinking，需要处理thinking块
@@ -686,9 +683,7 @@ impl StreamContext {
             }),
         ) {
             // 只统计真正发出的文本 —— 被状态机拒绝的 delta 客户端收不到，不应计入上报
-            let (cn, other) = count_token_chars(text);
-            self.visible_chars_cn += cn;
-            self.visible_chars_other += other;
+            self.visible_full_text.push_str(text);
             events.push(delta_event);
         }
 
@@ -707,7 +702,7 @@ impl StreamContext {
     /// 创建 thinking_delta 事件
     ///
     /// 非空内容同时写入 thinking 全文缓存（落库为 thinking_token_count 的统计口径：
-    /// 客户端实际收到的 thinking 文案 BPE 真值，与 visible_chars 同语义）；空串事件（
+    /// 客户端实际收到的 thinking 文案 BPE 真值，与 visible_full_text 同语义）；空串事件（
     /// content_block_stop 前的收尾）不计数。
     fn create_thinking_delta_event(&mut self, index: i32, thinking: &str) -> SseEvent {
         self.accumulate_thinking(thinking);
@@ -815,11 +810,9 @@ impl StreamContext {
 
         // 发送参数增量 (ToolUseEvent.input 是 String 类型)
         if !tool_use.input.is_empty() {
-            // tool input 是 JSON，整体归入非中文桶（与原 `(len+3)/4` 同口径，去掉逐次取整）
-            let tool_input_chars = tool_use.input.len() as i64;
             // 计费口径与 text 分支一致（`process_assistant_response` 也是无条件累加）：
             // 上游已生成这段内容即已计费，代理侧状态机是否转发不改变上游成本。
-            self.output_chars_other += tool_input_chars;
+            self.output_full_text.push_str(&tool_use.input);
 
             if let Some(delta_event) = self.state_manager.handle_content_block_delta(
                 block_index,
@@ -834,7 +827,7 @@ impl StreamContext {
             ) {
                 // 上报口径只统计真正发出的内容 —— 被状态机拒绝的 delta 客户端收不到
                 // （如同一 tool_use_id 在 stop 之后又收到迟到帧）。
-                self.visible_chars_other += tool_input_chars;
+                self.visible_full_text.push_str(&tool_use.input);
                 events.push(delta_event);
             }
         }
@@ -966,9 +959,12 @@ impl StreamContext {
 
         // message_delta 与 message_start 共用静态口径；UsageTracker 落库采用 creditsUsed 校准值
         let (report_input, cache_creation, cache_read) =
-            self.derive_report_cache_usage(final_input_tokens, None);
-        let (_, _, tracked_read) =
-            self.derive_report_cache_usage(final_input_tokens, self.metering_usage);
+            self.derive_report_cache_usage(final_input_tokens, None, billed_output_tokens);
+        let (_, _, tracked_read) = self.derive_report_cache_usage(
+            final_input_tokens,
+            self.metering_usage,
+            billed_output_tokens,
+        );
         let (report_cache_creation, report_cache_read) = (Some(cache_creation), Some(cache_read));
         let tracked_cache_read = Some(tracked_read);
 

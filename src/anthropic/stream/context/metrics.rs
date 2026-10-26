@@ -5,20 +5,22 @@
 use super::StreamContext;
 use crate::anthropic::stream::calib::NEAR_EMPTY_OUTPUT_THRESHOLD;
 use crate::anthropic::stream::calib::empty_response_oversized_threshold;
-use crate::anthropic::stream::helpers::tokens_from_chars;
 
 impl StreamContext {
     /// 计费口径的输出 tokens（含 thinking）——用于入库、`effective_rate` 与近似空响应判定
     ///
-    /// 由字符计数器一次性派生，而非逐 chunk 累加 token：`estimate_tokens` 对
-    /// 中文/非中文两个桶各做一次向上取整，每 chunk 调用一次会累积出系统性高估
-    /// （实测同一响应计费口径 8703、上报口径 8061，+7.96%，差值全部是取整噪音）。
+    /// BPE 真值（tiktoken cl100k_base，与输入估算、thinking_token_count 同编码器）：
+    /// 流式过程中缓冲全文，此处收尾一次性编码。不能改为逐 chunk 编码累加 —— 跨
+    /// chunk 的 BPE 合并（如两次 tool input 拼接点的 `}{"`）无法拆开分段累计；
+    /// 前身字符估算实现同样靠"累加字符桶、收尾一次取整"消除逐次取整噪音
+    /// （旧口径每 chunk 各桶向上取整一次，实测累积 +7.96% 高估）。
+    /// 全文为空返回 0 —— `is_empty_response` 依赖"零输出"这一状态。
     pub fn output_tokens(&self) -> i32 {
-        tokens_from_chars(self.output_chars_cn, self.output_chars_other)
+        crate::token::count_tokens(&self.output_full_text) as i32
     }
 
     /// 对客户端上报的输出 tokens：只统计实际发出的 text_delta 与 tool_use 参数，
-    /// 不含 thinking。
+    /// 不含 thinking。BPE 真值口径，与 `output_tokens` 同收尾一次编码。
     ///
     /// 早前对外上报 `output_tokens.min(380)`，注释理由是"检测工具对 output_tokens
     /// 总和 > 800 扣 15 分，thinking 内容不应计入对外报告"。但固定上限把正常长回复
@@ -26,7 +28,7 @@ impl StreamContext {
     /// 判定少算最近一轮输出）。改为按来源精确排除 thinking：膨胀源头本就是 thinking
     /// （`process_assistant_response` 在分离标签前就计入计费口径），排除后无需上限。
     pub fn visible_output_tokens(&self) -> i32 {
-        tokens_from_chars(self.visible_chars_cn, self.visible_chars_other)
+        crate::token::count_tokens(&self.visible_full_text) as i32
     }
 
     /// 深度思考文案 tokens：客户端实际收到的 thinking_delta 内容（不含 signature），
@@ -50,6 +52,13 @@ impl StreamContext {
     pub fn is_empty_response(&self) -> bool {
         let no_tool_use = !self.state_manager.has_tool_use();
         let thinking_empty = self.thinking_buffer.trim().is_empty();
+        // 在 cl100k 单 token 最长 128 字节的前提下，超过 30 × 128 字节必然 ≥ 31 token，不可能是近似空响应
+        const CL100K_MAX_TOKEN_BYTES: usize = 128;
+        if self.output_full_text.len()
+            > NEAR_EMPTY_OUTPUT_THRESHOLD as usize * CL100K_MAX_TOKEN_BYTES
+        {
+            return false;
+        }
         let output_tokens = self.output_tokens();
 
         // 路径 1：完全空

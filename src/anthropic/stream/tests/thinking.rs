@@ -36,8 +36,8 @@ mod tests {
                         ctx.process_kiro_event(&upstream_event("reasoningContentEvent", payload)),
                     );
                 }
-                assert_eq!(ctx.visible_chars_cn + ctx.visible_chars_other, 0);
-                assert!(ctx.output_chars_cn + ctx.output_chars_other > 0);
+                assert!(ctx.visible_full_text.is_empty());
+                assert!(!ctx.output_full_text.is_empty());
 
                 match boundary {
                     "text" => events.extend(ctx.process_kiro_event(&upstream_event(
@@ -101,7 +101,7 @@ mod tests {
             serde_json::json!({"text": "不应暴露", "signature": "real-signature"}),
         ));
         assert!(events.is_empty());
-        assert_eq!(ctx.visible_chars_cn + ctx.visible_chars_other, 0);
+        assert!(ctx.visible_full_text.is_empty());
     }
 
     #[test]
@@ -735,8 +735,8 @@ mod tests {
         );
 
         // 纯 thinking 响应：visible（不含 thinking）保持 0，output（含 thinking）> 0
-        assert_eq!(ctx.visible_chars_cn + ctx.visible_chars_other, 0);
-        assert!(ctx.output_chars_cn + ctx.output_chars_other > 0);
+        assert!(ctx.visible_full_text.is_empty());
+        assert!(!ctx.output_full_text.is_empty());
 
         // 已收到的内容不因后续空 delta/收尾而重复累计
         let before = ctx.thinking_token_count();

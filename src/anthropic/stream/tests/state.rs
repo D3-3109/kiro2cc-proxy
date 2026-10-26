@@ -3,18 +3,11 @@
 #[cfg(test)]
 mod tests {
     use crate::anthropic::stream::{
-        SseEvent, SseStateManager, StreamContext, count_token_chars, scale_for_client,
-        scale_for_client_with, split_thinking_and_visible, tokens_from_chars,
+        SseEvent, SseStateManager, StreamContext, scale_for_client, scale_for_client_with,
+        split_thinking_and_visible,
     };
     use crate::cache::PromptCacheUsage;
     use serde_json::json;
-
-    /// 测试辅助：单段文本的 token 估算 —— 生产路径已改为分桶累加 + 收尾取整，
-    /// 不再需要这个封装，只在断言里用来算「若单次估算会得到多少」。
-    fn est(text: &str) -> i32 {
-        let (cn, other) = count_token_chars(text);
-        tokens_from_chars(cn, other)
-    }
 
     /// 非流式整段分离：thinking 与可见文本必须彻底分开，标签原文不得残留
     #[test]
@@ -60,7 +53,7 @@ mod tests {
 
         let events = ctx.process_tool_use(&ev);
         assert!(events.iter().any(|e| e.event == "content_block_delta"));
-        let expected = (ev.input.len() as i32 + 3) / 4;
+        let expected = crate::token::count_tokens(&ev.input) as i32;
         assert_eq!(ctx.visible_output_tokens(), expected);
         assert_eq!(ctx.output_tokens(), expected);
 
@@ -69,17 +62,15 @@ mod tests {
         let late = ctx.process_tool_use(&ev);
         assert!(!late.iter().any(|e| e.event == "content_block_delta"));
         assert_eq!(ctx.visible_output_tokens(), expected);
-        // 两帧的计费口径由累计字符数一次派生，不是 expected * 2 ——
-        // 差掉的 1 token 正是被消除的逐次取整噪音
-        let billed_two = tokens_from_chars(0, ev.input.len() as i64 * 2);
+        // 两帧的计费口径 = 拼接全文一次 BPE 编码（拼接点的跨帧合并无法拆开分段累计）
+        let billed_two = crate::token::count_tokens(&format!("{}{}", ev.input, ev.input)) as i32;
         assert_eq!(ctx.output_tokens(), billed_two);
-        assert!(billed_two < expected * 2);
     }
 
-    /// 本次修复的核心等价性：同一段文本无论被切成多少个 chunk 投喂，两个 token
-    /// 口径的派生结果都必须完全一致。旧实现每 chunk 各自向上取整（中文桶与非中文桶
-    /// 各一次），切得越碎高估越多 —— 实测同一响应计费口径 8703、上报口径 8061，
-    /// 差值 642 全部是取整噪音（该响应 thinking 块数为 0）。
+    /// 核心等价性：同一段文本无论被切成多少个 chunk 投喂，两个 token 口径的派生
+    /// 结果都必须完全一致。BPE 收尾一次编码天然满足；该断言的历史价值在字符估算
+    /// 时代（每 chunk 各桶向上取整，切得越碎高估越多 —— 实测同一响应计费口径
+    /// 8703、上报口径 8061，差值 642 全部是取整噪音），现用于防止退回逐 chunk 编码。
     #[test]
     fn test_output_tokens_invariant_to_chunking() {
         let full = "这是一段中英混合的输出 with some ASCII words，用来验证分块不变性。".repeat(20);
@@ -128,23 +119,23 @@ mod tests {
             .process_assistant_response(&format!("<thinking>{thinking}</thinking>\n\n{visible}"));
         let _ = ctx.generate_final_events(); // flush 掉 lookahead 缓冲
 
-        let visible_est = est(&visible);
-        let thinking_est = est(&thinking);
-        // 上报量 ≈ 可见文本；分段 delta 的向上取整允许微小上浮，但绝不含 thinking 的量级
+        let visible_true = crate::token::count_tokens(&visible) as i32;
+        let thinking_true = crate::token::count_tokens(&thinking) as i32;
+        // 上报量 = 可见文本 BPE 真值（收尾一次编码，无取整噪音），绝不含 thinking
         assert!(
-            ctx.visible_output_tokens() >= visible_est,
-            "visible={} output={} visible_est={} thinking_est={} buf_len={}",
+            ctx.visible_output_tokens() >= visible_true,
+            "visible={} output={} visible_true={} thinking_true={} buf_len={}",
             ctx.visible_output_tokens(),
             ctx.output_tokens(),
-            visible_est,
-            thinking_est,
+            visible_true,
+            thinking_true,
             ctx.thinking_buffer.len()
         );
-        assert!(ctx.visible_output_tokens() < visible_est + thinking_est);
+        assert!(ctx.visible_output_tokens() < visible_true + thinking_true);
         // 旧的 380 固定上限已不再截断
         assert!(ctx.visible_output_tokens() > 380);
-        // 计费口径仍含 thinking，未受本次改动影响
-        assert!(ctx.output_tokens() >= visible_est + thinking_est);
+        // 计费口径仍含 thinking（全文含标签），未受本次改动影响
+        assert!(ctx.output_tokens() >= visible_true + thinking_true);
     }
 
     /// message_start 与 message_delta 的 cache_* 必须同口径 —— 防止 message_start
@@ -175,7 +166,10 @@ mod tests {
         );
 
         // 末尾 message_delta 走同一派生逻辑，三元组必须一致
-        assert_eq!(ctx.derive_report_cache_usage(45409, None), (9061, 0, 36348));
+        assert_eq!(
+            ctx.derive_report_cache_usage(45409, None, 0),
+            (9061, 0, 36348)
+        );
     }
 
     #[test]
@@ -440,11 +434,8 @@ mod tests {
     }
 
     #[test]
-    fn test_estimate_tokens() {
-        assert!(est("Hello") > 0);
-        assert!(est("你好") > 0);
-        assert!(est("Hello 你好") > 0);
-        // 两桶皆空返回 0 —— is_empty_response 依赖这个状态
-        assert_eq!(est(""), 0);
+    fn test_count_tokens_empty_returns_zero() {
+        // BPE 空串返回 0 —— is_empty_response 依赖这个状态
+        assert_eq!(crate::token::count_tokens(""), 0);
     }
 }

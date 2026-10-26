@@ -89,7 +89,7 @@ fn count_thinking_tokens(content: &[serde_json::Value]) -> Option<i32> {
 fn finalize_non_stream_output_usage(
     mut content: Vec<serde_json::Value>,
     thinking_suppressed: bool,
-    intercepted_input_chars: i64,
+    intercepted_input: &str,
     include_thinking: bool,
 ) -> (Vec<serde_json::Value>, i32, i32, Option<i32>) {
     let billed_thinking_tokens = count_thinking_tokens(&content).unwrap_or(0);
@@ -97,8 +97,9 @@ fn finalize_non_stream_output_usage(
         drop_thinking_blocks(&mut content);
     }
     let thinking_token_count = count_thinking_tokens(&content);
-    let visible_output_tokens =
-        token::estimate_output_tokens(&content) + ((intercepted_input_chars + 3) / 4) as i32;
+    // BPE 真值，与流式 output_full_text 同口径；空串计 0
+    let intercepted_output_tokens = token::count_tokens(intercepted_input) as i32;
+    let visible_output_tokens = token::estimate_output_tokens(&content) + intercepted_output_tokens;
     let billed_output_tokens = visible_output_tokens + billed_thinking_tokens;
     let output_tokens = if include_thinking {
         visible_output_tokens + thinking_token_count.unwrap_or(0)
@@ -344,9 +345,9 @@ pub(crate) async fn handle_non_stream_request(
     // 客户端可见性块（D5 非流式顺序：server_tool_use → web_search_tool_result
     // 逐轮交错，前置于 thinking/text/tool_use，无裸 tool_use 块）
     let mut visibility_blocks: Vec<serde_json::Value> = Vec::new();
-    // 截获的 web_search input 字符累计（S2 计费口径对齐流式 bridge_handle_event：
+    // 截获的 web_search input 全文累计（S2 计费口径对齐流式 bridge_handle_event：
     // 上游已生成分片即已计费；每轮所有 intercepted 事件的 input 均属截获调用）
-    let mut intercepted_input_chars: i64 = 0;
+    let mut intercepted_input_text = String::new();
 
     let mut body_bytes = body_bytes;
     'rounds: loop {
@@ -384,7 +385,7 @@ pub(crate) async fn handle_non_stream_request(
                                     // 计费口径（S2，对齐流式 bridge_handle_event 与
                                     // process_tool_use）：截获调用的全部分片 input
                                     // 无条件计入——上游已生成即已计费
-                                    intercepted_input_chars += tool_use.input.len() as i64;
+                                    intercepted_input_text.push_str(&tool_use.input);
                                     if let Some(pending) = completed {
                                         visibility_blocks.push(json!({
                                             "type": "server_tool_use",
@@ -604,7 +605,7 @@ pub(crate) async fn handle_non_stream_request(
         finalize_non_stream_output_usage(
             content,
             thinking_suppressed,
-            intercepted_input_chars,
+            &intercepted_input_text,
             super::super::stream::output_tokens_include_thinking(),
         );
 
@@ -925,7 +926,9 @@ mod native_tests {
                 "answer",
                 Vec::new(),
             );
-            let visible = token::estimate_output_tokens(&content) + 2;
+            let intercepted = "hello hello"; // BPE 2 tokens
+            let visible =
+                token::estimate_output_tokens(&content) + token::count_tokens(intercepted) as i32;
             let billed = visible + count_thinking_tokens(&content).unwrap();
             let credits = (1.6978 * final_input_tokens as f64 + 19.1873 * billed as f64
                 - 0.90 * 1.6978 * 20_000.0)
@@ -936,7 +939,7 @@ mod native_tests {
                         finalize_non_stream_output_usage(
                             content.clone(),
                             suppressed,
-                            5,
+                            intercepted,
                             include_thinking,
                         );
                     assert_eq!(billed_output, billed);

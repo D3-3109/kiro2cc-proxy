@@ -33,8 +33,6 @@ pub(crate) use thinking_text::{strip_dim_markers, strip_rendered_thinking};
 #[cfg(test)]
 pub(crate) use calib::context_window_for_model;
 #[cfg(test)]
-pub(crate) use helpers::{count_token_chars, tokens_from_chars};
-#[cfg(test)]
 pub(crate) use state::SseStateManager;
 #[cfg(test)]
 pub(crate) use thinking::{find_real_thinking_end_tag, find_real_thinking_start_tag};

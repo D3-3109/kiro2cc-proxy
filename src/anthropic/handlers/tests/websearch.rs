@@ -108,7 +108,7 @@ mod tests {
         let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
             .with_prefix_estimated_tokens(53_650);
         assert_eq!(
-            ctx.derive_report_cache_usage(53_776, Some(9.99)),
+            ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
             (53_776, 0, 0)
         );
         let response = reqwest::Response::from(http::Response::new(body_dummy_bytes()));
@@ -120,7 +120,7 @@ mod tests {
 
         let harvest = harvest_bridge_round(outcome, "tu-cont-1", &mut ctx);
         assert_eq!(
-            ctx.derive_report_cache_usage(53_776, Some(9.99)),
+            ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
             (126, 0, 53_650)
         );
         assert!(!harvest.finished, "Continued 应换入续流，finished=false");

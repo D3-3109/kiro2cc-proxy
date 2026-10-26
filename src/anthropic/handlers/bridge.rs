@@ -140,9 +140,9 @@ pub(crate) fn parse_bridge_query(input_json: &str) -> String {
 /// - `consumed == false`：事件按现有路径透传（含 Collecting 期间的
 ///   AssistantResponse 说明文字与非目标工具调用）
 ///
-/// 计费口径（对齐 `process_tool_use`）：截获的 input 分片同样无条件计入
-/// `output_chars_other`——上游已生成这段内容即已计费；可见性块把 query 回传给了
-/// 客户端，故 `visible_chars_other` 同步累加。
+/// 计费口径（对齐 `process_tool_use`）：截获的 input 分片同样无条件追加进
+/// `output_full_text`——上游已生成这段内容即已计费；可见性块把 query 回传给了
+/// 客户端，故 `visible_full_text` 同步追加。
 pub(crate) fn bridge_handle_event(
     ctx: &mut StreamContext,
     bridge: &mut Option<BridgeState>,
@@ -163,9 +163,8 @@ pub(crate) fn bridge_handle_event(
                 input_buffer.push_str(&tu.input);
                 if tu.stop {
                     // 截获完成：解析 query → 发可见性块 → 记录待执行搜索 → 回 PassThrough
-                    let chars = input_buffer.len() as i64;
-                    ctx.output_chars_other += chars;
-                    ctx.visible_chars_other += chars;
+                    ctx.output_full_text.push_str(input_buffer);
+                    ctx.visible_full_text.push_str(input_buffer);
 
                     let query = parse_bridge_query(input_buffer);
                     let events = build_web_search_visibility_events(ctx, tool_use_id, &query);
@@ -197,9 +196,8 @@ pub(crate) fn bridge_handle_event(
                 };
                 // 首个分片即带 stop=true（单事件完整调用）→ 立即完成截获
                 if tu.stop {
-                    let chars = tu.input.len() as i64;
-                    ctx.output_chars_other += chars;
-                    ctx.visible_chars_other += chars;
+                    ctx.output_full_text.push_str(&tu.input);
+                    ctx.visible_full_text.push_str(&tu.input);
 
                     let query = parse_bridge_query(&tu.input);
                     let events = build_web_search_visibility_events(ctx, &id, &query);

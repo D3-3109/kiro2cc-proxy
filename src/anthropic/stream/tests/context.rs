@@ -91,8 +91,8 @@ mod tests {
         // 大上下文（>28万）+ 极短输出（< 30 tokens）+ 无工具调用 → 视为退化空响应
         let mut ctx = StreamContext::new_with_thinking("test-model", 300_000, false);
         let _ = ctx.generate_initial_events();
-        // 模拟极短输出（40 个非中文字符 = 10 token）
-        ctx.output_chars_other = 40;
+        // 模拟极短输出（40 个 'a'，BPE 8 字符合并 1 token = 5 token）
+        ctx.output_full_text = "a".repeat(40);
         assert!(
             ctx.is_empty_response(),
             "大上下文+极短输出应判定为近似空响应"
@@ -104,7 +104,7 @@ mod tests {
         // 小上下文 + 极短输出 → 不应判定为空响应（可能是正常的短回复）
         let mut ctx = StreamContext::new_with_thinking("test-model", 50_000, false);
         let _ = ctx.generate_initial_events();
-        ctx.output_chars_other = 40;
+        ctx.output_full_text = "a".repeat(40);
         assert!(
             !ctx.is_empty_response(),
             "小上下文+极短输出不应判定为空响应"
@@ -116,9 +116,19 @@ mod tests {
         // 大上下文 + 极短输出 + 有工具调用 → 不应判定为空响应（工具调用是有效响应）
         let mut ctx = StreamContext::new_with_thinking("test-model", 300_000, false);
         let _ = ctx.generate_initial_events();
-        ctx.output_chars_other = 40;
+        ctx.output_full_text = "a".repeat(40);
         ctx.state_manager.set_has_tool_use(true);
         assert!(!ctx.is_empty_response(), "有工具调用时不应判定为空响应");
+    }
+
+    #[test]
+    fn test_near_empty_long_output_not_flagged_at_byte_boundary() {
+        // 3841 字节 > 30 × 128：在 cl100k 单 token 最长 128 字节的前提下必然 ≥ 31 token；
+        // 本用例校验短路结论与全文编码一致（等价性保护），不单独证明短路分支本身
+        let mut ctx = StreamContext::new_with_thinking("test-model", 300_000, false);
+        let _ = ctx.generate_initial_events();
+        ctx.output_full_text = "a".repeat(3841);
+        assert!(!ctx.is_empty_response());
     }
 
     #[test]
@@ -251,12 +261,12 @@ mod tests {
                 );
 
             // message_start 阶段尚未收到 meteringEvent，保持静态前缀估算 53_650
-            let (_, _, start_cache_read) = ctx.derive_report_cache_usage(53_776, None);
+            let (_, _, start_cache_read) = ctx.derive_report_cache_usage(53_776, None, 0);
             assert_eq!(start_cache_read, 53_650);
             let _ = ctx.generate_initial_events();
 
-            // 模拟 346 tokens 输出（346 * 4 = 1384 个英文字符）与部分缓存失效的 meteringEvent
-            ctx.output_chars_other = 346 * 4;
+            // 模拟 346 tokens 输出（BPE 8 个 'a' 合并 1 token，2768 = 346）与部分缓存失效的 meteringEvent
+            ctx.output_full_text = "a".repeat(346 * 8);
             let metering_event = crate::kiro::model::events::Event::Metering(
                 crate::kiro::model::events::MeteringEvent {
                     usage: 0.06617,
@@ -351,7 +361,7 @@ mod tests {
                     ctx.mark_continuation();
                 }
                 assert_eq!(
-                    ctx.derive_report_cache_usage(53_776, Some(9.99)),
+                    ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
                     (
                         expected.input_tokens,
                         expected.cache_creation_input_tokens,
@@ -367,7 +377,7 @@ mod tests {
                 cache_creation_input_tokens: Some(200),
             }));
             assert_eq!(
-                ctx.derive_report_cache_usage(53_776, Some(9.99)),
+                ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
                 (52_976, 200, 600)
             );
             accounting.commit();

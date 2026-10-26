@@ -193,6 +193,8 @@ pub(crate) mod tests {
             bridge.as_ref().unwrap().phase,
             BridgePhase::Collecting { .. }
         ));
+        assert!(ctx.output_full_text.is_empty());
+        assert!(ctx.visible_full_text.is_empty());
 
         // 分片 2 + stop：截获完成，发出可见性块
         let (consumed, events) = bridge_handle_event(
@@ -223,6 +225,10 @@ pub(crate) mod tests {
             BridgePhase::PassThrough
         ));
         assert_eq!(bridge.as_ref().unwrap().rounds_used, 1);
+        // stop 帧不得重复入账：计费口径两分片拼接一次，上报口径整段一次
+        let full = r#"{"query":"rust programming"}"#;
+        assert_eq!(ctx.output_full_text, full);
+        assert_eq!(ctx.visible_full_text, full);
     }
 
     #[test]

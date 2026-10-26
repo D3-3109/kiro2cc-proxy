@@ -21,7 +21,7 @@ use crate::model::usage::{MIN_INFER_INPUT_TOKENS, infer_cache_read_from_credits}
 /// 命中率低于该比例视为部分未命中，输出诊断
 const HIT_RATIO_TRIGGER: f64 = 0.8;
 /// 最多记录的 (会话, 模型) 条目数；超出后整体清空（诊断数据，丢失无影响）
-const MAX_SESSIONS: usize = 256;
+const MAX_ENTRIES: usize = 256;
 
 struct LastSettlement {
     at: Instant,
@@ -58,7 +58,7 @@ pub fn maybe_log(
         // 键按 (会话, 模型) 二元组：同一会话的标题生成等辅助请求（不同模型/独立
         // 系统提示）不覆盖主对话的结算记录，否则 gap 与凭据变化判断被污染
         let key = (conversation_id.to_string(), model.to_string());
-        if map.len() >= MAX_SESSIONS && !map.contains_key(&key) {
+        if map.len() >= MAX_ENTRIES && !map.contains_key(&key) {
             map.clear();
         }
         let prev = map.insert(
