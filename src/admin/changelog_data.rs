@@ -67,6 +67,44 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn build_release_notes() -> Vec<ReleaseNote> {
     let mut notes = vec![
         ReleaseNote {
+            version: "3.4.40".to_string(),
+            is_latest: false,
+            groups: vec![
+                feat_group(vec![
+                    Bilingual::new(
+                        "输出 Tokens 口径由字符估算改为 tiktoken BPE 真值，与思考徽章同口径：修复「总输出 Token 数少于深度思考 Token 数」的矛盾（旧口径对思考内容按不同比例估算，导致两者难以直接比较）。流式与非流式桥接路径均已切换，工具调用参数一并计入",
+                        "Output token counting switched from character estimation to real tiktoken BPE values, sharing the same tokenizer as the thinking badge. This fixes the contradiction where total output tokens appeared smaller than the thinking token count (the old formula estimated thinking content with a different ratio, making the two numbers incomparable). Both streaming and non-streaming bridge paths are migrated, and tool-call arguments are included",
+                    ),
+                    Bilingual::new(
+                        "根据上游 credits 消耗校准缓存读取用量：结合静态前缀上界与 creditsUsed 反推实际命中的缓存 token 数，接入流式落库与非流式响应（此前 Kiro 的 meteringEvent 不返回 cache_read 真值，缓存读取长期不可观测）",
+                        "Cache-read usage is now calibrated from upstream credit consumption: the actual cached token count is inferred by combining the static prefix upper bound with creditsUsed, wired into streaming persistence and non-streaming responses (Kiro's meteringEvent does not report cache_read, so cache reads were previously unobservable)",
+                    ),
+                    Bilingual::new(
+                        "新增 [cache-miss] INFO 诊断日志：credits 反推发现上游缓存部分未命中（命中率 < 80%）时输出命中率、缺失 token 数、与上次结算的闲置间隔及凭据是否变化，用于区分 TTL 逐出、换账号与上游换实例三种原因",
+                        "Added [cache-miss] INFO diagnostics: when credit inference shows a partial upstream cache miss (hit rate < 80%), the log reports the hit ratio, missing tokens, the idle gap since the previous settlement and whether the credential changed, helping tell apart TTL eviction, account switching and upstream instance changes",
+                    ),
+                ]),
+                improve_group(vec![
+                    Bilingual::new(
+                        "缓存漂移诊断提升为 INFO 并按请求类型匹配快照：同一会话混入的标题生成、额度探测、子代理等辅助请求不再被误报为主对话漂移；每个会话保留至多 4 份快照，按系统块重叠字节数匹配最相似的一份，与所有快照都无重叠时标注为「新请求类型」",
+                        "Cache drift diagnostics moved to INFO and now match snapshots by request type: auxiliary requests sharing a session (title generation, quota probes, sub-agents) are no longer misreported as main-conversation drift. Up to four snapshots are kept per session and matched by shared system-block bytes; a request overlapping none of them is labelled a new request type",
+                    ),
+                    Bilingual::new(
+                        "首条消息、单条消息重发及 history[0] 重置轮次不再把尚未建立缓存的 system + tools 误计入缓存读取，报告的 cache_read 更贴近实际分母",
+                        "The first message of a window, single-message resends and turns that reset history[0] no longer count the not-yet-cached system + tools as cache reads, so reported cache_read better matches the real denominator",
+                    ),
+                    Bilingual::new(
+                        "使用日志新增缓存命中率胶囊，深度思考 Token 数改为琥珀色胶囊样式",
+                        "The usage log now shows a cache hit-rate pill, and the thinking token count uses an amber pill style",
+                    ),
+                ]),
+                fix_group(vec![Bilingual::new(
+                    "暂隐藏使用日志的缓存命中百分比胶囊：meteringEvent 不返回 cache_read 真值，命中率完全依赖 credits 反推，而反推在 credits 高于全未命中基线时被截断为 0%，会把缓存写入轮误显成 0%。口径校准前先隐藏，功能开关保留在代码中可随时恢复；缓存读取数字行不受影响",
+                    "Temporarily hide the cache hit-rate pill in the usage log: meteringEvent does not report cache_read, so the rate relies entirely on credit inference, which clamps to 0% whenever credits exceed the all-miss baseline and misrenders cache-write turns as 0%. Hidden until the metric is calibrated, with the switch kept in code for easy restore; the cache-read token row is unaffected",
+                )]),
+            ],
+        },
+        ReleaseNote {
             version: "3.4.39".to_string(),
             is_latest: false,
             groups: vec![
