@@ -19,6 +19,17 @@ impl StreamContext {
         crate::token::count_tokens(&self.output_full_text) as i32
     }
 
+    /// credits 反推用的计费输出观测值；`tokens` 由调用方传入 `output_tokens()`（避免重复编码）。
+    pub(crate) fn billed_output(&self, tokens: i32) -> crate::model::usage::BilledOutput {
+        crate::model::usage::BilledOutput {
+            tokens,
+            native_reasoning_tokens: crate::token::count_tokens(&self.native_reasoning_full_text)
+                as i32,
+            signature_chars: self.native_signature_chars,
+            signature_blocks: self.native_signature_blocks,
+        }
+    }
+
     /// 对客户端上报的输出 tokens：只统计实际发出的 text_delta 与 tool_use 参数，
     /// 不含 thinking。BPE 真值口径，与 `output_tokens` 同收尾一次编码。
     ///

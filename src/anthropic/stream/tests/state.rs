@@ -167,7 +167,7 @@ mod tests {
 
         // 末尾 message_delta 走同一派生逻辑，三元组必须一致
         assert_eq!(
-            ctx.derive_report_cache_usage(45409, None, 0),
+            ctx.derive_report_cache_usage(45409, None, &Default::default()),
             (9061, 0, 36348)
         );
     }

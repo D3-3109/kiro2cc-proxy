@@ -147,6 +147,26 @@ fn collect_native_reasoning(
     }
 }
 
+/// 原生推理块的 credits 反推观测值：`(摘要 tokens, 签名字符数, 带签名块数)`。
+/// 须在剔除 thinking 块之前统计（上游已生成即已计费）。
+fn native_reasoning_stats(native_blocks: &[serde_json::Value]) -> (i32, usize, usize) {
+    let mut summary_tokens = 0i32;
+    let mut signature_chars = 0usize;
+    let mut signature_blocks = 0usize;
+    for block in native_blocks {
+        if let Some(text) = block["thinking"].as_str() {
+            summary_tokens += token::count_tokens(text) as i32;
+        }
+        if let Some(signature) = block["signature"].as_str()
+            && !signature.is_empty()
+        {
+            signature_chars += signature.len();
+            signature_blocks += 1;
+        }
+    }
+    (summary_tokens, signature_chars, signature_blocks)
+}
+
 fn split_non_stream_thinking(text_content: &str, has_native_thinking: bool) -> (String, String) {
     if has_native_thinking {
         (String::new(), text_content.to_string())
@@ -594,6 +614,9 @@ pub(crate) async fn handle_non_stream_request(
         text_content = strip_json_fences(text_content);
     }
 
+    let (native_reasoning_tokens, signature_chars, signature_blocks) =
+        native_reasoning_stats(&native_thinking_blocks);
+
     // 构建响应内容
     let (content, thinking_only) = build_non_stream_content_with_native(
         native_thinking_blocks,
@@ -649,13 +672,19 @@ pub(crate) async fn handle_non_stream_request(
         (Some(read), Some(creation)) => Some((read, creation)),
         _ => None,
     };
+    let billed_output = crate::model::usage::BilledOutput {
+        tokens: billed_output_tokens,
+        native_reasoning_tokens,
+        signature_chars,
+        signature_blocks,
+    };
     // 显式注入：handler 始终算出了 prefix_estimated_tokens（可能为 0），
     // 结合 metering_usage 反推校准后以 Some 传入 select_final_usage 选用 prefix 分支
     let prefix_estimated = Some(crate::model::usage::refine_prefix_cache_read(
         model,
         prefix_estimated_tokens,
         final_input_tokens,
-        billed_output_tokens,
+        &billed_output,
         // 多轮累计输出与末轮积分不匹配，仅退回静态前缀，不改积分落库。
         if has_continuation {
             None
@@ -670,7 +699,7 @@ pub(crate) async fn handle_non_stream_request(
         model,
         prefix_estimated_tokens,
         final_input_tokens,
-        billed_output_tokens,
+        &billed_output,
         metering_usage,
         // 与实际用量选路（metering_pair）同口径：read/creation 任一缺失即无完整真值
         metering_pair.is_none() && cache_accounting.is_none() && !has_continuation,
@@ -933,9 +962,16 @@ mod native_tests {
             let visible =
                 token::estimate_output_tokens(&content) + token::count_tokens(intercepted) as i32;
             let billed = visible + count_thinking_tokens(&content).unwrap();
-            let credits = (1.6978 * final_input_tokens as f64 + 19.1873 * billed as f64
-                - 0.90 * 1.6978 * 20_000.0)
-                / 1_000_000.0;
+            // haiku 5.5 计费曲线：cold − 命中比例 · (cold − cached) + 输出
+            let input_mtok = final_input_tokens as f64 / 1_000_000.0;
+            let cold = 0.00083 + 2.485 * input_mtok;
+            let cached = 0.00082 + 0.248 * input_mtok;
+            let read_ratio = 20_000.0 / final_input_tokens as f64;
+            let credits = cold - read_ratio * (cold - cached) + 8.4 * billed as f64 / 1_000_000.0;
+            // 原生块（仅 native 时位于首位）拆出摘要与签名；签名 "sig" 的估算值低于摘要，
+            // 上游输出取摘要，与 credits 构造口径一致
+            let (native_reasoning_tokens, signature_chars, signature_blocks) =
+                native_reasoning_stats(&content[..native as usize]);
             for suppressed in [false, true] {
                 for include_thinking in [false, true] {
                     let (filtered, output, billed_output, observed) =
@@ -966,12 +1002,18 @@ mod native_tests {
                         filtered.iter().any(|block| block["type"] == "thinking"),
                         !suppressed
                     );
+                    let output = crate::model::usage::BilledOutput {
+                        tokens: billed_output,
+                        native_reasoning_tokens,
+                        signature_chars,
+                        signature_blocks,
+                    };
                     assert_eq!(
                         crate::model::usage::refine_prefix_cache_read(
                             "claude-haiku-5-5",
                             prefix_estimated_tokens,
                             final_input_tokens,
-                            billed_output,
+                            &output,
                             Some(credits),
                         ),
                         20_000

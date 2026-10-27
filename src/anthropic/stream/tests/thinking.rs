@@ -20,6 +20,45 @@ mod tests {
     }
 
     #[test]
+    fn test_native_reasoning_signature_accumulates_per_block() {
+        use serde_json::json;
+
+        // 账号关闭 thinking（thinking_enabled=false）时签名不下发客户端，但上游已计费，仍需统计
+        for thinking_enabled in [true, false] {
+            let mut ctx =
+                StreamContext::new_with_thinking("claude-opus-5-5", 100, thinking_enabled);
+            let _ = ctx.generate_initial_events();
+            for (name, payload) in [
+                ("reasoningContentEvent", json!({"text": "推理一"})),
+                (
+                    "reasoningContentEvent",
+                    json!({"signature": "a".repeat(1000)}),
+                ),
+                (
+                    "reasoningContentEvent",
+                    json!({"signature": "b".repeat(200)}),
+                ),
+                ("assistantResponseEvent", json!({"content": "答案"})),
+                (
+                    "reasoningContentEvent",
+                    json!({"text": "推理二", "signature": "c".repeat(300)}),
+                ),
+            ] {
+                let _ = ctx.process_kiro_event(&upstream_event(name, payload));
+            }
+            let tokens = ctx.output_tokens();
+            let billed = ctx.billed_output(tokens);
+            assert_eq!(billed.tokens, tokens);
+            assert_eq!(billed.signature_chars, 1500);
+            assert_eq!(billed.signature_blocks, 2, "分片签名计为同一块");
+            assert_eq!(
+                billed.native_reasoning_tokens,
+                crate::token::count_tokens("推理一推理二") as i32
+            );
+        }
+    }
+
+    #[test]
     fn test_native_reasoning_frames_preserve_text_signature_and_boundaries() {
         use serde_json::json;
 

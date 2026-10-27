@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use crate::model::usage::{MIN_INFER_INPUT_TOKENS, infer_cache_read_from_credits};
+use crate::model::usage::{BilledOutput, MIN_INFER_INPUT_TOKENS, infer_cache_read_from_credits};
 
 /// 命中率低于该比例视为部分未命中，输出诊断
 const HIT_RATIO_TRIGGER: f64 = 0.8;
@@ -45,7 +45,7 @@ pub fn maybe_log(
     model: &str,
     prefix_estimated_tokens: i32,
     final_input_tokens: i32,
-    billed_output_tokens: i32,
+    billed_output: &BilledOutput,
     credits_used: Option<f64>,
     inference_applied: bool,
     credential_id: u64,
@@ -84,7 +84,7 @@ pub fn maybe_log(
         return;
     };
     let Some(inferred) =
-        infer_cache_read_from_credits(model, final_input_tokens, billed_output_tokens, credits)
+        infer_cache_read_from_credits(model, final_input_tokens, billed_output, credits)
     else {
         return;
     };
@@ -99,7 +99,8 @@ pub fn maybe_log(
         miss_tokens = (prefix_estimated_tokens - inferred).max(0),
         hit_ratio = format!("{:.0}%", (inferred as f64 / prefix_estimated_tokens as f64) * 100.0),
         input = final_input_tokens,
-        output = billed_output_tokens,
+        output = billed_output.tokens,
+        signature_chars = billed_output.signature_chars,
         credits,
         // 闲置间隔 = 本轮请求开始 - 上次结算：结算时刻在响应读完后，若用 settled_at
         // 计算会含本轮生成耗时，把短闲置误判为 TTL 逐出；并发时序倒挂时不输出该字段
@@ -126,10 +127,17 @@ mod tests {
             .retain(|(sid, _), _| sid != key);
     }
 
-    /// 与 2026-10-25 实测 0.0539 事件同构：prefix 53650、input 53776、输出 346、
-    /// credits 0.06617 → 反推约 21000，命中率约 39%，应触发
-    fn event_credits() -> (i32, i32, i32, f64) {
-        (53_650, 53_776, 346, 0.06617)
+    fn plain(tokens: i32) -> BilledOutput {
+        BilledOutput {
+            tokens,
+            ..Default::default()
+        }
+    }
+
+    /// haiku 5.5 部分未命中：prefix 53650、input 53776、输出 346，
+    /// credits 按计费曲线取 21000 命中 → 命中率约 39%，应触发
+    fn event_credits() -> (i32, i32, BilledOutput, f64) {
+        (53_650, 53_776, plain(346), 0.0904)
     }
 
     #[derive(Clone, Default)]
@@ -167,7 +175,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,
@@ -177,6 +185,7 @@ mod tests {
         assert_eq!(out.matches("[cache-miss]").count(), 1, "{out}");
         assert!(out.contains("prefix_estimated=53650"), "{out}");
         assert!(out.contains("hit_ratio=\"39%\""), "{out}");
+        assert!(out.contains("signature_chars=0"), "{out}");
         // 首次结算：无间隔字段、凭据视为已变化
         assert!(!out.contains("gap_since_prev_ms"), "{out}");
         assert!(out.contains("credential_changed=true"), "{out}");
@@ -186,15 +195,14 @@ mod tests {
     fn high_hit_ratio_does_not_log() {
         clear("miss-diag-2");
         let out = capture(|| {
-            // 全量命中：credits 只含 10% 缓存读取价 → 反推 ≈ prefix
+            // 全量命中：credits ≈ 全命中价 + 346 输出 → 反推 ≈ input
             maybe_log(
                 "miss-diag-2",
                 "claude-haiku-5-5",
                 53_650,
                 53_776,
-                346,
-                // 53.65K 读 × 10% + 346 输出 + 未命中尾部
-                Some(0.0108),
+                &plain(346),
+                Some(0.0170),
                 true,
                 64,
                 Instant::now(),
@@ -213,7 +221,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,
@@ -224,7 +232,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,
@@ -251,7 +259,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,
@@ -262,7 +270,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 99,
@@ -289,7 +297,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,
@@ -297,12 +305,12 @@ mod tests {
             );
             maybe_log(
                 "miss-diag-6",
-                "claude-opus-4-6",
+                "claude-opus-5-5",
                 prefix,
                 input,
-                output,
-                // opus 费率（9.5/47.5 credits/MTok）下反推 21000 所需的部分未命中 credits
-                Some(0.347757),
+                &output,
+                // opus 5.5 计费曲线下 21000 命中所需的部分未命中 credits
+                Some(1.1896),
                 true,
                 64,
                 Instant::now(),
@@ -310,7 +318,7 @@ mod tests {
         });
         let opus_line = out
             .lines()
-            .find(|l| l.contains("claude-opus-4-6"))
+            .find(|l| l.contains("claude-opus-5-5"))
             .expect("opus 轮应触发");
         // opus 轮是独立键 → 首次结算语义：无间隔字段
         assert!(!opus_line.contains("gap_since_prev_ms"), "{opus_line}");
@@ -344,7 +352,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,
@@ -370,8 +378,8 @@ mod tests {
                 "claude-haiku-5-5",
                 53_650,
                 53_776,
-                346,
-                Some(0.06617),
+                &plain(346),
+                Some(0.0904),
                 false,
                 64,
                 Instant::now(),
@@ -386,7 +394,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
-                output,
+                &output,
                 Some(credits),
                 true,
                 64,

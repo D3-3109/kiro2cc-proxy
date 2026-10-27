@@ -21,6 +21,17 @@ impl StreamContext {
         );
         // 计费口径：缓冲全文，收尾 BPE 一次编码（见 output_tokens）
         self.output_full_text.push_str(&reasoning.text);
+        // 反推口径：签名收尾一个推理块，可能分多个事件下发；紧随签名的纯签名事件属同一块
+        self.native_reasoning_full_text.push_str(&reasoning.text);
+        let has_signature = !reasoning.signature.is_empty();
+        if has_signature {
+            self.native_signature_chars += reasoning.signature.len();
+            let continues_signature = self.in_native_signature_run && reasoning.text.is_empty();
+            if !continues_signature {
+                self.native_signature_blocks += 1;
+            }
+        }
+        self.in_native_signature_run = has_signature;
         if !self.thinking_enabled || (reasoning.text.is_empty() && reasoning.signature.is_empty()) {
             return Vec::new();
         }

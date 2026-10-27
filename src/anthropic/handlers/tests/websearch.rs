@@ -107,8 +107,10 @@ mod tests {
         // 成对，且不含 error/message_stop 收尾事件
         let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
             .with_prefix_estimated_tokens(53_650);
+        // haiku 5.5 53776 输入全未命中价：续流前反推为 0
+        let full_miss_credits = Some(0.1345);
         assert_eq!(
-            ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
+            ctx.derive_report_cache_usage(53_776, full_miss_credits, &Default::default()),
             (53_776, 0, 0)
         );
         let response = reqwest::Response::from(http::Response::new(body_dummy_bytes()));
@@ -120,7 +122,7 @@ mod tests {
 
         let harvest = harvest_bridge_round(outcome, "tu-cont-1", &mut ctx);
         assert_eq!(
-            ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
+            ctx.derive_report_cache_usage(53_776, full_miss_credits, &Default::default()),
             (126, 0, 53_650)
         );
         assert!(!harvest.finished, "Continued 应换入续流，finished=false");

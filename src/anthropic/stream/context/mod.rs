@@ -62,6 +62,13 @@ pub struct StreamContext {
     /// 原生推理块独立于旧文本标签状态。
     native_thinking_index: Option<i32>,
     native_thinking_seen: bool,
+    /// 上游原生推理摘要全文（含账号关闭 thinking 时未下发的部分），credits 反推用
+    native_reasoning_full_text: String,
+    /// 上游原生推理签名字符数之和与带签名事件数，credits 反推估算隐藏推理输出用
+    native_signature_chars: usize,
+    native_signature_blocks: usize,
+    /// 上一个推理事件是否带签名（同一块的签名分片不重复计块）
+    in_native_signature_run: bool,
     /// 用量追踪器（可选）
     usage_tracker: Option<Arc<UsageTracker>>,
     /// API Key ID（用于用量记录）
@@ -135,6 +142,10 @@ impl StreamContext {
             signature_sent: false,
             native_thinking_index: None,
             native_thinking_seen: false,
+            native_reasoning_full_text: String::new(),
+            native_signature_chars: 0,
+            native_signature_blocks: 0,
+            in_native_signature_run: false,
             usage_tracker: None,
             api_key_id: None,
             credential_id: None,
@@ -263,13 +274,13 @@ impl StreamContext {
     ///   3. 前缀估算混合校准 refine_prefix_cache_read（credits_used 仅传入落库路径）← 主路径
     ///   4. PromptCacheUsage 模拟值（仅当前缀未注入）
     ///
-    /// `billed_output_tokens` 由调用方传入（BPE 全文编码 O(n)，收尾路径算一次复用，
-    /// 避免重复编码；message_start 阶段传 0 —— 彼时全文为空，编码结果本就是 0）。
+    /// `billed_output` 由调用方传入（BPE 全文编码 O(n)，收尾路径算一次复用，
+    /// 避免重复编码；message_start 阶段传默认值 —— 彼时尚无输出）。
     pub(crate) fn derive_report_cache_usage(
         &self,
         input_tokens: i32,
         credits_used: Option<f64>,
-        billed_output_tokens: i32,
+        billed_output: &crate::model::usage::BilledOutput,
     ) -> (i32, i32, i32) {
         if let (Some(read), Some(creation)) = (
             self.metering_cache_read_tokens,
@@ -289,7 +300,7 @@ impl StreamContext {
                 &self.model,
                 prefix,
                 input_tokens,
-                billed_output_tokens,
+                billed_output,
                 if self.has_continuation {
                     None
                 } else {
@@ -312,7 +323,7 @@ impl StreamContext {
         // 与末尾 message_delta 共用派生逻辑，避免 cache_* 口径不一致
         let input = cap_input_tokens(self.input_tokens, self.input_tokens, &self.model);
         let (non_cached, cache_creation, cache_read) =
-            self.derive_report_cache_usage(input, None, 0);
+            self.derive_report_cache_usage(input, None, &Default::default());
         json!({
             "type": "message_start",
             "message": {
@@ -967,13 +978,11 @@ impl StreamContext {
         };
 
         // message_delta 与 message_start 共用静态口径；UsageTracker 落库采用 creditsUsed 校准值
+        let billed_output = self.billed_output(billed_output_tokens);
         let (report_input, cache_creation, cache_read) =
-            self.derive_report_cache_usage(final_input_tokens, None, billed_output_tokens);
-        let (_, _, tracked_read) = self.derive_report_cache_usage(
-            final_input_tokens,
-            self.metering_usage,
-            billed_output_tokens,
-        );
+            self.derive_report_cache_usage(final_input_tokens, None, &billed_output);
+        let (_, _, tracked_read) =
+            self.derive_report_cache_usage(final_input_tokens, self.metering_usage, &billed_output);
         let (report_cache_creation, report_cache_read) = (Some(cache_creation), Some(cache_read));
         let tracked_cache_read = Some(tracked_read);
 
@@ -984,7 +993,7 @@ impl StreamContext {
             &self.model,
             self.prefix_estimated_tokens.unwrap_or(0),
             final_input_tokens,
-            billed_output_tokens,
+            &billed_output,
             self.metering_usage,
             // 与 derive_report_cache_usage 同口径：read+creation 双 Some 才算完整
             // metering 真值（任一缺失则反推实际生效，诊断不应被关闭）

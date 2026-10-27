@@ -262,7 +262,8 @@ mod tests {
                 );
 
             // message_start 阶段尚未收到 meteringEvent，保持静态前缀估算 53_650
-            let (_, _, start_cache_read) = ctx.derive_report_cache_usage(53_776, None, 0);
+            let (_, _, start_cache_read) =
+                ctx.derive_report_cache_usage(53_776, None, &Default::default());
             assert_eq!(start_cache_read, 53_650);
             let _ = ctx.generate_initial_events();
 
@@ -270,7 +271,7 @@ mod tests {
             ctx.output_full_text = "a".repeat(346 * 8);
             let metering_event = crate::kiro::model::events::Event::Metering(
                 crate::kiro::model::events::MeteringEvent {
-                    usage: 0.06617,
+                    usage: 0.0904,
                     unit_plural: "credits".to_string(),
                     unit: String::new(),
                     cache_read_input_tokens: None,
@@ -308,7 +309,7 @@ mod tests {
             } else {
                 assert!((20_000..=22_500).contains(&recorded_read));
             }
-            assert_eq!(page.records[0].credits_used, Some(0.06617));
+            assert_eq!(page.records[0].credits_used, Some(0.0904));
 
             // 2. 末尾 message_delta 保持静态前缀口径，与 message_start 一致
             let delta_evt = final_events
@@ -367,7 +368,7 @@ mod tests {
                     ctx.mark_continuation();
                 }
                 assert_eq!(
-                    ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
+                    ctx.derive_report_cache_usage(53_776, Some(9.99), &Default::default()),
                     (
                         expected.input_tokens,
                         expected.cache_creation_input_tokens,
@@ -383,7 +384,7 @@ mod tests {
                 cache_creation_input_tokens: Some(200),
             }));
             assert_eq!(
-                ctx.derive_report_cache_usage(53_776, Some(9.99), 0),
+                ctx.derive_report_cache_usage(53_776, Some(9.99), &Default::default()),
                 (52_976, 200, 600)
             );
             accounting.commit();
