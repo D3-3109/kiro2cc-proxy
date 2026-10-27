@@ -7,6 +7,7 @@ mod context;
 mod echo_guard;
 mod helpers;
 mod state;
+mod termination;
 mod tests;
 mod thinking;
 mod thinking_text;
@@ -23,6 +24,9 @@ pub use context::StreamContext;
 pub(crate) use echo_guard::ResponseEchoGuard;
 pub(crate) use helpers::generate_fake_signature;
 pub use state::SseEvent;
+pub(crate) use termination::{
+    CONTENT_LENGTH_EXCEEDED_EXCEPTION, UpstreamTermination, upstream_aborted_message,
+};
 pub(crate) use thinking::split_thinking_and_visible;
 pub use thinking_text::{
     ThinkingTextRewriter, ThinkingTextStyle, set_thinking_as_text, thinking_as_text_enabled,

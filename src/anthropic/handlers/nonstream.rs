@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 //! 非流式响应构建：将 Kiro 事件聚合为完整 Anthropic message 响应（含 thinking 块 flush），用于非流式请求。
 
+use crate::anthropic::stream::{
+    CONTENT_LENGTH_EXCEEDED_EXCEPTION, UpstreamTermination, upstream_aborted_message,
+};
 use crate::anthropic::types::ErrorResponse;
 
-use crate::kiro::model::events::{Event, ReasoningContentEvent};
+use crate::kiro::model::events::{Event, EventType, ReasoningContentEvent, UpstreamStop};
 use crate::kiro::model::requests::conversation::ConversationState;
 use crate::kiro::parser::decoder::EventStreamDecoder;
 use crate::token;
@@ -370,6 +373,8 @@ pub(crate) async fn handle_non_stream_request(
     // 截获的 web_search input 全文累计（S2 计费口径对齐流式 bridge_handle_event：
     // 上游已生成分片即已计费；每轮所有 intercepted 事件的 input 均属截获调用）
     let mut intercepted_input_text = String::new();
+    // 上游异常终止判定（错误帧 / 异常 stopReason / 帧丢失），收集结束后决定是否报错
+    let mut termination = UpstreamTermination::default();
 
     let mut body_bytes = body_bytes;
     'rounds: loop {
@@ -377,12 +382,19 @@ pub(crate) async fn handle_non_stream_request(
         let mut decoder = EventStreamDecoder::new();
         if let Err(e) = decoder.feed(&body_bytes) {
             tracing::warn!("缓冲区溢出: {}", e);
+            termination.observe_decode_error(&e);
         }
 
         for result in decoder.decode_iter() {
             match result {
                 Ok(frame) => {
-                    if let Ok(event) = Event::from_frame(frame) {
+                    let tool_use_frame = frame.event_type() == Some(EventType::ToolUse.as_str());
+                    let parsed = Event::from_frame(frame);
+                    if let Err(e) = &parsed {
+                        termination.observe_parse_failure(tool_use_frame, e);
+                    }
+                    if let Ok(event) = parsed {
+                        termination.observe_event(&event);
                         collect_native_reasoning(
                             &event,
                             &mut native_reasoning,
@@ -470,19 +482,31 @@ pub(crate) async fn handle_non_stream_request(
                                 metering_usage = Some(metering.usage);
                             }
                             Event::Exception { exception_type, .. }
-                                if exception_type == "ContentLengthExceededException" =>
+                                if exception_type == CONTENT_LENGTH_EXCEEDED_EXCEPTION =>
                             {
                                 stop_reason = "max_tokens".to_string();
                             }
+                            // 异常类 stopReason 由 termination 判定，此处只映射正常收尾的 stop_reason
+                            Event::Metadata(metadata) => match metadata.upstream_stop() {
+                                Some(UpstreamStop::MaxTokens) => {
+                                    stop_reason = "max_tokens".to_string();
+                                }
+                                Some(UpstreamStop::ContextWindowExceeded) => {
+                                    stop_reason = "model_context_window_exceeded".to_string();
+                                }
+                                _ => {}
+                            },
                             _ => {}
                         }
                     }
                 }
                 Err(e) => {
                     tracing::warn!("解码事件失败: {}", e);
+                    termination.observe_decode_error(&e);
                 }
             }
         }
+        termination.observe_eof(decoder.buffer_len());
 
         flush_native_reasoning(&mut native_reasoning, &mut native_thinking_blocks);
 
@@ -560,6 +584,7 @@ pub(crate) async fn handle_non_stream_request(
                 };
                 // 演进基底更新为本轮续请求所用状态（下一轮基于它演进）
                 has_continuation = true;
+                termination.on_continuation();
                 evolution_base = Some(kiro_request.conversation_state);
             }
             Err(e) => {
@@ -571,6 +596,19 @@ pub(crate) async fn handle_non_stream_request(
                 break 'rounds;
             }
         }
+    }
+
+    // 异常终止不得组装成正常响应（客户端会当成任务完成），返回可重试错误
+    if let Some(reason) = termination.failure() {
+        tracing::warn!(reason = %reason, "上游异常终止，返回错误防止伪装成正常完成");
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse::new(
+                "overloaded_error",
+                upstream_aborted_message(&reason),
+            )),
+        )
+            .into_response();
     }
 
     // 确定 stop_reason：tool_use 优先级最高，存在工具调用时无条件覆盖

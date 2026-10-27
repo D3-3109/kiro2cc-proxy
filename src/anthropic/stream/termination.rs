@@ -1,0 +1,217 @@
+// Copyright (c) 2026 Harllan He. Licensed under MIT.
+//! 上游异常终止判定
+//!
+//! 以下情形上游流仍可能以正常 EOF 结束。若照常按 end_turn 收尾，客户端会把
+//! 截断/丢弃的响应当成任务完成（表现为工具调用被吞、对话停住且不重试）：
+//! - 流内 error / exception 帧、invalidStateEvent
+//! - metadataEvent.stopReason 为 MALFORMED_*，或为 TOOL_USE 却未收到任何 toolUseEvent
+//! - toolUseEvent 帧解析失败（工具调用整帧丢失）
+//! - 解码器因连续错误停止、缓冲区溢出，或 EOF 时残留半帧
+//!
+//! 流结束时 `failure()` 返回 Some 即改发可重试错误，而非正常收尾。
+
+use crate::kiro::model::events::{Event, UpstreamStop};
+use crate::kiro::parser::error::ParseError;
+
+/// 输出超长异常：上游的 max_tokens 语义，不属于异常终止
+pub(crate) const CONTENT_LENGTH_EXCEEDED_EXCEPTION: &str = "ContentLengthExceededException";
+
+#[derive(Debug, Default)]
+pub(crate) struct UpstreamTermination {
+    /// 首个致命信号（日志与错误文案用）
+    fatal: Option<String>,
+    /// 本轮最后一次带 stopReason 的 metadataEvent 是否为 TOOL_USE
+    claimed_tool_use: bool,
+    /// 本轮是否收到过 toolUseEvent（含被 web_search 桥接截获的）
+    saw_tool_use: bool,
+}
+
+impl UpstreamTermination {
+    /// 观察每个成功解析的上游事件（须在桥接截获之前调用）
+    pub(crate) fn observe_event(&mut self, event: &Event) {
+        match event {
+            Event::ToolUse(_) => self.saw_tool_use = true,
+            Event::Metadata(metadata) => {
+                let Some(stop) = metadata.upstream_stop() else {
+                    return;
+                };
+                let raw = metadata.stop_reason.as_deref().unwrap_or_default();
+                tracing::debug!(stop_reason = raw, "[metadata] 上游 stopReason");
+                self.claimed_tool_use = stop == UpstreamStop::ToolUse;
+                if stop == UpstreamStop::Malformed {
+                    self.mark_fatal(format!("stopReason={raw}"));
+                }
+            }
+            Event::Error { error_code, .. } => self.mark_fatal(error_code.clone()),
+            Event::Exception { exception_type, .. }
+                if exception_type != CONTENT_LENGTH_EXCEEDED_EXCEPTION =>
+            {
+                self.mark_fatal(exception_type.clone())
+            }
+            _ => {}
+        }
+    }
+
+    /// 事件帧解析失败：toolUseEvent 丢失即工具调用被吞，按致命处理；其余仅记录
+    pub(crate) fn observe_parse_failure(&mut self, tool_use_frame: bool, err: &ParseError) {
+        tracing::warn!(tool_use_frame, "事件帧解析失败，帧内容被丢弃: {}", err);
+        if tool_use_frame {
+            self.mark_fatal("malformed toolUseEvent");
+        }
+    }
+
+    /// 解码错误：解码器停止或缓冲区溢出意味着后续帧全部丢失
+    pub(crate) fn observe_decode_error(&mut self, err: &ParseError) {
+        if matches!(
+            err,
+            ParseError::TooManyErrors { .. } | ParseError::BufferOverflow { .. }
+        ) {
+            self.mark_fatal("event stream decoding failed");
+        }
+    }
+
+    /// 上游 EOF：解码缓冲区残留字节说明流在帧中间被截断
+    pub(crate) fn observe_eof(&mut self, residual_bytes: usize) {
+        if residual_bytes > 0 {
+            tracing::warn!(residual_bytes, "上游流结束时残留未完成的帧");
+            self.mark_fatal("stream ended mid-frame");
+        }
+    }
+
+    /// 进入 web_search 桥接续流：stopReason 与工具调用按轮判定，致命信号保留
+    pub(crate) fn on_continuation(&mut self) {
+        self.claimed_tool_use = false;
+        self.saw_tool_use = false;
+    }
+
+    /// 异常终止原因；None 表示可以正常收尾
+    pub(crate) fn failure(&self) -> Option<String> {
+        if let Some(reason) = &self.fatal {
+            return Some(reason.clone());
+        }
+        let tool_use_lost = self.claimed_tool_use && !self.saw_tool_use;
+        tool_use_lost.then(|| "stopReason=TOOL_USE without toolUseEvent".to_string())
+    }
+
+    fn mark_fatal(&mut self, reason: impl Into<String>) {
+        if self.fatal.is_none() {
+            self.fatal = Some(reason.into());
+        }
+    }
+}
+
+/// 异常终止时返回给客户端的错误文案（流式 error 事件与非流式响应共用）
+pub(crate) fn upstream_aborted_message(reason: &str) -> String {
+    format!("Upstream aborted the response before it finished ({reason}). Please retry.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kiro::model::events::{MetadataEvent, ToolUseEvent};
+
+    fn metadata(stop_reason: &str) -> Event {
+        Event::Metadata(MetadataEvent {
+            stop_reason: Some(stop_reason.to_string()),
+        })
+    }
+
+    fn tool_use() -> Event {
+        Event::ToolUse(ToolUseEvent {
+            name: "Read".to_string(),
+            tool_use_id: "toolu_1".to_string(),
+            input: "{}".to_string(),
+            stop: true,
+        })
+    }
+
+    #[test]
+    fn test_normal_completion_is_not_failure() {
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&tool_use());
+        t.observe_event(&metadata("TOOL_USE"));
+        t.observe_eof(0);
+        assert_eq!(t.failure(), None);
+
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&metadata("END_TURN"));
+        t.observe_event(&metadata("MAX_TOKENS"));
+        assert_eq!(t.failure(), None);
+    }
+
+    #[test]
+    fn test_tool_use_claimed_without_event_is_failure() {
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&metadata("TOOL_USE"));
+        assert!(t.failure().unwrap().contains("TOOL_USE"));
+
+        // 续流轮重新判定：上一轮的 TOOL_USE（被桥接截获的 web_search）不得残留
+        t.on_continuation();
+        t.observe_event(&metadata("END_TURN"));
+        assert_eq!(t.failure(), None);
+    }
+
+    #[test]
+    fn test_malformed_and_error_frames_are_failures() {
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&metadata("MALFORMED_TOOL_USE"));
+        assert_eq!(
+            t.failure().as_deref(),
+            Some("stopReason=MALFORMED_TOOL_USE")
+        );
+        // 致命信号跨续流保留，且只记首个
+        t.on_continuation();
+        t.observe_event(&Event::Error {
+            error_code: "InternalServerError".to_string(),
+            error_message: String::new(),
+        });
+        assert_eq!(
+            t.failure().as_deref(),
+            Some("stopReason=MALFORMED_TOOL_USE")
+        );
+
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&Event::Exception {
+            exception_type: "ThrottlingException".to_string(),
+            message: String::new(),
+        });
+        assert_eq!(t.failure().as_deref(), Some("ThrottlingException"));
+    }
+
+    #[test]
+    fn test_content_length_exception_is_not_failure() {
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&Event::Exception {
+            exception_type: CONTENT_LENGTH_EXCEEDED_EXCEPTION.to_string(),
+            message: String::new(),
+        });
+        assert_eq!(t.failure(), None);
+    }
+
+    #[test]
+    fn test_decode_and_parse_failures() {
+        let parse_err = || ParseError::InvalidMessageType("x".to_string());
+
+        let mut t = UpstreamTermination::default();
+        t.observe_parse_failure(false, &parse_err());
+        t.observe_decode_error(&ParseError::MessageCrcMismatch {
+            expected: 0,
+            actual: 1,
+        });
+        assert_eq!(t.failure(), None, "可恢复的单帧错误不判为异常终止");
+
+        t.observe_parse_failure(true, &parse_err());
+        assert_eq!(t.failure().as_deref(), Some("malformed toolUseEvent"));
+
+        let mut t = UpstreamTermination::default();
+        t.observe_decode_error(&ParseError::TooManyErrors {
+            count: 5,
+            last_error: String::new(),
+        });
+        assert!(t.failure().is_some());
+
+        let mut t = UpstreamTermination::default();
+        t.observe_eof(7);
+        assert_eq!(t.failure().as_deref(), Some("stream ended mid-frame"));
+    }
+}

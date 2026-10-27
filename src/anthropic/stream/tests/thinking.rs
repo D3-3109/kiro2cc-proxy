@@ -713,6 +713,42 @@ mod tests {
         );
     }
 
+    /// metadataEvent.stopReason=MAX_TOKENS 映射为 max_tokens；异常帧不产出 SSE、由 termination 判定
+    #[test]
+    fn test_metadata_and_invalid_state_events() {
+        use crate::kiro::model::events::Event;
+        use serde_json::json;
+
+        let mut ctx = StreamContext::new_with_thinking("test-model", 1, false);
+        let _ = ctx.generate_initial_events();
+        let _ = ctx.process_assistant_response("部分输出");
+        let metadata = upstream_event("metadataEvent", json!({"stopReason": "MAX_TOKENS"}));
+        assert!(matches!(metadata, Event::Metadata(_)));
+        assert!(ctx.process_kiro_event(&metadata).is_empty());
+        ctx.termination.observe_event(&metadata);
+        assert_eq!(ctx.termination.failure(), None);
+        let finals = ctx.generate_final_events();
+        let md = finals
+            .iter()
+            .find(|e| e.event == "message_delta")
+            .expect("message_delta");
+        assert_eq!(md.data["delta"]["stop_reason"], "max_tokens");
+
+        let invalid = upstream_event("invalidStateEvent", json!({"message": "aborted"}));
+        let Event::Error { error_code, .. } = &invalid else {
+            panic!("invalidStateEvent 应解析为 Error");
+        };
+        assert_eq!(error_code, "invalidStateEvent");
+        let mut ctx = StreamContext::new_with_thinking("test-model", 1, false);
+        ctx.termination.observe_event(&invalid);
+        assert!(ctx.termination.failure().is_some());
+
+        assert!(matches!(
+            upstream_event("someFutureEvent", json!({})),
+            Event::Unknown {}
+        ));
+    }
+
     /// 复现 bug: context 100% 先被设置（model_context_window_exceeded），随后 tool_use。
     #[test]
     fn repro_context_exceeded_then_tool_use_must_be_tool_use() {

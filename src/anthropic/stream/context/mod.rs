@@ -7,7 +7,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::cache::PromptCacheUsage;
-use crate::kiro::model::events::Event;
+use crate::kiro::model::events::{Event, UpstreamStop};
 use crate::model::usage::UsageTracker;
 
 use super::calib::{cap_input_tokens, scale_for_client};
@@ -112,6 +112,8 @@ pub struct StreamContext {
     pub(crate) first_token_at: Option<Instant>,
     /// 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
     conversation_id: Option<String>,
+    /// 上游异常终止判定（handler 在桥接截获前喂入事件，流结束时据此决定收尾方式）
+    pub(crate) termination: super::UpstreamTermination,
 }
 
 impl StreamContext {
@@ -165,6 +167,7 @@ impl StreamContext {
             request_started_at: None,
             first_token_at: None,
             conversation_id: None,
+            termination: Default::default(),
         }
     }
 
@@ -203,6 +206,7 @@ impl StreamContext {
 
     pub(crate) fn mark_continuation(&mut self) {
         self.has_continuation = true;
+        self.termination.on_continuation();
     }
 
     /// 注入断点缓存记账（None 时维持前缀估算路径）
@@ -446,6 +450,20 @@ impl StreamContext {
                 }
                 Vec::new()
             }
+            Event::Metadata(metadata) => {
+                // 异常类 stopReason 由 termination 判定，此处只映射正常收尾的 stop_reason
+                match metadata.upstream_stop() {
+                    Some(UpstreamStop::MaxTokens) => {
+                        self.state_manager.set_stop_reason("max_tokens");
+                    }
+                    Some(UpstreamStop::ContextWindowExceeded) => {
+                        self.state_manager
+                            .set_stop_reason("model_context_window_exceeded");
+                    }
+                    _ => {}
+                }
+                Vec::new()
+            }
             Event::Error {
                 error_code,
                 error_message,
@@ -458,7 +476,7 @@ impl StreamContext {
                 message,
             } => {
                 // 处理 ContentLengthExceededException
-                if exception_type == "ContentLengthExceededException" {
+                if exception_type == super::CONTENT_LENGTH_EXCEEDED_EXCEPTION {
                     self.state_manager.set_stop_reason("max_tokens");
                 }
                 tracing::warn!("收到异常事件: {} - {}", exception_type, message);

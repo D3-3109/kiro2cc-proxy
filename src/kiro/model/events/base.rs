@@ -21,6 +21,10 @@ pub enum EventType {
     ContextUsage,
     /// 代码引用事件
     CodeReference,
+    /// 元数据事件（携带上游 stopReason）
+    Metadata,
+    /// 上游状态异常事件（生成已中止）
+    InvalidState,
     /// 未知事件类型
     Unknown,
 }
@@ -35,6 +39,8 @@ impl EventType {
             "meteringEvent" => Self::Metering,
             "contextUsageEvent" => Self::ContextUsage,
             "codeReferenceEvent" => Self::CodeReference,
+            "metadataEvent" => Self::Metadata,
+            "invalidStateEvent" => Self::InvalidState,
             _ => Self::Unknown,
         }
     }
@@ -48,6 +54,8 @@ impl EventType {
             Self::Metering => "meteringEvent",
             Self::ContextUsage => "contextUsageEvent",
             Self::CodeReference => "codeReferenceEvent",
+            Self::Metadata => "metadataEvent",
+            Self::InvalidState => "invalidStateEvent",
             Self::Unknown => "unknown",
         }
     }
@@ -84,9 +92,11 @@ pub enum Event {
     ContextUsage(super::ContextUsageEvent),
     /// 代码引用（开源许可证合规追踪）
     CodeReference(super::CodeReferenceEvent),
+    /// 元数据（上游终止原因）
+    Metadata(super::MetadataEvent),
     /// 未知事件 (保留原始帧数据)
     Unknown {},
-    /// 服务端错误
+    /// 服务端错误（error 消息帧与 invalidStateEvent）
     Error {
         /// 错误代码
         error_code: String,
@@ -157,7 +167,23 @@ impl Event {
                 let payload = super::CodeReferenceEvent::from_frame(&frame)?;
                 Ok(Self::CodeReference(payload))
             }
-            EventType::Unknown => Ok(Self::Unknown {}),
+            EventType::Metadata => {
+                tracing::debug!(
+                    "[raw-event] metadataEvent payload: {}",
+                    frame.payload_as_str()
+                );
+                let payload = super::MetadataEvent::from_frame(&frame)?;
+                Ok(Self::Metadata(payload))
+            }
+            // 上游中止生成，语义等同错误帧，统一走 Error 的异常收尾
+            EventType::InvalidState => Ok(Self::Error {
+                error_code: EventType::InvalidState.as_str().to_string(),
+                error_message: frame.payload_as_str(),
+            }),
+            EventType::Unknown => {
+                tracing::warn!(event_type = event_type_str, "未识别的上游事件类型，已忽略");
+                Ok(Self::Unknown {})
+            }
         }
     }
 

@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 //! 流式请求处理：handle_stream_request 建立 SSE 通道并驱动 Kiro 事件到客户端的转发，wait_deadline 处理全局超时。
 
-use crate::anthropic::stream::{SseEvent, StreamContext};
+use crate::anthropic::stream::{SseEvent, StreamContext, upstream_aborted_message};
 
 use std::convert::Infallible;
 
-use crate::kiro::model::events::Event;
+use crate::kiro::model::events::{Event, EventType};
 use crate::kiro::parser::decoder::EventStreamDecoder;
 use axum::{
     body::Body,
@@ -362,6 +362,20 @@ pub(crate) fn stream_interrupted_error_event_after(elapsed: Duration) -> SseEven
     )
 }
 
+/// 上游异常终止（见 `UpstreamTermination`）时的 error 事件：overloaded_error 保持可重试语义
+pub(crate) fn upstream_aborted_error_event(reason: &str) -> SseEvent {
+    SseEvent::new(
+        "error",
+        serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "overloaded_error",
+                "message": upstream_aborted_message(reason)
+            }
+        }),
+    )
+}
+
 /// /cc 全局 deadline 触发时返回给客户端的 error 事件（两处 deadline 收尾路径共用）
 pub(crate) fn deadline_error_event() -> SseEvent {
     SseEvent::new(
@@ -496,45 +510,50 @@ fn create_sse_stream(
                             // 解码事件
                             if let Err(e) = decoder.feed(&chunk) {
                                 tracing::warn!("缓冲区溢出: {}", e);
+                                ctx.termination.observe_decode_error(&e);
                             }
 
                             let mut events = Vec::new();
                             for result in decoder.decode_iter() {
                                 match result {
-                                    Ok(frame) => match Event::from_frame(frame) {
-                                        Ok(event) => {
-                                            // 桥接截获优先：web_search toolUse 不透传为
-                                            // 普通 tool_use SSE，改为客户端可见性块（D4/D8）
-                                            let (consumed, mut bridge_events) =
-                                                bridge_handle_event(&mut ctx, &mut bridge, &event);
-                                            // 首字埋点：按「本帧是否产出客户端可见的 SSE 事件」
-                                            // 判定，而非按事件变体名 —— 桥接截获同样会产出可见性块
-                                            // （bridge.rs build_web_search_visibility_events），
-                                            // 而空 content / thinking 关闭的 ReasoningContent 等
-                                            // 早退分支返回空事件，客户端零输出不应计首字；
-                                            // Metering/ContextUsage 等元信息帧天然产出空事件，
-                                            // keepalive 是 SSE 层合成事件，同样不走此处
-                                            if !bridge_events.is_empty() {
-                                                ctx.mark_first_token();
-                                            }
-                                            if !consumed {
-                                                let sse_events = ctx.process_kiro_event(&event);
-                                                if !sse_events.is_empty() {
+                                    Ok(frame) => {
+                                        let tool_use_frame =
+                                            frame.event_type() == Some(EventType::ToolUse.as_str());
+                                        match Event::from_frame(frame) {
+                                            Ok(event) => {
+                                                // 先于桥接截获观察：被截获的 toolUse 也算工具调用
+                                                ctx.termination.observe_event(&event);
+                                                // 桥接截获优先：web_search toolUse 不透传为
+                                                // 普通 tool_use SSE，改为客户端可见性块（D4/D8）
+                                                let (consumed, mut bridge_events) =
+                                                    bridge_handle_event(&mut ctx, &mut bridge, &event);
+                                                // 首字埋点：按「本帧是否产出客户端可见的 SSE 事件」
+                                                // 判定，而非按事件变体名 —— 桥接截获同样会产出可见性块
+                                                // （bridge.rs build_web_search_visibility_events），
+                                                // 而空 content / thinking 关闭的 ReasoningContent 等
+                                                // 早退分支返回空事件，客户端零输出不应计首字；
+                                                // Metering/ContextUsage 等元信息帧天然产出空事件，
+                                                // keepalive 是 SSE 层合成事件，同样不走此处
+                                                if !bridge_events.is_empty() {
                                                     ctx.mark_first_token();
                                                 }
-                                                bridge_events.extend(sse_events);
+                                                if !consumed {
+                                                    let sse_events = ctx.process_kiro_event(&event);
+                                                    if !sse_events.is_empty() {
+                                                        ctx.mark_first_token();
+                                                    }
+                                                    bridge_events.extend(sse_events);
+                                                }
+                                                events.extend(bridge_events);
                                             }
-                                            events.extend(bridge_events);
+                                            Err(e) => {
+                                                ctx.termination.observe_parse_failure(tool_use_frame, &e);
+                                            }
                                         }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "事件帧解析失败，帧内容被丢弃: {}",
-                                                e
-                                            );
-                                        }
-                                    },
+                                    }
                                     Err(e) => {
                                         tracing::warn!("解码事件失败: {}", e);
+                                        ctx.termination.observe_decode_error(&e);
                                     }
                                 }
                             }
@@ -596,6 +615,7 @@ fn create_sse_stream(
                             // （一个 unfold 状态同一时刻至多一轮桥接；耗尽的
                             // body_stream 在 in-flight 期间也不会再以 None 就绪
                             // 进入本分支——它已被替换为永不就绪的占位流）。
+                            ctx.termination.observe_eof(decoder.buffer_len());
                             if let Some(mut state) =
                                 bridge.take().filter(|b| !b.pending.is_empty()).filter(|_| round_in_flight.is_none())
                             {
@@ -678,9 +698,16 @@ fn create_sse_stream(
                                 ));
                                 }
 
-                            // 非桥接态（或桥接无待执行搜索）→ 现有收尾路径（零行为变化）
+                            // 非桥接态（或桥接无待执行搜索）→ 现有收尾路径
                             let mut out_events = Vec::new();
-                            if ctx.is_empty_response() {
+                            if let Some(reason) = ctx.termination.failure() {
+                                tracing::warn!(
+                                    reason = %reason,
+                                    est_input_tokens = ctx.input_tokens,
+                                    "上游异常终止，补发 error 事件防止伪装成正常完成"
+                                );
+                                out_events.push(upstream_aborted_error_event(&reason));
+                            } else if ctx.is_empty_response() {
                                 let oversized = ctx.empty_response_is_oversized_context();
                                 tracing::warn!(
                                     oversized_context = oversized,

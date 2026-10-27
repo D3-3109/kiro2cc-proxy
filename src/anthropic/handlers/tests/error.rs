@@ -8,7 +8,8 @@ mod tests {
 
     use super::super::super::nonstream::build_non_stream_content;
     use super::super::super::stream::{
-        stream_interrupted_error_event, stream_interrupted_error_event_after, wait_deadline,
+        stream_interrupted_error_event, stream_interrupted_error_event_after,
+        upstream_aborted_error_event, wait_deadline,
     };
 
     use crate::anthropic::stream::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
@@ -54,6 +55,15 @@ mod tests {
                 "不得断言未证实的时长上限"
             );
         }
+    }
+
+    #[test]
+    fn test_upstream_aborted_error_event_is_retryable_and_names_reason() {
+        let event = upstream_aborted_error_event("stopReason=MALFORMED_TOOL_USE");
+        assert_eq!(event.event, "error");
+        assert_eq!(event.data["error"]["type"], "overloaded_error");
+        let msg = event.data["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("MALFORMED_TOOL_USE") && msg.contains("retry"));
     }
 
     async fn response_body_text(resp: Response) -> String {
