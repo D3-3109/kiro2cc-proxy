@@ -79,6 +79,14 @@ pub struct UsageRecord {
     pub user_agent: Option<String>,
 }
 
+impl UsageRecord {
+    /// 计费 credits：真实值优先，旧记录按 estimated_cost * k_ref 回退估算
+    fn credits_or_estimate(&self) -> f64 {
+        self.credits_used
+            .unwrap_or_else(|| self.estimated_cost * get_k_ref(&self.model))
+    }
+}
+
 /// `record()` 的可选参数集合：位置参数已达 14 个且多次追加（thinking/is_stream），
 /// 收拢为具名结构体后调用点尾部不再出现裸 None/Some 字面量，新增字段也不会
 /// 引发全量调用点改动（此前 thinking 字段追加时已三次被迫改动全部调用点）。
@@ -158,6 +166,23 @@ struct LifetimeTotals {
     pruned_input_tokens: i64,
     /// 裁剪掉的记录贡献的输出 tokens
     pruned_output_tokens: i64,
+    /// 裁剪掉的记录贡献的估算费用（USD）；缺失则视为 0（旧文件兼容）
+    #[serde(default)]
+    pruned_cost: f64,
+    /// 裁剪掉的记录贡献的 credits（口径同 `UsageRecord::credits_or_estimate`）
+    #[serde(default)]
+    pruned_credits: f64,
+}
+
+impl LifetimeTotals {
+    /// 累加一条被裁剪记录的贡献
+    fn absorb(&mut self, r: &UsageRecord) {
+        self.pruned_requests += 1;
+        self.pruned_input_tokens += r.input_tokens as i64;
+        self.pruned_output_tokens += r.output_tokens as i64;
+        self.pruned_cost += r.estimated_cost;
+        self.pruned_credits += r.credits_or_estimate();
+    }
 }
 
 impl std::ops::AddAssign for LifetimeTotals {
@@ -165,6 +190,8 @@ impl std::ops::AddAssign for LifetimeTotals {
         self.pruned_requests += rhs.pruned_requests;
         self.pruned_input_tokens += rhs.pruned_input_tokens;
         self.pruned_output_tokens += rhs.pruned_output_tokens;
+        self.pruned_cost += rhs.pruned_cost;
+        self.pruned_credits += rhs.pruned_credits;
     }
 }
 
@@ -429,9 +456,7 @@ impl UsageTracker {
                 records.retain(|r| {
                     if r.api_key_id == api_key_id && removed < excess {
                         removed += 1;
-                        pruned.pruned_requests += 1;
-                        pruned.pruned_input_tokens += r.input_tokens as i64;
-                        pruned.pruned_output_tokens += r.output_tokens as i64;
+                        pruned.absorb(r);
                         false
                     } else {
                         true
@@ -457,10 +482,7 @@ impl UsageTracker {
                     records.retain(|r| {
                         if r.credential_id == Some(cid) && removed < excess {
                             removed += 1;
-                            let e = by_key.entry(r.api_key_id).or_default();
-                            e.pruned_requests += 1;
-                            e.pruned_input_tokens += r.input_tokens as i64;
-                            e.pruned_output_tokens += r.output_tokens as i64;
+                            by_key.entry(r.api_key_id).or_default().absorb(r);
                             false
                         } else {
                             true
@@ -471,9 +493,7 @@ impl UsageTracker {
                         let mut cred = LifetimeTotals::default();
                         let mut keys = self.lifetime_keys.write();
                         for (id, v) in by_key {
-                            cred.pruned_requests += v.pruned_requests;
-                            cred.pruned_input_tokens += v.pruned_input_tokens;
-                            cred.pruned_output_tokens += v.pruned_output_tokens;
+                            cred += v.clone();
                             *keys.entry(id).or_default() += v;
                         }
                         drop(keys);
@@ -519,27 +539,22 @@ impl UsageTracker {
             })
             .sum();
 
-        let total_credits: f64 = filtered
-            .iter()
-            .map(|r| {
-                r.credits_used
-                    .unwrap_or_else(|| r.estimated_cost * get_k_ref(&r.model))
-            })
-            .sum();
+        // 基数（已裁剪部分）+ 现存明细求和 = 真实累计值；不加基数会导致
+        // 请求数封顶、已用额度随裁剪倒退。须在持有明细读锁时读取（与 record 同锁序）
+        let base = self.lifetime_base(api_key_id);
+
+        let total_credits: f64 = base.pruned_credits
+            + filtered
+                .iter()
+                .map(|r| r.credits_or_estimate())
+                .sum::<f64>();
 
         UsageSummary {
             api_key_id,
-            // 基数（已裁剪部分）+ 现存明细求和 = 真实累计请求数；
-            // 不加基数会导致超过 MAX_RECORDS_PER_KEY 后请求数封顶不再增长
-            total_requests: self
-                .lifetime_keys
-                .read()
-                .get(&api_key_id)
-                .map_or(0, |t| t.pruned_requests)
-                + filtered.len() as u64,
+            total_requests: base.pruned_requests + filtered.len() as u64,
             total_input_tokens: filtered.iter().map(|r| r.input_tokens as i64).sum(),
             total_output_tokens: filtered.iter().map(|r| r.output_tokens as i64).sum(),
-            total_cost: filtered.iter().map(|r| r.estimated_cost).sum(),
+            total_cost: base.pruned_cost + filtered.iter().map(|r| r.estimated_cost).sum::<f64>(),
             total_credits,
             total_credits_saved,
             by_model: by_model
@@ -604,28 +619,36 @@ impl UsageTracker {
         Ok(())
     }
 
-    /// 获取指定 API Key 的累计费用（轻量版，仅算总费用）
+    /// 获取指定 API Key 的累计费用（轻量版，仅算总费用；含已裁剪基数）
     pub fn get_total_cost(&self, api_key_id: u32) -> f64 {
         let records = self.records.read();
-        records
-            .iter()
-            .filter(|r| r.api_key_id == api_key_id)
-            .map(|r| r.estimated_cost)
-            .sum()
+        self.lifetime_base(api_key_id).pruned_cost
+            + records
+                .iter()
+                .filter(|r| r.api_key_id == api_key_id)
+                .map(|r| r.estimated_cost)
+                .sum::<f64>()
     }
 
-    /// 获取指定 API Key 的累计真实 credits 消耗（轻量版）
+    /// 获取指定 API Key 的累计真实 credits 消耗（轻量版；含已裁剪基数）
     /// 旧记录无 credits_used 时按 estimated_cost * k_ref 回退估算（与日报汇总口径一致）
     pub fn get_total_credits(&self, api_key_id: u32) -> f64 {
         let records = self.records.read();
-        records
-            .iter()
-            .filter(|r| r.api_key_id == api_key_id)
-            .map(|r| {
-                r.credits_used
-                    .unwrap_or_else(|| r.estimated_cost * get_k_ref(&r.model))
-            })
-            .sum()
+        self.lifetime_base(api_key_id).pruned_credits
+            + records
+                .iter()
+                .filter(|r| r.api_key_id == api_key_id)
+                .map(|r| r.credits_or_estimate())
+                .sum::<f64>()
+    }
+
+    /// 指定 API Key 的裁剪前基数；调用方须先持有明细锁，保证与现存明细一致
+    fn lifetime_base(&self, api_key_id: u32) -> LifetimeTotals {
+        self.lifetime_keys
+            .read()
+            .get(&api_key_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

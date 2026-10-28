@@ -1303,4 +1303,70 @@ mod tests {
             40_000
         );
     }
+
+    fn credits_opts(credits_used: f64, credential_id: u64) -> RecordOptions {
+        RecordOptions {
+            credits_used: Some(credits_used),
+            credential_id: Some(credential_id),
+            ..Default::default()
+        }
+    }
+
+    /// 回归：key 自身明细超上限被裁剪后，已用 credits / cost 不倒退
+    #[tokio::test]
+    async fn test_spent_totals_not_reduced_by_key_pruning() {
+        let path = temp_usage_path("spent_key_pruning");
+        let tracker = UsageTracker::load(&path).unwrap();
+        let cap = crate::model::usage::MAX_RECORDS_PER_KEY_FOR_TEST;
+        for _ in 0..cap {
+            tracker.record(1, "claude-opus-4.6".into(), 10, 10, credits_opts(1.0, 100));
+        }
+        let credits_before = tracker.get_total_credits(1);
+        let cost_before = tracker.get_total_cost(1);
+
+        tracker.record(1, "claude-opus-4.6".into(), 10, 10, credits_opts(0.1, 100));
+
+        let cost_per_record = cost_before / cap as f64;
+        assert!((tracker.get_total_credits(1) - (credits_before + 0.1)).abs() < 1e-6);
+        assert!((tracker.get_total_cost(1) - (cost_before + cost_per_record)).abs() < 1e-9);
+        let summary = tracker.get_summary(1);
+        assert!((summary.total_credits - tracker.get_total_credits(1)).abs() < 1e-9);
+        assert!((summary.total_cost - tracker.get_total_cost(1)).abs() < 1e-9);
+        cleanup_usage_path(&path);
+    }
+
+    /// 回归：共享账号明细超上限时，其他 key 的记录被挤掉，其已用 credits 不归零
+    #[tokio::test]
+    async fn test_spent_totals_not_reduced_by_credential_pruning() {
+        let path = temp_usage_path("spent_credential_pruning");
+        let tracker = UsageTracker::load(&path).unwrap();
+        let cap = crate::model::usage::MAX_RECORDS_PER_KEY_FOR_TEST;
+        tracker.record(2, "claude-opus-4.6".into(), 10, 10, credits_opts(5.0, 200));
+        let cost_before = tracker.get_total_cost(2);
+        for _ in 0..cap {
+            tracker.record(3, "claude-opus-4.6".into(), 10, 10, credits_opts(1.0, 200));
+        }
+
+        assert!((tracker.get_total_credits(2) - 5.0).abs() < 1e-9);
+        assert!((tracker.get_total_cost(2) - cost_before).abs() < 1e-9);
+        assert_eq!(tracker.get_summary(2).total_requests, 1);
+        cleanup_usage_path(&path);
+    }
+
+    /// 旧版累计基数文件（无 prunedCost / prunedCredits 字段）可加载，缺失值按 0 计
+    #[tokio::test]
+    async fn test_legacy_lifetime_file_without_spent_fields_loads() {
+        let path = temp_usage_path("legacy_lifetime");
+        let lifetime = path.parent().unwrap().join("api_key_lifetime.json");
+        std::fs::write(
+            &lifetime,
+            r#"{"4":{"prunedRequests":3,"prunedInputTokens":30,"prunedOutputTokens":30}}"#,
+        )
+        .unwrap();
+        let tracker = UsageTracker::load(&path).unwrap();
+        assert_eq!(tracker.get_summary(4).total_requests, 3);
+        assert_eq!(tracker.get_total_credits(4), 0.0);
+        assert_eq!(tracker.get_total_cost(4), 0.0);
+        cleanup_usage_path(&path);
+    }
 }
