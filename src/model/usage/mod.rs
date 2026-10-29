@@ -80,6 +80,23 @@ pub struct UsageRecord {
     /// 历史推理未能回传上游的情况（None 表示无丢失或旧数据）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_loss: Option<ThinkingLoss>,
+    /// 客户端请求所用的 API 格式（None 表示旧数据）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_format: Option<ApiFormat>,
+}
+
+/// 客户端请求所用的 API 格式（按入口端点区分）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApiFormat {
+    /// `/v1/messages`
+    AnthropicMessages,
+    /// `/cc/v1/messages`
+    CcMessages,
+    /// `/v1/chat/completions`
+    OpenaiChat,
+    /// `/v1/responses`
+    OpenaiResponses,
 }
 
 /// 一次请求中未能回传给上游的历史推理，供面板审查签名回传是否回归
@@ -142,6 +159,7 @@ pub struct RecordOptions {
     pub is_stream: Option<bool>,
     pub user_agent: Option<String>,
     pub thinking_loss: Option<ThinkingLoss>,
+    pub api_format: Option<ApiFormat>,
 }
 
 /// 单个 API Key 的用量汇总
@@ -456,6 +474,7 @@ impl UsageTracker {
             is_stream,
             user_agent,
             thinking_loss,
+            api_format,
         } = options;
         let cost = calculate_cost(&model, input_tokens, output_tokens);
         let record = UsageRecord {
@@ -480,6 +499,7 @@ impl UsageTracker {
             is_stream,
             user_agent,
             thinking_loss,
+            api_format,
         };
         {
             let mut records = self.records.write();

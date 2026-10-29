@@ -4,7 +4,7 @@ import { Brain, DatabaseZap, Loader2, SearchX } from 'lucide-react'
 import { CELL, TH_BASE } from '@/components/table-kit'
 import { formatDateTime, formatTokenCount } from '@/lib/locale'
 import type { GeoInfo } from '@/hooks/use-ip-geo'
-import type { ThinkingLoss, UsageRecord } from '@/types/api'
+import type { ApiFormat, ThinkingLoss, UsageRecord } from '@/types/api'
 
 /**
  * 请求日志表（API Key 详情页 / 每日明细页共用）。
@@ -35,6 +35,28 @@ export function formatCost(cost: number): string {
 /** UA 短标识：取首个空格前段（如 claude-cli/2.1.5），完整原文走 title 悬停展示 */
 function uaShort(ua: string): string {
   return ua.split(/\s+/)[0] || ua
+}
+
+/** API 格式展示名与入口端点（协议名不随界面语言变化） */
+const API_FORMATS: Record<ApiFormat, { label: string; endpoint: string }> = {
+  'anthropic-messages': { label: 'Anthropic Messages', endpoint: '/v1/messages' },
+  'cc-messages': { label: 'Anthropic Messages (CC)', endpoint: '/cc/v1/messages' },
+  'openai-chat': { label: 'OpenAI Chat', endpoint: '/v1/chat/completions' },
+  'openai-responses': { label: 'OpenAI Responses', endpoint: '/v1/responses' },
+}
+
+/** 低于该生成耗时（ms）的 TPS 波动过大，不展示 */
+const MIN_TPS_GENERATION_MS = 200
+
+/**
+ * 估算输出速度（tokens/s）：输出 tokens ÷ 生成耗时，流式扣除首字等待。
+ * 输出 tokens 为本地计数（含推理摘要，不含上游隐藏推理），故为估算值。
+ */
+function estimatedTps(record: UsageRecord): number | null {
+  if (record.durationMs == null || !(record.outputTokens > 0)) return null
+  const generationMs = record.durationMs - (record.firstTokenMs ?? 0)
+  if (generationMs < MIN_TPS_GENERATION_MS) return null
+  return record.outputTokens / (generationMs / 1000)
 }
 
 /**
@@ -128,14 +150,29 @@ function durationTone(ms: number, fastMs: number, slowMs: number): string {
   return 'bg-surface-3 text-ink-2'
 }
 
+/** 估算 TPS 分档阈值（tokens/s）：≥60 快 / ≤20 慢 */
+const TPS_FAST = 60
+const TPS_SLOW = 20
+
+/** TPS 快/中/慢三档底色（越快越好，与耗时方向相反） */
+function tpsTone(tps: number): string {
+  if (tps >= TPS_FAST) return 'bg-ok-soft text-ok'
+  if (tps <= TPS_SLOW) return 'bg-warn-soft text-warn'
+  return 'bg-surface-3 text-ink-2'
+}
+
 /** 徽章胶囊统一样式：细边框占宽度、小号加粗字号 */
 const BADGE_CLS = 'rounded-[4px] border border-transparent px-1 text-[9.5px] font-semibold'
 
-/** 「用时」单元格：流式双徽章（首字/耗时），非流式仅耗时，缺数据以 — 占位保证列宽稳定 */
+/**
+ * 「用时」单元格：流式双徽章（首字/耗时），非流式仅耗时，末行估算 TPS；
+ * 缺数据以 — 占位保证列宽稳定
+ */
 export function DurationCell({ record }: { record: UsageRecord }) {
   const { t } = useTranslation()
   const first = record.firstTokenMs
   const dur = record.durationMs
+  const tps = estimatedTps(record)
   if (first == null && dur == null) return <span className="text-ink-3">—</span>
   return (
     <div className="flex flex-col items-start gap-px">
@@ -153,6 +190,11 @@ export function DurationCell({ record }: { record: UsageRecord }) {
           title={t('common.durationLabel')}
         >
           {t('common.durationLabel')} {formatDurationMs(dur)}
+        </span>
+      )}
+      {tps != null && (
+        <span className={`${BADGE_CLS} ${tpsTone(tps)} font-mono tabular-nums`} title={t('common.tpsHint')}>
+          {t('common.tpsValue', { tps: tps >= 10 ? Math.round(tps) : tps.toFixed(1) })}
         </span>
       )}
     </div>
@@ -184,8 +226,7 @@ const LOG_COLS: { labelKey: string; num?: boolean }[] = [
   { labelKey: 'common.colModel' },
   { labelKey: 'common.colTokenUsage' },
   { labelKey: 'common.colDuration' },
-  { labelKey: 'common.colCost', num: true },
-  { labelKey: 'common.colCredits', num: true },
+  { labelKey: 'common.colCostCredits', num: true },
 ]
 
 export function UsageLogTable({
@@ -235,11 +276,12 @@ export function UsageLogTable({
                 </td>
                 <td className={`${CELL} whitespace-nowrap text-[11.5px] text-ink-2`}>
                   {record.clientIp ? (
-                    <span title={record.clientIp} className="flex flex-col items-start">
-                      <span className="font-mono">{geo?.displayIp ?? record.clientIp}</span>
+                    // IPv6 / 长地名不撑宽列：限宽截断，完整 IP 走 title（td 上的 max-width 浏览器不保证生效）
+                    <span title={record.clientIp} className="flex max-w-[140px] flex-col">
+                      <span className="truncate font-mono">{geo?.displayIp ?? record.clientIp}</span>
                       {/* city 缺失颗粒度的 IP（如 8.8.8.8）返回空串，拼接会留下悬空分隔符 */}
                       {geo?.country && (
-                        <span className="text-ink-3">
+                        <span className="truncate text-ink-3">
                           {geo.city ? `${geo.country}·${geo.city}` : geo.country}
                         </span>
                       )}
@@ -266,6 +308,14 @@ export function UsageLogTable({
                       title={record.userAgent}
                     >
                       {uaShort(record.userAgent)}
+                    </span>
+                  )}
+                  {record.apiFormat && (
+                    <span
+                      className="mt-px block truncate text-[10px] text-ink-3"
+                      title={`${t('common.apiFormatTitle')}: ${API_FORMATS[record.apiFormat].endpoint}`}
+                    >
+                      {API_FORMATS[record.apiFormat].label}
                     </span>
                   )}
                 </td>
@@ -352,14 +402,14 @@ export function UsageLogTable({
                 <td className={`${CELL} whitespace-nowrap text-[11px]`}>
                   <DurationCell record={record} />
                 </td>
-                <td className={`${CELL} text-right font-mono text-[12px] font-medium tabular-nums text-warn`}>
-                  {formatCost(record.estimatedCost)}
-                </td>
-                <td className={`${CELL} text-right font-mono text-[12px] font-medium tabular-nums text-brand`}>
-                  {recordCredits(record).toFixed(4)}
-                  {record.creditsUsed != null && <span className="ml-1 text-[11px] text-ok">✓</span>}
+                <td className={`${CELL} whitespace-nowrap text-right font-mono tabular-nums`}>
+                  <span className="block text-[12px] font-medium text-warn">{formatCost(record.estimatedCost)}</span>
+                  <span className="block text-[10.5px] text-brand">
+                    {recordCredits(record).toFixed(4)} cr
+                    {record.creditsUsed != null && <span className="ml-1 text-ok">✓</span>}
+                  </span>
                   {record.creditsSaved != null && record.creditsSaved > 0 && (
-                    <small className="block text-[10px] font-normal text-ok">
+                    <small className="block text-[10px] text-ok">
                       {t('common.savedPrefix', { amount: record.creditsSaved.toFixed(4) })}
                     </small>
                   )}

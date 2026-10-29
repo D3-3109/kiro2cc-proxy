@@ -290,6 +290,8 @@ pub(crate) async fn handle_non_stream_request(
     history_thinking_loss: crate::anthropic::converter::HistoryThinkingLoss,
     // 历史中回传上游的推理签名（ConversionResult::history_reasoning_replay），供 credits 反推
     history_reasoning_replay: crate::anthropic::converter::HistoryReasoningReplay,
+    // 客户端请求所用的 API 格式（随 usage 记录入库）
+    api_format: crate::model::usage::ApiFormat,
 ) -> Response {
     // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
     let request_started_at = std::time::Instant::now();
@@ -828,6 +830,7 @@ pub(crate) async fn handle_non_stream_request(
                     history_thinking_loss,
                     history_reasoning_stripped,
                 ),
+                api_format: Some(api_format),
             },
         );
     }

@@ -276,7 +276,11 @@ export interface UsageRecord {
   isStream?: boolean
   userAgent?: string
   thinkingLoss?: ThinkingLoss
+  apiFormat?: ApiFormat
 }
+
+// 客户端请求所用的 API 格式（按入口端点区分；旧记录缺省）
+export type ApiFormat = 'anthropic-messages' | 'cc-messages' | 'openai-chat' | 'openai-responses'
 
 // 历史推理未能回传上游的情况（字段缺省即 0 / false）
 export interface ThinkingLoss {

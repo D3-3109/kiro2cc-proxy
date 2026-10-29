@@ -211,6 +211,7 @@ mod tests {
             is_stream: None,
             user_agent: None,
             thinking_loss: None,
+            api_format: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["firstTokenMs"], 1234);
@@ -262,6 +263,7 @@ mod tests {
             is_stream: Some(true),
             user_agent: Some("claude-cli/2.1.5 (external, cli)".to_string()),
             thinking_loss: None,
+            api_format: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["thinkingTokenCount"], 1034);
@@ -376,6 +378,30 @@ mod tests {
         });
         let parsed: crate::model::usage::UsageRecord = serde_json::from_value(old_json).unwrap();
         assert_eq!(parsed.thinking_loss, None);
+        assert_eq!(parsed.api_format, None);
+        cleanup_usage_path(&path);
+    }
+
+    /// api_format：按 kebab-case 落库并透传到分页 DTO
+    #[tokio::test]
+    async fn test_record_api_format_persisted_and_paged() {
+        use crate::model::usage::ApiFormat;
+
+        let path = temp_usage_path("api_format_field");
+        let tracker = UsageTracker::load(&path).unwrap();
+        tracker.record(
+            1,
+            "claude-opus-4.6".to_string(),
+            100,
+            10,
+            RecordOptions {
+                api_format: Some(ApiFormat::OpenaiResponses),
+                ..Default::default()
+            },
+        );
+        let page = tracker.get_records_paged(1, 1, 10, &RecordLabels::default());
+        let json = serde_json::to_value(&page.records).unwrap();
+        assert_eq!(json[0]["apiFormat"], "openai-responses");
         cleanup_usage_path(&path);
     }
 
@@ -404,6 +430,7 @@ mod tests {
             is_stream: None,
             user_agent: None,
             thinking_loss: None,
+            api_format: None,
         };
         tracker.records.write().push(record);
     }
@@ -446,6 +473,7 @@ mod tests {
             is_stream: None,
             user_agent: None,
             thinking_loss: None,
+            api_format: None,
         };
         tracker.records.write().push(record);
     }

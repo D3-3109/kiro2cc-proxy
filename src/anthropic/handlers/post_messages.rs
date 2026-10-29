@@ -38,6 +38,27 @@ pub async fn post_messages(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
+    post_messages_as(
+        state,
+        identity,
+        addr,
+        headers,
+        body,
+        crate::model::usage::ApiFormat::AnthropicMessages,
+    )
+    .await
+}
+
+/// `/v1/messages` 的处理主体；OpenAI 端点把请求转成 Anthropic 格式后带上自己的
+/// `api_format` 复用（随 usage 记录入库）
+pub(crate) async fn post_messages_as(
+    state: AppState,
+    identity: Option<Extension<ApiKeyContext>>,
+    addr: std::net::SocketAddr,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+    api_format: crate::model::usage::ApiFormat,
+) -> Response {
     let mut payload = match parse_messages_request(&body) {
         Ok(p) => p,
         Err(resp) => return resp,
@@ -333,6 +354,7 @@ pub async fn post_messages(
             conversation_id,
             history_thinking_loss,
             history_reasoning_replay,
+            api_format,
         )
         .await
     } else {
@@ -362,6 +384,7 @@ pub async fn post_messages(
             conversation_id,
             history_thinking_loss,
             history_reasoning_replay,
+            api_format,
         )
         .await
     }
