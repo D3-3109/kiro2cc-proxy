@@ -1,73 +1,64 @@
 name: Tests
 
+# Pushes to the default branch are tested by docker-build.yaml, which calls
+# this workflow before building the image.
 on:
-  push:
-    branches:
-      - master
   pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9
 
-      - name: Install admin-ui dependencies
-        working-directory: web-ui/admin-ui
-        run: pnpm install
-
+      # The frontends are type-checked by their builds, and rust-embed needs
+      # the dist folders to exist at compile time.
       - name: Build admin-ui
         working-directory: web-ui/admin-ui
-        run: pnpm build
-
-      - name: Install user-ui dependencies
-        working-directory: web-ui/user-ui
-        run: npm install
+        run: |
+          pnpm install
+          pnpm build
 
       - name: Build user-ui
         working-directory: web-ui/user-ui
-        run: npm run build
+        run: |
+          npm install
+          npm run build
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: llvm-tools-preview
+          components: rustfmt, clippy
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-cache-test"
+          shared-key: rust-cache-test
           cache-on-failure: true
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Check formatting
+        run: cargo fmt --all --check
 
-      - name: Run tests with coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
+      # Test modules carry upstream clippy debt, so only non-test code is gated.
+      - name: Clippy
+        run: cargo clippy --locked -- -D warnings
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        continue-on-error: true
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Run tests
+        run: cargo test --locked

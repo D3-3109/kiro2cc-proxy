@@ -3,65 +3,30 @@ name: Build and Push Docker Images
 on:
   push:
     branches:
-      - master
+      - local
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag for Docker images (e.g., 2025.12.1)'
-        required: true
-        default: '2026.1.1'
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+env:
+  IMAGE_NAME: kiro2cc-proxy
 
 jobs:
-  pre-check:
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
-        with:
-          fetch-depth: 0
-      - name: Check if commit has release tag
-        id: check
-        run: |
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/heads/* ]] && git tag --points-at HEAD | grep -q '^v'; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "::notice::Skipping beta build: commit already has a release tag"
-          else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
-
-  version:
-    needs: pre-check
-    if: needs.pre-check.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      is_beta: ${{ steps.version.outputs.is_beta }}
-    steps:
-      - name: Determine version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-            echo "is_beta=false" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "is_beta=false" >> $GITHUB_OUTPUT
-          else
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-6)
-            echo "version=beta-${SHORT_SHA}" >> $GITHUB_OUTPUT
-            echo "is_beta=true" >> $GITHUB_OUTPUT
-          fi
+  test:
+    uses: ./.github/workflows/test.yaml
 
   build:
-    needs: version
+    needs: test
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -73,51 +38,68 @@ jobs:
             runner: ubuntu-24.04-arm
             name: arm64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Image reference
+        run: echo "IMAGE_REF=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ github.token }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lowercase owner
-        run: echo "IMAGE_OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Build and push by digest
-        id: build
-        uses: nick-fields/retry@v3
+      - name: Image labels
+        id: meta
+        uses: docker/metadata-action@v6
         with:
-          timeout_minutes: 20
+          images: ${{ env.IMAGE_REF }}
+
+      # Docker Hub's auth service occasionally returns transient 5xx errors
+      # when pulling base images, so the build is retried.
+      - name: Build and push by digest
+        uses: nick-fields/retry@v4
+        env:
+          LABELS: ${{ steps.meta.outputs.labels }}
+        with:
+          timeout_minutes: 30
           max_attempts: 3
           retry_wait_seconds: 15
+          shell: bash
           command: |
+            label_args=()
+            while IFS= read -r label; do
+              [ -n "$label" ] && label_args+=(--label "$label")
+            done <<< "$LABELS"
             docker buildx build \
               --platform ${{ matrix.platform }} \
               --provenance=false \
-              --output type=image,name=ghcr.io/${{ env.IMAGE_OWNER }}/kiro2cc-proxy,push-by-digest=true,name-canonical=true,push=true \
-              --cache-from type=gha,scope=${{ matrix.platform }} \
-              --cache-to type=gha,mode=max,scope=${{ matrix.platform }} \
-              --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
-              --label org.opencontainers.image.description="kiro2cc-proxy Docker Image" \
+              --output "type=image,name=${IMAGE_REF},push-by-digest=true,name-canonical=true,push=true" \
+              --cache-from type=gha,scope=${{ matrix.name }} \
+              --cache-to type=gha,mode=max,scope=${{ matrix.name }} \
+              "${label_args[@]}" \
               --metadata-file /tmp/metadata.json \
               .
 
       - name: Export digest
         run: |
           mkdir -p /tmp/digests
-          DIGEST=$(jq -r '."containerimage.digest"' /tmp/metadata.json)
-          [[ -n "$DIGEST" && "$DIGEST" != "null" ]] || { echo "::error::failed to extract digest from metadata.json"; exit 1; }
-          touch "/tmp/digests/${DIGEST#sha256:}"
+          digest=$(jq -r '."containerimage.digest"' /tmp/metadata.json)
+          if [[ -z "$digest" || "$digest" == "null" ]]; then
+            echo "::error::failed to read image digest from build metadata"
+            exit 1
+          fi
+          touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.name }}
           path: /tmp/digests/*
@@ -125,43 +107,63 @@ jobs:
           retention-days: 1
 
   merge:
-    needs: [version, build]
+    needs: build
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
 
+      - name: Image reference
+        run: echo "IMAGE_REF=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ github.token }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lowercase owner
-        run: echo "IMAGE_OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      # Branch builds publish `latest`, `local` and `sha-<short>`;
+      # `v*` tags publish the semver tags instead of moving `latest`.
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_REF }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Create manifest list and push
-        env:
-          IMAGE_REF: ghcr.io/${{ env.IMAGE_OWNER }}/kiro2cc-proxy
-          VERSION: ${{ needs.version.outputs.version }}
-          TAG_ALIAS: ${{ needs.version.outputs.is_beta == 'true' && 'beta' || 'latest' }}
         working-directory: /tmp/digests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          docker buildx imagetools create \
-            -t "$IMAGE_REF:$VERSION" \
-            -t "$IMAGE_REF:$TAG_ALIAS" \
-            $(printf "$IMAGE_REF@sha256:%s " *)
+          tag_args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && tag_args+=(-t "$tag")
+          done <<< "$TAGS"
+          sources=()
+          for digest in *; do
+            sources+=("${IMAGE_REF}@sha256:${digest}")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
 
       - name: Inspect image
         env:
-          IMAGE_REF: ghcr.io/${{ env.IMAGE_OWNER }}/kiro2cc-proxy
-          VERSION: ${{ needs.version.outputs.version }}
-        run: docker buildx imagetools inspect "$IMAGE_REF:$VERSION"
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect "${IMAGE_REF}:${VERSION}"
