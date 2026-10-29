@@ -1,13 +1,15 @@
+# The image only needs Cargo.toml, Cargo.lock, src/, assets/ and web-ui/.
+# Cargo.lock must stay in the context: the build uses `cargo build --locked`.
+
 # Rust build artifacts
 target/
-Cargo.lock
 
-# Node.js dependencies and build artifacts
-admin-ui/node_modules/
-admin-ui/dist/
-admin-ui/pnpm-lock.yaml
-admin-ui/tsconfig.tsbuildinfo
-admin-ui/.vite/
+# Node.js dependencies and build artifacts (rebuilt inside the image)
+web-ui/*/node_modules/
+web-ui/*/dist/
+web-ui/*/tsconfig.tsbuildinfo
+web-ui/*/.vite/
+.pnpm-store/
 
 # Version control
 .git/
@@ -22,33 +24,44 @@ admin-ui/.vite/
 
 # Claude/AI
 .claude/
+.playwright-mcp/
 CLAUDE.md
 AGENTS.md
 
 # CI/CD
 .github/
 
-# Documentation and examples
+# Documentation, specs and examples
+docs/
+openspec/
 *.md
-README.md
 config.example.json
+server.env.example
 credentials.example.*.json
 
-# Development and test files
-src/test.rs
-src/debug.rs
-test.json
+# Development scripts and tools
+scripts/
 tools/
+*.sh
+!docker-entrypoint.sh
+*.ps1
+test.json
 
 # OS-specific files
 .DS_Store
 Thumbs.db
 
-# Local configuration (keep templates only)
+# Local configuration and runtime data
+app/
 config.json
-credentials.json
+credentials*.json
+server.env
+.env
+logs/
 
-# Docker files
+# Docker and deployment files
 Dockerfile
 .dockerignore
 docker-compose*.yml
+fly.toml
+kiro2cc-proxy.service
