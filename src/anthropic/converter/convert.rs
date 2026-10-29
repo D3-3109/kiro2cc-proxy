@@ -190,6 +190,7 @@ pub(super) fn convert_request_with_chunking(
         injected_thinking_budget,
         prefix_cached,
         thinking_loss: history_thinking_loss,
+        reasoning_replay: history_reasoning_replay,
     } = build_history(
         req,
         &messages,
@@ -317,6 +318,7 @@ pub(super) fn convert_request_with_chunking(
         effort,
         thinking_budget_tokens: injected_thinking_budget,
         history_thinking_loss,
+        history_reasoning_replay,
     })
 }
 

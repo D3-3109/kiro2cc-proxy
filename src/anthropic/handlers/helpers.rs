@@ -44,6 +44,20 @@ pub(crate) fn thinking_loss(
     .non_empty()
 }
 
+/// 实际回传上游的推理签名：签名被拒后 provider 已剥离全部历史推理，按未回传计
+pub(crate) fn replayed_reasoning(
+    history: crate::anthropic::converter::HistoryReasoningReplay,
+    history_reasoning_stripped: bool,
+) -> crate::model::usage::ReplayedReasoning {
+    if history_reasoning_stripped {
+        return crate::model::usage::ReplayedReasoning::default();
+    }
+    crate::model::usage::ReplayedReasoning {
+        signature_chars: history.signature_chars,
+        blocks: history.blocks,
+    }
+}
+
 /// 去除 JSON 响应中模型可能添加的 Markdown 代码围栏
 ///
 /// 当请求 JSON schema 结构化输出时，部分模型仍会将结果包裹在 ```json...``` 中。

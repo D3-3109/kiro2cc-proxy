@@ -62,6 +62,8 @@ pub(crate) async fn handle_stream_request(
     conversation_id: Option<String>,
     // 历史中没能回传上游的推理（ConversionResult::history_thinking_loss），随 usage 记录入库
     history_thinking_loss: crate::anthropic::converter::HistoryThinkingLoss,
+    // 历史中回传上游的推理签名（ConversionResult::history_reasoning_replay），供 credits 反推
+    history_reasoning_replay: crate::anthropic::converter::HistoryReasoningReplay,
 ) -> Response {
     // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
@@ -131,6 +133,10 @@ pub(crate) async fn handle_stream_request(
             .with_thinking_as_text(thinking_as_text)
             .with_thinking_loss(super::helpers::thinking_loss(
                 history_thinking_loss,
+                history_reasoning_stripped,
+            ))
+            .with_replayed_reasoning(super::helpers::replayed_reasoning(
+                history_reasoning_replay,
                 history_reasoning_stripped,
             ));
 

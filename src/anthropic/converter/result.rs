@@ -39,6 +39,19 @@ pub struct ConversionResult {
     pub thinking_budget_tokens: Option<i32>,
     /// 历史中带推理却没能回传上游的 assistant 轮次
     pub history_thinking_loss: HistoryThinkingLoss,
+    /// 历史中实际回传上游（`reasoningContent`）的推理签名
+    pub history_reasoning_replay: HistoryReasoningReplay,
+}
+
+/// 历史中回传上游的推理签名统计，供 credits 反推估算回传推理的输入计费
+///
+/// 每轮（相邻 assistant 消息合并后）最多回传一块，见 `merge_assistant_messages`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HistoryReasoningReplay {
+    /// 回传签名字符数之和
+    pub signature_chars: usize,
+    /// 回传的推理块数
+    pub blocks: usize,
 }
 
 /// 历史中带推理却没能回传上游（无 `reasoningContent`）的 assistant 轮次统计

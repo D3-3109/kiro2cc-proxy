@@ -4,8 +4,8 @@
 mod tests {
 
     use crate::model::usage::{
-        BilledOutput, RecordLabels, RecordOptions, UsageTracker, calculate_cost, get_k_ref,
-        infer_cache_read_from_credits, refine_prefix_cache_read,
+        BilledOutput, RecordLabels, RecordOptions, ReplayedReasoning, UsageTracker, calculate_cost,
+        get_k_ref, infer_cache_read_from_credits, refine_prefix_cache_read,
     };
 
     /// 每个测试使用独立目录隔离明细文件与累计基数文件（api_key_lifetime.json
@@ -1194,92 +1194,221 @@ mod tests {
         }
     }
 
-    fn hit_ratio(model: &str, input: i32, output: &BilledOutput, credits: f64) -> f64 {
-        infer_cache_read_from_credits(model, input, output, credits).unwrap() as f64 / input as f64
+    const NO_REPLAY: ReplayedReasoning = ReplayedReasoning {
+        signature_chars: 0,
+        blocks: 0,
+    };
+
+    fn hit_ratio(
+        model: &str,
+        input: i32,
+        replayed: &ReplayedReasoning,
+        output: &BilledOutput,
+        credits: f64,
+    ) -> f64 {
+        infer_cache_read_from_credits(model, input, replayed, output, credits).unwrap() as f64
+            / input as f64
     }
 
     #[test]
     fn test_pricing_infer_cache_read_measured_cold_and_repeat() {
-        // pinned 单账号实测（2026-10-26）：冷请求反推≈0，紧接的重复请求反推≈全命中
-        for (model, input, output, credits, expected) in [
-            ("claude-sonnet-5.5", 16_030, 1, 0.32765, 0.0),
-            ("claude-sonnet-5.5", 16_031, 2, 0.08966, 1.0),
-            ("claude-opus-5.5", 16_030, 1, 0.50640, 0.0),
-            ("claude-opus-5.5", 16_031, 2, 0.13857, 1.0),
-            ("claude-opus-5.5", 110_024, 1, 2.99829, 0.0),
-            ("claude-opus-5.5", 110_025, 2, 0.81205, 1.0),
-            ("claude-haiku-5.5", 16_031, 1, 0.04067, 0.0),
-            ("claude-haiku-5.5", 16_032, 2, 0.00479, 1.0),
-            // 长上下文档（> 100K 整单跳价）
-            ("claude-haiku-5.5", 110_028, 1, 1.37346, 0.0),
-            ("claude-haiku-5.5", 110_031, 4, 0.14105, 1.0),
+        // pinned 单账号实测（2026-10-29，Rust 源码 system）：冷请求反推≈0，紧接的重复请求反推≈全命中
+        for (model, input, credits, expected) in [
+            ("claude-opus-5.5", 16_395, 0.33098, 0.0),
+            ("claude-opus-5.5", 16_395, 0.09022, 1.0),
+            ("claude-opus-5.5", 63_593, 1.21847, 0.0),
+            ("claude-opus-5.5", 63_593, 0.33008, 1.0),
+            ("claude-sonnet-5.5", 16_393, 0.21511, 0.0),
+            ("claude-sonnet-5.5", 16_393, 0.05863, 1.0),
+            ("claude-sonnet-5.5", 63_592, 0.79199, 0.0),
+            ("claude-sonnet-5.5", 63_592, 0.21455, 1.0),
+            ("claude-haiku-5.5", 16_394, 0.02911, 0.0),
+            ("claude-haiku-5.5", 16_394, 0.00313, 1.0),
+            ("claude-haiku-5.5", 31_755, 0.05631, 0.0),
+            ("claude-haiku-5.5", 31_755, 0.00585, 1.0),
+            // 长上下文档（整单 5 倍跳价，高于跳档区间只取长档）
+            ("claude-haiku-5.5", 84_101, 0.74489, 0.0),
+            ("claude-haiku-5.5", 84_101, 0.07559, 1.0),
+            ("claude-haiku-5.5", 97_446, 0.86262, 0.0),
+            ("claude-haiku-5.5", 97_446, 0.08736, 1.0),
         ] {
-            let ratio = hit_ratio(model, input, &plain(output), credits);
+            let ratio = hit_ratio(model, input, &NO_REPLAY, &plain(1), credits);
             assert!(
                 (ratio - expected).abs() < 0.03,
                 "{model} input={input}: hit={ratio:.3}, 期望 {expected}"
             );
         }
+    }
 
-        // haiku 常规前缀缓存：S8000 已缓存 + F8000 新增 → 一半命中
-        let ratio = hit_ratio("claude-haiku-5-5", 16_032, &plain(1), 0.02279);
-        assert!((ratio - 0.5).abs() < 0.03, "hit={ratio:.3}");
+    #[test]
+    fn test_pricing_infer_cache_read_haiku_tier_range() {
+        // 跳档区间（本地 60K–80K）内两档都试，只有一档能解释才采用（2026-10-29 实测）
+        // 70834 冷请求已跳长档：常态档解释不了（命中远低于 0），长档 ≈0 命中
+        let long_cold = infer_cache_read_from_credits(
+            "claude-haiku-5-5",
+            70_834,
+            &NO_REPLAY,
+            &plain(1),
+            0.62752,
+        );
+        assert!(long_cold.is_some_and(|read| read < 700), "{long_cold:?}");
+        // 63590 冷请求仍在常态档，但长档 89% 命中也能解释；70834 长档全命中与常态档 55% 命中同价
+        for (input, credits) in [(63_590, 0.11258), (70_834, 0.06385)] {
+            assert_eq!(
+                infer_cache_read_from_credits(
+                    "claude-haiku-5-5",
+                    input,
+                    &NO_REPLAY,
+                    &plain(1),
+                    credits
+                ),
+                None,
+                "input={input}"
+            );
+        }
     }
 
     #[test]
     fn test_pricing_infer_cache_read_hidden_thinking_from_signature() {
-        // opus 5.5 adaptive 多轮（20K system）：首轮冷，其后全命中。
-        // 摘要只有 ~130 tokens，隐藏推理须按签名长度补足，否则续轮被误判部分未命中
-        for (input, tokens, summary, sig, credits, expected) in [
-            (20_346, 132, 124, 2_156, 0.73547, 0.0),
-            (20_695, 157, 156, 2_240, 0.31941, 1.0),
-            (21_018, 137, 136, 2_480, 0.32487, 1.0),
-            (21_718, 103, 76, 2_732, 0.37805, 1.0),
+        // 2026-10-29 实测两轮会话（15K 随机词 system，第 2 轮回传第 1 轮推理）：
+        // 首轮冷、续轮全命中；摘要远少于隐藏推理，须按签名长度补足输出
+        for (model, input, replayed, output, credits, expected) in [
+            (
+                "claude-opus-5-5",
+                14_968,
+                NO_REPLAY,
+                reasoning(61, 60, 792),
+                0.33091,
+                0.0,
+            ),
+            (
+                "claude-opus-5-5",
+                15_008,
+                ReplayedReasoning {
+                    signature_chars: 792,
+                    blocks: 1,
+                },
+                reasoning(49, 48, 932),
+                0.10692,
+                1.0,
+            ),
+            (
+                "claude-haiku-5-5",
+                14_997,
+                NO_REPLAY,
+                reasoning(66, 65, 1_096),
+                0.02874,
+                0.0,
+            ),
+            (
+                "claude-haiku-5-5",
+                15_037,
+                ReplayedReasoning {
+                    signature_chars: 1_096,
+                    blocks: 1,
+                },
+                reasoning(67, 66, 1_196),
+                0.00421,
+                1.0,
+            ),
         ] {
-            let output = reasoning(tokens, summary, sig);
-            let ratio = hit_ratio("claude-opus-5-5", input, &output, credits);
+            let ratio = hit_ratio(model, input, &replayed, &output, credits);
             assert!(
                 (ratio - expected).abs() < 0.1,
-                "input={input}: hit={ratio:.3}, 期望 {expected}"
+                "{model} input={input}: hit={ratio:.3}, 期望 {expected}"
             );
         }
-        let sonnet = hit_ratio(
-            "claude-sonnet-5-5",
-            20_690,
-            &reasoning(140, 139, 1_524),
-            0.17421,
-        );
-        assert!((sonnet - 1.0).abs() < 0.05, "hit={sonnet:.3}");
-
-        // 只按摘要计输出会把全命中的续轮误判为约 79% 命中
-        let summary_only = hit_ratio("claude-opus-5-5", 20_695, &plain(157), 0.31941);
-        assert!(summary_only < 0.85, "hit={summary_only:.3}");
 
         // 有推理摘要却无签名：隐藏输出不可估算，跳过反推
         let unsigned = BilledOutput {
             signature_blocks: 0,
             signature_chars: 0,
-            ..reasoning(157, 156, 0)
+            ..reasoning(49, 48, 0)
         };
         assert_eq!(
-            infer_cache_read_from_credits("claude-opus-5-5", 20_695, &unsigned, 0.31941),
+            infer_cache_read_from_credits(
+                "claude-opus-5-5",
+                15_008,
+                &NO_REPLAY,
+                &unsigned,
+                0.10692
+            ),
             None
         );
         assert_eq!(
-            refine_prefix_cache_read("claude-opus-5-5", 20_000, 20_695, &unsigned, Some(0.31941)),
-            20_000
+            refine_prefix_cache_read(
+                "claude-opus-5-5",
+                14_000,
+                15_008,
+                &NO_REPLAY,
+                &unsigned,
+                Some(0.10692)
+            ),
+            14_000
+        );
+    }
+
+    #[test]
+    fn test_pricing_infer_cache_read_replayed_reasoning_as_input() {
+        // sonnet 120K 输入、历史回传 20 块各 3000 字符签名，按曲线构造全命中 credits：
+        // 回传推理折合约 2 万输入 token，忽略它会把全命中误判为约 94% 命中
+        let replayed = ReplayedReasoning {
+            signature_chars: 60_000,
+            blocks: 20,
+        };
+        let replay_input = 1.48 * (0.2672 * 60_000.0 - 110.1 * 20.0);
+        let input_mtok = (120_000.0 + replay_input) / 1_000_000.0;
+        let credits = 0.00454 + 3.303 * input_mtok + 208.0 * 200.0 / 1_000_000.0;
+        assert_eq!(
+            refine_prefix_cache_read(
+                "claude-sonnet-5-5",
+                119_000,
+                120_000,
+                &replayed,
+                &plain(200),
+                Some(credits)
+            ),
+            119_000
+        );
+        let ignored = hit_ratio(
+            "claude-sonnet-5-5",
+            120_000,
+            &NO_REPLAY,
+            &plain(200),
+            credits,
+        );
+        assert!((0.92..0.96).contains(&ignored), "hit={ignored:.3}");
+
+        // opus 回传推理不计费：同样的回传对反推无影响
+        let opus_credits = 0.00696 + 5.081 * 0.05 + 350.0 * 200.0 / 1_000_000.0;
+        assert_eq!(
+            infer_cache_read_from_credits(
+                "claude-opus-5-5",
+                50_000,
+                &replayed,
+                &plain(200),
+                opus_credits
+            ),
+            infer_cache_read_from_credits(
+                "claude-opus-5-5",
+                50_000,
+                &NO_REPLAY,
+                &plain(200),
+                opus_credits
+            ),
         );
     }
 
     #[test]
     fn test_pricing_refine_prefix_cache_read_partial_and_capped() {
-        // 按计费曲线构造：haiku 53776 输入中 21000 命中、346 输出 → credits 0.090389
+        // 按计费曲线构造：haiku 53776 输入中 21000 命中、346 输出 → credits 0.064747
         let refined = refine_prefix_cache_read(
             "claude-haiku-5-5",
             53_650,
             53_776,
+            &NO_REPLAY,
             &plain(346),
-            Some(0.090389),
+            Some(0.064747),
         );
         assert!((20_900..=21_100).contains(&refined), "实际: {refined}");
 
@@ -1289,15 +1418,23 @@ mod tests {
                 "claude-haiku-5-5",
                 52_000,
                 53_776,
+                &NO_REPLAY,
                 &plain(346),
-                Some(0.0145)
+                Some(0.0127)
             ),
             52_000
         );
 
         // 全未命中（冷价）→ 下修为 0
         assert_eq!(
-            refine_prefix_cache_read("claude-haiku-5-5", 53_650, 53_776, &plain(0), Some(0.1345)),
+            refine_prefix_cache_read(
+                "claude-haiku-5-5",
+                53_650,
+                53_776,
+                &NO_REPLAY,
+                &plain(0),
+                Some(0.0953)
+            ),
             0
         );
     }
@@ -1307,7 +1444,13 @@ mod tests {
         // credits 远超全未命中价 / 远低于全命中价：模型无法解释，返回 None 而非截成 0 或满额
         for credits in [9.99, 0.001] {
             assert_eq!(
-                infer_cache_read_from_credits("claude-opus-5-5", 50_000, &plain(500), credits),
+                infer_cache_read_from_credits(
+                    "claude-opus-5-5",
+                    50_000,
+                    &NO_REPLAY,
+                    &plain(500),
+                    credits
+                ),
                 None,
                 "credits={credits}"
             );
@@ -1316,6 +1459,7 @@ mod tests {
                     "claude-opus-5-5",
                     45_000,
                     50_000,
+                    &NO_REPLAY,
                     &plain(500),
                     Some(credits)
                 ),
@@ -1328,16 +1472,37 @@ mod tests {
     fn test_pricing_infer_cache_read_boundaries() {
         // 首轮 / history[0] 重置门控（prefix_estimated == 0）→ 无论 credits 多低均锁定为 0
         assert_eq!(
-            refine_prefix_cache_read("claude-haiku-5-5", 0, 50_000, &plain(100), Some(0.001)),
+            refine_prefix_cache_read(
+                "claude-haiku-5-5",
+                0,
+                50_000,
+                &NO_REPLAY,
+                &plain(100),
+                Some(0.001)
+            ),
             0
         );
         // 短输入（< 4096）跳过反推，保留静态前缀估算
         assert_eq!(
-            refine_prefix_cache_read("claude-haiku-5-5", 4_000, 4_095, &plain(0), Some(0.0108)),
+            refine_prefix_cache_read(
+                "claude-haiku-5-5",
+                4_000,
+                4_095,
+                &NO_REPLAY,
+                &plain(0),
+                Some(0.0074)
+            ),
             4_000
         );
         assert_eq!(
-            refine_prefix_cache_read("claude-haiku-5-5", 4_000, 4_096, &plain(0), Some(0.0111)),
+            refine_prefix_cache_read(
+                "claude-haiku-5-5",
+                4_000,
+                4_096,
+                &NO_REPLAY,
+                &plain(0),
+                Some(0.0074)
+            ),
             0
         );
         // 未标定模型（GPT / 5.5 以外的 Claude）跳过反推，保留静态前缀估算
@@ -1348,18 +1513,25 @@ mod tests {
             "claude-fable-5",
         ] {
             assert_eq!(
-                infer_cache_read_from_credits(model, 50_000, &plain(100), 0.3),
+                infer_cache_read_from_credits(model, 50_000, &NO_REPLAY, &plain(100), 0.3),
                 None,
                 "{model}"
             );
             assert_eq!(
-                refine_prefix_cache_read(model, 40_000, 50_000, &plain(100), Some(0.3)),
+                refine_prefix_cache_read(model, 40_000, 50_000, &NO_REPLAY, &plain(100), Some(0.3)),
                 40_000
             );
         }
         // 无 meteringEvent 时保留静态前缀估算
         assert_eq!(
-            refine_prefix_cache_read("claude-haiku-5-5", 40_000, 50_000, &plain(100), None),
+            refine_prefix_cache_read(
+                "claude-haiku-5-5",
+                40_000,
+                50_000,
+                &NO_REPLAY,
+                &plain(100),
+                None
+            ),
             40_000
         );
     }

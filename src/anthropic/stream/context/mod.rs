@@ -104,6 +104,8 @@ pub struct StreamContext {
     thinking_budget_tokens: Option<i32>,
     /// 历史推理丢失情况，随 usage 记录入库
     thinking_loss: Option<crate::model::usage::ThinkingLoss>,
+    /// 历史中回传上游的推理签名，供 credits 反推
+    replayed_reasoning: crate::model::usage::ReplayedReasoning,
     /// 思考文本化转换器（None = 关闭，出站事件原样输出）
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
     /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
@@ -166,6 +168,7 @@ impl StreamContext {
             effort: None,
             thinking_budget_tokens: None,
             thinking_loss: None,
+            replayed_reasoning: Default::default(),
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
             request_started_at: None,
             first_token_at: None,
@@ -256,6 +259,15 @@ impl StreamContext {
         self
     }
 
+    /// 设置历史中回传上游的推理签名（credits 反推计入回传推理的输入计费）
+    pub fn with_replayed_reasoning(
+        mut self,
+        replayed: crate::model::usage::ReplayedReasoning,
+    ) -> Self {
+        self.replayed_reasoning = replayed;
+        self
+    }
+
     /// 设置用量追踪
     pub fn with_usage_tracking(
         mut self,
@@ -313,6 +325,7 @@ impl StreamContext {
                 &self.model,
                 prefix,
                 input_tokens,
+                &self.replayed_reasoning,
                 billed_output,
                 if self.has_continuation {
                     None
@@ -1020,6 +1033,7 @@ impl StreamContext {
             &self.model,
             self.prefix_estimated_tokens.unwrap_or(0),
             final_input_tokens,
+            &self.replayed_reasoning,
             &billed_output,
             self.metering_usage,
             // 与 derive_report_cache_usage 同口径：read+creation 双 Some 才算完整
