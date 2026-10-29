@@ -570,7 +570,7 @@ pub(crate) async fn bridge_execute_round(
                             )
                             .await
                         {
-                            Ok((response, _credential_id)) => {
+                            Ok(crate::kiro::provider::ApiResponse { response, .. }) => {
                                 tracing::info!(
                                     tool_use_id = %pending.tool_use_id,
                                     "web_search 续请求完整配对重试成功"
