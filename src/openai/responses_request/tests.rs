@@ -85,6 +85,35 @@ mod tests {
     }
 
     #[test]
+    fn signed_reasoning_item_becomes_leading_thinking_block() {
+        let r = convert_ok(json!({
+            "model": "gpt-5-codex",
+            "input": [
+                {"type": "message", "role": "user", "content": "看看目录"},
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "先 ls"}],
+                 "encrypted_content": "kiro2cc.v1:SIG"},
+                {"type": "function_call", "call_id": "c1", "name": "ls", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "c1", "output": "a.txt"},
+                // 他家的加密推理无法回传，丢弃
+                {"type": "reasoning", "summary": [], "encrypted_content": "gAAAAABfoo"},
+                {"type": "message", "role": "assistant", "content": "只有 a.txt"},
+            ],
+        }));
+        let messages = &r.anthropic_body["messages"];
+        assert_eq!(
+            messages[1],
+            json!({"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "先 ls", "signature": "SIG"},
+                {"type": "tool_use", "id": "c1", "name": "ls", "input": {}},
+            ]})
+        );
+        assert_eq!(
+            messages[3],
+            json!({"role": "assistant", "content": [{"type": "text", "text": "只有 a.txt"}]})
+        );
+    }
+
+    #[test]
     fn rejects_stateful_request_with_previous_response_id() {
         let err = convert(&json!({
             "model": "gpt-5-codex",

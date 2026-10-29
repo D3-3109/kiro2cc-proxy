@@ -4,18 +4,25 @@
 use serde_json::{Value, json};
 
 use super::nonstream::{convert_usage, map_finish_reason, new_completion_id, unix_now};
+use crate::openai::reasoning::{is_replayable_signature, reasoning_detail};
 
 /// Anthropic `content_block_delta` 中允许透传的 `delta.type` 白名单
 ///
 /// **必须按 `delta.type` 过滤，而不是"落在 thinking 块上的 delta 都算推理增量"**：
-/// `src/anthropic/stream.rs` 会在 thinking 块的 `content_block_stop` 之前注入一个
-/// `signature_delta`，其内容是为通过下游检测伪造的 ≥100 字符无语义串。若按块类型
-/// 归类，这串签名会被拼进 `reasoning_content` 变成乱码。
+/// thinking 块在 `content_block_stop` 之前会带 `signature_delta`。若按块类型归类，
+/// 签名会被拼进 `reasoning_content` 变成乱码。
 pub(crate) const TEXT_DELTA: &str = "text_delta";
 pub(crate) const THINKING_DELTA: &str = "thinking_delta";
 pub(crate) const INPUT_JSON_DELTA: &str = "input_json_delta";
-/// 常规注入、无需留痕的 delta 类型（丢弃且不记 WARN，避免每轮 thinking 产生噪声）
+/// thinking 块的签名（真实或代理伪造），块收尾时整体判断是否下发
 pub(crate) const SIGNATURE_DELTA: &str = "signature_delta";
+
+/// 一个尚未收尾的 thinking 块：收尾时以完整文本 + 签名组成一项 `reasoning_details`
+#[derive(Default)]
+struct PendingThinking {
+    text: String,
+    signature: String,
+}
 
 ///
 /// 逐事件喂入 [`ChatStreamConverter::on_event`]，返回若干条待下发的 SSE 帧文本
@@ -33,6 +40,10 @@ pub(crate) struct ChatStreamConverter {
     /// Anthropic block index → OpenAI tool_calls index
     tool_index_by_block: std::collections::HashMap<i64, usize>,
     next_tool_index: usize,
+    /// Anthropic block index → 累积中的 thinking 块
+    thinking_by_block: std::collections::HashMap<i64, PendingThinking>,
+    /// 下一项 `reasoning_details` 的 index
+    next_detail_index: usize,
     finish_reason: &'static str,
     usage: Option<Value>,
 }
@@ -49,6 +60,8 @@ impl ChatStreamConverter {
             done_sent: false,
             tool_index_by_block: std::collections::HashMap::new(),
             next_tool_index: 0,
+            thinking_by_block: std::collections::HashMap::new(),
+            next_detail_index: 0,
             finish_reason: "stop",
             usage: None,
         }
@@ -60,8 +73,8 @@ impl ChatStreamConverter {
             "message_start" => self.ensure_role_frame(),
             "content_block_start" => self.on_block_start(data),
             "content_block_delta" => self.on_block_delta(data),
-            // 块级收尾在 OpenAI 协议里没有对应事件
-            "content_block_stop" => Vec::new(),
+            // 块级收尾在 OpenAI 协议里没有对应事件，只有带签名的 thinking 块要下发 reasoning_details
+            "content_block_stop" => self.on_block_stop(data),
             "message_delta" => {
                 if let Some(reason) = data
                     .get("delta")
@@ -213,6 +226,11 @@ impl ChatStreamConverter {
                 if text.is_empty() {
                     return Vec::new();
                 }
+                self.thinking_by_block
+                    .entry(block_index(data))
+                    .or_default()
+                    .text
+                    .push_str(text);
                 let mut frames = self.ensure_role_frame();
                 frames.push(self.frame(json!([{
                     "index": 0,
@@ -246,13 +264,44 @@ impl ChatStreamConverter {
                 }])));
                 frames
             }
-            // 伪造签名：丢弃且不留痕（每个 thinking 块都会注入一次）
-            SIGNATURE_DELTA => Vec::new(),
+            SIGNATURE_DELTA => {
+                let part = delta
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.thinking_by_block
+                    .entry(block_index(data))
+                    .or_default()
+                    .signature
+                    .push_str(part);
+                Vec::new()
+            }
             other => {
                 tracing::warn!(delta_type = %other, "未识别的 content_block_delta 类型，已跳过");
                 Vec::new()
             }
         }
+    }
+
+    /// thinking 块收尾：签名可回传时下发一项完整的 `reasoning_details`（文本已随
+    /// `reasoning_content` 流式下发过，这里再给一份与签名配对的全文）
+    fn on_block_stop(&mut self, data: &Value) -> Vec<String> {
+        let Some(thinking) = self.thinking_by_block.remove(&block_index(data)) else {
+            return Vec::new();
+        };
+        if !is_replayable_signature(&thinking.signature) {
+            return Vec::new();
+        }
+        let detail = reasoning_detail(&thinking.text, &thinking.signature, self.next_detail_index);
+        self.next_detail_index += 1;
+
+        let mut frames = self.ensure_role_frame();
+        frames.push(self.frame(json!([{
+            "index": 0,
+            "delta": {"reasoning_details": [detail]},
+            "finish_reason": Value::Null,
+        }])));
+        frames
     }
 
     /// 取或分配某个上游 block 对应的 `tool_calls` index，保证同一块在整个流中稳定
@@ -292,4 +341,9 @@ impl ChatStreamConverter {
             })
         )
     }
+}
+
+/// 事件所属的上游 block index
+fn block_index(data: &Value) -> i64 {
+    data.get("index").and_then(Value::as_i64).unwrap_or(0)
 }

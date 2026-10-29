@@ -4,6 +4,8 @@
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
+use crate::openai::reasoning::{is_replayable_signature, reasoning_detail};
+
 /// 生成 `chatcmpl-<32位hex>` 形式的响应 id
 pub(crate) fn new_completion_id() -> String {
     format!("chatcmpl-{}", Uuid::new_v4().simple())
@@ -39,14 +41,14 @@ pub(crate) fn map_finish_reason(stop_reason: Option<&str>) -> &'static str {
 struct ExtractedContent {
     text: String,
     reasoning: String,
+    /// 带可回传签名的 thinking 块，每块一项
+    reasoning_details: Vec<Value>,
     tool_calls: Vec<Value>,
 }
 
 /// 遍历 Anthropic content 数组，按块类型分拣
 ///
-/// `thinking` 块的 `signature` 字段是为通过下游检测伪造的无语义串
-/// （`src/anthropic/stream.rs` 的 `generate_fake_signature`），只取 `thinking` 文本，
-/// 绝不把签名混进任何面向客户端的字段。
+/// 代理伪造的签名不进入任何面向客户端的字段。
 fn extract_content(content: Option<&Value>) -> ExtractedContent {
     let mut out = ExtractedContent::default();
     let Some(blocks) = content.and_then(Value::as_array) else {
@@ -65,8 +67,19 @@ fn extract_content(content: Option<&Value>) -> ExtractedContent {
                 }
             }
             "thinking" => {
-                if let Some(t) = block.get("thinking").and_then(Value::as_str) {
-                    out.reasoning.push_str(t);
+                let text = block
+                    .get("thinking")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                out.reasoning.push_str(text);
+                if let Some(signature) = block
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .filter(|s| is_replayable_signature(s))
+                {
+                    let index = out.reasoning_details.len();
+                    out.reasoning_details
+                        .push(reasoning_detail(text, signature, index));
                 }
             }
             "tool_use" => {
@@ -161,6 +174,12 @@ pub(crate) fn convert_non_stream(anthropic: &Value, client_model: &str) -> Value
     );
     if !extracted.reasoning.is_empty() {
         message.insert("reasoning_content".to_string(), json!(extracted.reasoning));
+    }
+    if !extracted.reasoning_details.is_empty() {
+        message.insert(
+            "reasoning_details".to_string(),
+            json!(extracted.reasoning_details),
+        );
     }
     if !extracted.tool_calls.is_empty() {
         message.insert("tool_calls".to_string(), json!(extracted.tool_calls));

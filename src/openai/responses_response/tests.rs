@@ -292,7 +292,9 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_stream_uses_distinct_output_index_and_hides_signature() {
+    fn reasoning_stream_uses_distinct_output_index_and_hides_fake_signature() {
+        let fake_signature = crate::anthropic::generate_fake_signature();
+        let (head, tail) = fake_signature.split_at(40);
         let frames = run_stream(&[
             ("message_start", json!({"message": {"id": "msg_up"}})),
             (
@@ -303,9 +305,14 @@ mod tests {
                 "content_block_delta",
                 json!({"index": 0, "delta": {"type": "thinking_delta", "thinking": "先看文件"}}),
             ),
+            // 伪造签名分段到达，拼起来才能认出
             (
                 "content_block_delta",
-                json!({"index": 0, "delta": {"type": "signature_delta", "signature": "A".repeat(120)}}),
+                json!({"index": 0, "delta": {"type": "signature_delta", "signature": head}}),
+            ),
+            (
+                "content_block_delta",
+                json!({"index": 0, "delta": {"type": "signature_delta", "signature": tail}}),
             ),
             ("content_block_stop", json!({"index": 0})),
             (
@@ -349,8 +356,111 @@ mod tests {
 
         // 伪造签名不得出现在任何下发帧中
         let joined = frames.concat();
-        assert!(!joined.contains(&"A".repeat(100)));
-        assert!(!joined.contains("signature"));
+        assert!(!joined.contains(head) && !joined.contains(tail));
+        assert!(!joined.contains("encrypted_content"));
+    }
+
+    /// 上游真实签名的形态：远长于伪造签名
+    fn real_signature() -> String {
+        "EqQBCkYIBhgCKkA".repeat(64)
+    }
+
+    fn signature_delta(index: i64, signature: &str) -> (&'static str, Value) {
+        (
+            "content_block_delta",
+            json!({"index": index, "delta": {"type": "signature_delta", "signature": signature}}),
+        )
+    }
+
+    #[test]
+    fn reasoning_stream_carries_real_signature_as_encrypted_content() {
+        let signature = real_signature();
+        let frames = run_stream(&[
+            ("message_start", json!({"message": {"id": "msg_up"}})),
+            (
+                "content_block_start",
+                json!({"index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+            ),
+            (
+                "content_block_delta",
+                json!({"index": 0, "delta": {"type": "thinking_delta", "thinking": "先看文件"}}),
+            ),
+            signature_delta(0, &signature),
+            ("content_block_stop", json!({"index": 0})),
+            ("message_stop", json!({})),
+        ]);
+
+        let parsed = parse_all(&frames);
+        let expected = json!(format!("kiro2cc.v1:{signature}"));
+        let done = parsed
+            .iter()
+            .find(|(n, _)| n == "response.output_item.done")
+            .expect("缺少 output_item.done");
+        assert_eq!(done.1["item"]["encrypted_content"], expected);
+        assert_eq!(
+            done.1["item"]["summary"],
+            json!([{"type": "summary_text", "text": "先看文件"}])
+        );
+        let completed = &parsed.last().unwrap().1["response"];
+        assert_eq!(completed["output"][0]["encrypted_content"], expected);
+    }
+
+    #[test]
+    fn signature_only_thinking_block_yields_reasoning_item_without_summary() {
+        let signature = real_signature();
+        let frames = run_stream(&[
+            ("message_start", json!({"message": {"id": "msg_up"}})),
+            (
+                "content_block_start",
+                json!({"index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+            ),
+            signature_delta(0, &signature),
+            ("content_block_stop", json!({"index": 0})),
+            (
+                "content_block_delta",
+                json!({"index": 1, "delta": {"type": "text_delta", "text": "结论"}}),
+            ),
+            ("content_block_stop", json!({"index": 1})),
+            ("message_stop", json!({})),
+        ]);
+
+        let names = event_names(&frames);
+        assert_eq!(
+            &names[2..4],
+            ["response.output_item.added", "response.output_item.done"]
+        );
+        assert!(!names.iter().any(|n| n.contains("reasoning_summary")));
+
+        let parsed = parse_all(&frames);
+        let item = &parsed[3].1["item"];
+        assert_eq!(item["type"], "reasoning");
+        assert_eq!(item["summary"], json!([]));
+        assert_eq!(
+            item["encrypted_content"],
+            json!(format!("kiro2cc.v1:{signature}"))
+        );
+    }
+
+    #[test]
+    fn fake_signature_only_thinking_block_yields_no_item() {
+        let frames = run_stream(&[
+            ("message_start", json!({"message": {"id": "msg_up"}})),
+            (
+                "content_block_start",
+                json!({"index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+            ),
+            signature_delta(0, &crate::anthropic::generate_fake_signature()),
+            ("content_block_stop", json!({"index": 0})),
+            ("message_stop", json!({})),
+        ]);
+        assert_eq!(
+            event_names(&frames),
+            vec![
+                "response.created",
+                "response.in_progress",
+                "response.completed"
+            ]
+        );
     }
 
     #[test]
@@ -738,10 +848,11 @@ mod tests {
 
     #[test]
     fn thinking_becomes_reasoning_item_ahead_of_message() {
+        let fake_signature = crate::anthropic::generate_fake_signature();
         let out = convert_non_stream(
             &json!({
                 "content": [
-                    {"type": "thinking", "thinking": "先看目录", "signature": "A".repeat(120)},
+                    {"type": "thinking", "thinking": "先看目录", "signature": fake_signature},
                     {"type": "text", "text": "结论"},
                 ],
                 "stop_reason": "end_turn",
@@ -761,8 +872,34 @@ mod tests {
 
         // 伪造签名不得出现在任何位置
         let serialized = out.to_string();
-        assert!(!serialized.contains(&"A".repeat(100)));
-        assert!(!serialized.contains("signature"));
+        assert!(!serialized.contains(&fake_signature));
+        assert!(output[0].get("encrypted_content").is_none());
+    }
+
+    #[test]
+    fn non_stream_reasoning_item_carries_last_real_signature() {
+        let (first, last) = (real_signature(), format!("{}Z", real_signature()));
+        let out = convert_non_stream(
+            &json!({
+                "content": [
+                    {"type": "thinking", "thinking": "第一轮", "signature": first},
+                    {"type": "thinking", "thinking": "", "signature": last},
+                    {"type": "text", "text": "结论"},
+                ],
+                "stop_reason": "end_turn",
+            }),
+            "gpt-5-codex",
+        );
+        let reasoning = &out["output"][0];
+        assert_eq!(reasoning["type"], "reasoning");
+        assert_eq!(
+            reasoning["summary"],
+            json!([{"type": "summary_text", "text": "第一轮"}])
+        );
+        assert_eq!(
+            reasoning["encrypted_content"],
+            json!(format!("kiro2cc.v1:{last}"))
+        );
     }
 
     #[test]

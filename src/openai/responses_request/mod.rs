@@ -18,7 +18,8 @@
 //!
 //! - `previous_response_id`：本代理无状态（不存储任何一轮响应），无法按 id 续接上下文。
 //!   非空时直接 400，而不是静默丢弃后返回一个"忘记了前文"的回答。
-//! - `include` 的 `reasoning.encrypted_content`：上游不产出加密推理内容，静默忽略。
+//! - `include` 的 `reasoning.encrypted_content`：响应侧总是附带签名编码的
+//!   `encrypted_content`（见 [`super::reasoning`]），无需按此开关，静默忽略。
 //!   Codex CLI 每轮都会带上它，WARN 会变成刷屏噪声。
 //! - `store` / `parallel_tool_calls` / `temperature` / `top_p` / `text.verbosity` /
 //!   `truncation`：Kiro 上游无对应入参，一并忽略（与 `chat_request` 的处理一致）。

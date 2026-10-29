@@ -16,6 +16,7 @@
 use serde_json::{Value, json};
 
 use super::model_map::map_model;
+use super::reasoning::thinking_blocks_from_details;
 
 /// 未指定 `max_tokens` 时的默认值，与 `/v1/models` 对外声明的 `max_tokens` 一致
 pub(super) const DEFAULT_MAX_TOKENS: i64 = 32000;
@@ -297,12 +298,12 @@ fn parse_data_url(url: &str) -> Option<(String, String)> {
     Some((media_type.to_string(), data.to_string()))
 }
 
-/// 转换 assistant 消息（文本 + tool_calls）
+/// 转换 assistant 消息（推理 + 文本 + tool_calls）
 ///
-/// 历史 `reasoning_content` 不回传：thinking block 需要配套签名，伪造签名回传给上游
-/// 只会增加被拒风险，而丢弃它不影响后续对话。
+/// 推理只认带签名的 `reasoning_details`（见 [`super::reasoning`]），放在最前面；
+/// 纯文本的 `reasoning_content` 没有签名，上游用不了，不回传。
 fn convert_assistant_message(msg: &Value) -> Vec<Value> {
-    let mut blocks = Vec::new();
+    let mut blocks = thinking_blocks_from_details(msg.get("reasoning_details"));
 
     match msg.get("content") {
         Some(Value::String(s)) if !s.is_empty() => {
@@ -677,6 +678,34 @@ mod tests {
             json!([
                 {"type": "text", "text": "让我查一下"},
                 {"type": "tool_use", "id": "t1", "name": "f", "input": {"k": 1}},
+            ])
+        );
+    }
+
+    #[test]
+    fn signed_reasoning_details_become_leading_thinking_blocks() {
+        let real_signature = "EqQBCkYIBhgCKkA".repeat(64);
+        let fake_signature = crate::anthropic::generate_fake_signature();
+        let r = convert_ok(json!({
+            "model": "gpt-5-codex",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "好", "reasoning_content": "想一想",
+                 "reasoning_details": [
+                    {"type": "reasoning.text", "text": "想一想", "signature": real_signature,
+                     "format": "anthropic-claude-v1", "index": 0},
+                    // 无签名、伪造签名、其他类型都不回传
+                    {"type": "reasoning.text", "text": "无签名", "index": 1},
+                    {"type": "reasoning.text", "text": "伪造", "signature": fake_signature, "index": 2},
+                    {"type": "reasoning.encrypted", "data": "xxx", "index": 3},
+                ]},
+            ],
+        }));
+        assert_eq!(
+            r.anthropic_body["messages"][1]["content"],
+            json!([
+                {"type": "thinking", "thinking": "想一想", "signature": real_signature},
+                {"type": "text", "text": "好"},
             ])
         );
     }

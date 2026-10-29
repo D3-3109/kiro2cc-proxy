@@ -23,6 +23,7 @@ mod chat_response;
 mod error;
 mod handlers;
 mod model_map;
+mod reasoning;
 mod responses_request;
 mod responses_response;
 mod sse;

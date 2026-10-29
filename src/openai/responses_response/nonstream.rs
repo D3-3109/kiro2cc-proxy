@@ -23,8 +23,8 @@
 //! # reasoning 的处理
 //!
 //! 上游 thinking 文本会作为 `type: "reasoning"` item 放在 `output` 首位（与 OpenAI 的
-//! 顺序一致），但不带 `encrypted_content`——本代理产不出可回传的加密推理内容，客户端
-//! 把它原样回传时会被 [`super::responses_request`] 静默丢弃。
+//! 顺序一致）。带真实签名时附 `encrypted_content`（编码见 [`crate::openai::reasoning`]），
+//! 客户端原样回传后由 [`super::responses_request`] 还原为 thinking 块。
 
 use std::collections::HashSet;
 
@@ -32,6 +32,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::super::chat_response::unix_now;
+use crate::openai::reasoning::{encode_encrypted_content, is_replayable_signature};
 use crate::openai::responses_request::NamespaceMap;
 
 /// 生成 `<prefix>_<32位hex>` 形式的 id
@@ -95,14 +96,13 @@ pub(crate) fn convert_usage(usage: Option<&Value>) -> Value {
 struct ExtractedContent {
     text: String,
     reasoning: String,
+    /// 最后一个可回传的 thinking 签名：它覆盖到该轮结束的推理，与历史回传的取法一致
+    reasoning_signature: Option<String>,
     /// 已转换为 Responses `function_call` / `custom_tool_call` item 的工具调用
     tool_calls: Vec<Value>,
 }
 
 /// 遍历 Anthropic content 数组，按块类型分拣
-///
-/// `thinking` 块的 `signature` 字段是为通过下游检测伪造的无语义串
-/// （`src/anthropic/stream.rs` 的 `generate_fake_signature`），只取 `thinking` 文本。
 fn extract_content(
     content: Option<&Value>,
     custom_tools: &HashSet<String>,
@@ -127,6 +127,13 @@ fn extract_content(
             "thinking" => {
                 if let Some(t) = block.get("thinking").and_then(Value::as_str) {
                     out.reasoning.push_str(t);
+                }
+                if let Some(s) = block
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .filter(|s| is_replayable_signature(s))
+                {
+                    out.reasoning_signature = Some(s.to_string());
                 }
             }
             "tool_use" => {
@@ -231,13 +238,20 @@ fn message_item(text: &str) -> Value {
     })
 }
 
-/// 构造一个 `type: "reasoning"` 的 output item
-fn reasoning_item(text: &str) -> Value {
-    json!({
-        "type": "reasoning",
-        "id": new_id("rs"),
-        "summary": [{"type": "summary_text", "text": text}],
-    })
+/// 构造一个已完成的 `type: "reasoning"` output item
+///
+/// 只有签名、没有摘要文本的推理（上游常见）给空 `summary`，与 OpenAI 不要摘要时的形态一致。
+pub(crate) fn reasoning_item(id: String, text: &str, signature: Option<&str>) -> Value {
+    let summary = if text.is_empty() {
+        json!([])
+    } else {
+        json!([{"type": "summary_text", "text": text}])
+    };
+    let mut item = json!({"type": "reasoning", "id": id, "summary": summary});
+    if let Some(signature) = signature {
+        item["encrypted_content"] = json!(encode_encrypted_content(signature));
+    }
+    item
 }
 
 /// 把 Anthropic 非流式响应转换为 Responses `response` 对象
@@ -289,8 +303,13 @@ fn convert_non_stream_inner(
         }
         output.push(compaction_item(summary));
     } else {
-        if !extracted.reasoning.is_empty() {
-            output.push(reasoning_item(&extracted.reasoning));
+        let signature = extracted.reasoning_signature.as_deref();
+        if !extracted.reasoning.is_empty() || signature.is_some() {
+            output.push(reasoning_item(
+                new_id("rs"),
+                &extracted.reasoning,
+                signature,
+            ));
         }
         // 只有工具调用、没有可见文本时不产出空的 message item
         if !extracted.text.is_empty() {

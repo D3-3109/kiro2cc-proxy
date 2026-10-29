@@ -11,6 +11,7 @@ use super::tools::{
 use crate::openai::chat_request::{
     MessageAccumulator, convert_image_url, flatten_text, parse_tool_arguments, part_text,
 };
+use crate::openai::reasoning::{decode_encrypted_content, thinking_block};
 
 /// 遍历 `input` 数组，把各类 item 分派到 system 块、消息累加器或工具收集器
 ///
@@ -58,10 +59,14 @@ pub(crate) fn convert_input_items(
                     tools.push_list(list, 0);
                 }
             }
-            // Codex 会把上一轮的 reasoning item 原样回传。Anthropic 的 thinking 块需要配套
-            // 签名，伪造签名回传只会增加被上游拒的风险；丢弃它不影响后续对话，故静默跳过
+            // Codex 会把上一轮的 reasoning item 原样回传。带本代理签名的还原为 thinking 块，
+            // 让上游看到上一轮的推理；其余（无签名、他家的加密内容）无法回传，静默跳过
             // （每轮都出现，WARN 会成噪声）。
-            "reasoning" => {}
+            "reasoning" => {
+                if let Some(block) = reasoning_thinking_block(item) {
+                    acc.push("assistant", vec![block]);
+                }
+            }
             // Codex remote compaction v2：客户端在 input 末尾追加该 item 触发服务端压缩。
             // 上游（Kiro/Anthropic 协议）不支持此机制；由代理层拦截并在响应侧模拟。
             // 把标志位置为 true；来自上游的真实请求内容（其余 input items）已正常转换。
@@ -155,6 +160,20 @@ fn convert_content_part(part: &Value) -> Option<Value> {
             None
         }
     }
+}
+
+/// 带本代理签名的 `reasoning` item → Anthropic thinking 块（摘要文本 + 签名）
+fn reasoning_thinking_block(item: &Value) -> Option<Value> {
+    let encrypted = item.get("encrypted_content").and_then(Value::as_str)?;
+    let signature = decode_encrypted_content(encrypted)?;
+    let text: String = item
+        .get("summary")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect();
+    Some(thinking_block(&text, signature))
 }
 
 /// `function_call` / `custom_tool_call` → Anthropic `tool_use` block

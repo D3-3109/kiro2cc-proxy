@@ -168,10 +168,11 @@ mod tests {
     }
 
     #[test]
-    fn thinking_goes_to_reasoning_content_without_signature() {
+    fn thinking_goes_to_reasoning_content_without_fake_signature() {
+        let fake_signature = crate::anthropic::generate_fake_signature();
         let anthropic = json!({
             "content": [
-                {"type": "thinking", "thinking": "先看天气", "signature": "FAKESIGNATURE".repeat(10)},
+                {"type": "thinking", "thinking": "先看天气", "signature": fake_signature},
                 {"type": "text", "text": "晴"},
             ],
             "stop_reason": "end_turn",
@@ -181,7 +182,38 @@ mod tests {
         assert_eq!(msg["reasoning_content"], "先看天气");
         assert_eq!(msg["content"], "晴");
         // 伪造签名不得出现在任何字段中
-        assert!(!out.to_string().contains("FAKESIGNATURE"));
+        assert!(!out.to_string().contains(&fake_signature));
+        assert!(msg.get("reasoning_details").is_none());
+    }
+
+    /// 上游真实签名的形态：远长于伪造签名
+    fn real_signature() -> String {
+        "EqQBCkYIBhgCKkA".repeat(64)
+    }
+
+    #[test]
+    fn real_signature_goes_to_reasoning_details_per_block() {
+        let (first, second) = (real_signature(), format!("{}Z", real_signature()));
+        let anthropic = json!({
+            "content": [
+                {"type": "thinking", "thinking": "第一轮", "signature": first},
+                {"type": "thinking", "thinking": "", "signature": second},
+                {"type": "text", "text": "晴"},
+            ],
+            "stop_reason": "end_turn",
+        });
+        let out = convert_non_stream(&anthropic, "m");
+        let msg = &out["choices"][0]["message"];
+        assert_eq!(msg["reasoning_content"], "第一轮");
+        assert_eq!(
+            msg["reasoning_details"],
+            json!([
+                {"type": "reasoning.text", "text": "第一轮", "signature": first,
+                 "format": "anthropic-claude-v1", "index": 0},
+                {"type": "reasoning.text", "text": "", "signature": second,
+                 "format": "anthropic-claude-v1", "index": 1},
+            ])
+        );
     }
 
     #[test]
@@ -452,8 +484,9 @@ mod tests {
     }
 
     #[test]
-    fn signature_delta_never_reaches_client() {
-        let fake_signature = "A".repeat(120);
+    fn fake_signature_delta_never_reaches_client() {
+        let fake_signature = crate::anthropic::generate_fake_signature();
+        let (head, tail) = fake_signature.split_at(40);
         let frames = run_stream(
             &[
                 ("message_start", json!({})),
@@ -461,9 +494,14 @@ mod tests {
                     "content_block_delta",
                     json!({"index": 0, "delta": {"type": "thinking_delta", "thinking": "想"}}),
                 ),
+                // 伪造签名分段到达，拼起来才能认出
                 (
                     "content_block_delta",
-                    json!({"index": 0, "delta": {"type": "signature_delta", "signature": fake_signature}}),
+                    json!({"index": 0, "delta": {"type": "signature_delta", "signature": head}}),
+                ),
+                (
+                    "content_block_delta",
+                    json!({"index": 0, "delta": {"type": "signature_delta", "signature": tail}}),
                 ),
                 ("content_block_stop", json!({"index": 0})),
                 ("message_stop", json!({})),
@@ -473,12 +511,47 @@ mod tests {
 
         let all = frames.concat();
         assert!(
-            !all.contains(&"A".repeat(120)),
+            !all.contains(head) && !all.contains(tail),
             "伪造签名串不得出现在任何下发帧中"
         );
         assert!(!all.contains("signature"));
         // 签名帧不产生任何输出：role + reasoning + finish + DONE 共 4 帧
         assert_eq!(frames.len(), 4);
+    }
+
+    #[test]
+    fn real_signature_emits_reasoning_details_at_block_stop() {
+        let signature = real_signature();
+        let frames = run_stream(
+            &[
+                ("message_start", json!({})),
+                (
+                    "content_block_delta",
+                    json!({"index": 0, "delta": {"type": "thinking_delta", "thinking": "想"}}),
+                ),
+                (
+                    "content_block_delta",
+                    json!({"index": 0, "delta": {"type": "thinking_delta", "thinking": "好了"}}),
+                ),
+                (
+                    "content_block_delta",
+                    json!({"index": 0, "delta": {"type": "signature_delta", "signature": signature}}),
+                ),
+                ("content_block_stop", json!({"index": 0})),
+                ("content_block_delta", text_delta(1, "答案")),
+                ("message_stop", json!({})),
+            ],
+            false,
+        );
+
+        // role + 2 段 reasoning + reasoning_details + 正文 + finish + DONE
+        assert_eq!(frames.len(), 7);
+        let detail = parse_frame(&frames[3]).unwrap();
+        assert_eq!(
+            detail["choices"][0]["delta"]["reasoning_details"],
+            json!([{"type": "reasoning.text", "text": "想好了", "signature": signature,
+                    "format": "anthropic-claude-v1", "index": 0}])
+        );
     }
 
     #[test]

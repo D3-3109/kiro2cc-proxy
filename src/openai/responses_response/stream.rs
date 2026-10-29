@@ -9,7 +9,9 @@ use crate::openai::responses_request::NamespaceMap;
 
 use super::nonstream::{
     compaction_item, convert_usage, custom_input_from_json_text, is_truncated, new_id,
+    reasoning_item,
 };
+use crate::openai::reasoning::is_replayable_signature;
 
 use super::super::chat_response::{
     INPUT_JSON_DELTA, SIGNATURE_DELTA, TEXT_DELTA, THINKING_DELTA, unix_now,
@@ -72,6 +74,8 @@ pub(crate) struct ResponsesStreamConverter {
     next_output_index: i64,
     /// Anthropic block index → 打开中的 output item
     open: HashMap<i64, OpenItem>,
+    /// Anthropic block index → 累积中的 thinking 签名（分多段到达，块收尾时才能判断真伪）
+    signatures: HashMap<i64, String>,
     /// 已收尾的 output item，用于 `response.completed` 的快照
     completed_items: Vec<Value>,
     /// 请求侧声明为 `custom` 的工具名
@@ -98,6 +102,7 @@ impl ResponsesStreamConverter {
             usage: None,
             next_output_index: 0,
             open: HashMap::new(),
+            signatures: HashMap::new(),
             completed_items: Vec::new(),
             custom_tools,
             namespaced: NamespaceMap::new(),
@@ -131,7 +136,7 @@ impl ResponsesStreamConverter {
             "message_start" => self.ensure_created(),
             "content_block_start" => pass(self.on_block_start(data)),
             "content_block_delta" => pass(self.on_block_delta(data)),
-            "content_block_stop" => pass(self.close_item(block_index(data))),
+            "content_block_stop" => pass(self.on_block_stop(block_index(data))),
             "message_delta" => {
                 if let Some(reason) = data
                     .get("delta")
@@ -383,13 +388,35 @@ impl ResponsesStreamConverter {
                     .unwrap_or_default();
                 self.push_arguments_delta(index, partial)
             }
-            // 伪造签名：丢弃且不留痕（每个 thinking 块都会注入一次）
-            SIGNATURE_DELTA => Vec::new(),
+            SIGNATURE_DELTA => {
+                let part = delta
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.signatures.entry(index).or_default().push_str(part);
+                Vec::new()
+            }
             other => {
                 tracing::warn!(delta_type = %other, "未识别的 content_block_delta 类型，已跳过");
                 Vec::new()
             }
         }
+    }
+
+    /// 块收尾。只有签名、没有推理文本的 thinking 块此前没开 item，这里补开，让签名能下发
+    fn on_block_stop(&mut self, index: i64) -> Vec<String> {
+        let signature_only = !self.open.contains_key(&index)
+            && self
+                .signatures
+                .get(&index)
+                .is_some_and(|s| is_replayable_signature(s));
+        let mut frames = if signature_only {
+            self.open_reasoning(index)
+        } else {
+            Vec::new()
+        };
+        frames.extend(self.close_item(index));
+        frames
     }
 
     /// 文本或推理增量。`reasoning` 决定走 output_text 还是 reasoning_summary_text 事件族
@@ -422,9 +449,23 @@ impl ResponsesStreamConverter {
             );
             return frames;
         }
+        // 推理的摘要 part 随首段文本打开：只有签名的推理不带摘要 part
+        let opens_summary_part = reasoning && item.buffer.is_empty();
         item.buffer.push_str(text);
         let item_id = item.item_id.clone();
         let output_index = item.output_index;
+
+        if opens_summary_part {
+            frames.push(self.event(
+                "response.reasoning_summary_part.added",
+                json!({
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "summary_index": SINGLE_PART_INDEX,
+                    "part": {"type": "summary_text", "text": ""},
+                }),
+            ));
+        }
 
         let (event_name, key) = if reasoning {
             ("response.reasoning_summary_text.delta", "summary_index")
@@ -545,15 +586,6 @@ impl ResponsesStreamConverter {
                 "item": {"type": "reasoning", "id": item_id, "summary": []},
             }),
         ));
-        frames.push(self.event(
-            "response.reasoning_summary_part.added",
-            json!({
-                "item_id": item_id,
-                "output_index": output_index,
-                "summary_index": SINGLE_PART_INDEX,
-                "part": {"type": "summary_text", "text": ""},
-            }),
-        ));
         frames
     }
 
@@ -613,6 +645,10 @@ impl ResponsesStreamConverter {
 
     /// 闭合某个上游 block 对应的 output item，下发其收尾事件
     fn close_item(&mut self, index: i64) -> Vec<String> {
+        let signature = self
+            .signatures
+            .remove(&index)
+            .filter(|s| is_replayable_signature(s));
         let Some(item) = self.open.remove(&index) else {
             return Vec::new();
         };
@@ -659,14 +695,11 @@ impl ResponsesStreamConverter {
                 ]
             }
             OpenKind::Reasoning => {
-                let done_item = json!({
-                    "type": "reasoning",
-                    "id": item_id,
-                    "summary": [{"type": "summary_text", "text": buffer}],
-                });
+                let done_item = reasoning_item(item_id.clone(), &buffer, signature.as_deref());
                 self.completed_items.push(done_item.clone());
-                vec![
-                    self.event(
+                let mut frames = Vec::new();
+                if !buffer.is_empty() {
+                    frames.push(self.event(
                         "response.reasoning_summary_text.done",
                         json!({
                             "item_id": item_id,
@@ -674,8 +707,8 @@ impl ResponsesStreamConverter {
                             "summary_index": SINGLE_PART_INDEX,
                             "text": buffer,
                         }),
-                    ),
-                    self.event(
+                    ));
+                    frames.push(self.event(
                         "response.reasoning_summary_part.done",
                         json!({
                             "item_id": item_id,
@@ -683,12 +716,13 @@ impl ResponsesStreamConverter {
                             "summary_index": SINGLE_PART_INDEX,
                             "part": {"type": "summary_text", "text": buffer},
                         }),
-                    ),
-                    self.event(
-                        "response.output_item.done",
-                        json!({"output_index": output_index, "item": done_item}),
-                    ),
-                ]
+                    ));
+                }
+                frames.push(self.event(
+                    "response.output_item.done",
+                    json!({"output_index": output_index, "item": done_item}),
+                ));
+                frames
             }
             OpenKind::ToolCall {
                 call_id,
