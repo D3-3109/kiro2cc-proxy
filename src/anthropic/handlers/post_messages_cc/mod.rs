@@ -294,6 +294,7 @@ pub async fn post_messages_cc(
             conversation_id,
             history_thinking_loss,
             history_reasoning_replay,
+            crate::model::usage::ApiFormat::CcMessages,
         )
         .await
     } else {
@@ -323,6 +324,7 @@ pub async fn post_messages_cc(
             conversation_id,
             history_thinking_loss,
             history_reasoning_replay,
+            crate::model::usage::ApiFormat::CcMessages,
         )
         .await
     }

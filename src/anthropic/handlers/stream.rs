@@ -64,6 +64,8 @@ pub(crate) async fn handle_stream_request(
     history_thinking_loss: crate::anthropic::converter::HistoryThinkingLoss,
     // 历史中回传上游的推理签名（ConversionResult::history_reasoning_replay），供 credits 反推
     history_reasoning_replay: crate::anthropic::converter::HistoryReasoningReplay,
+    // 客户端请求所用的 API 格式（随 usage 记录入库）
+    api_format: crate::model::usage::ApiFormat,
 ) -> Response {
     // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
@@ -138,7 +140,8 @@ pub(crate) async fn handle_stream_request(
             .with_replayed_reasoning(super::helpers::replayed_reasoning(
                 history_reasoning_replay,
                 history_reasoning_stripped,
-            ));
+            ))
+            .with_api_format(api_format);
 
         // 生成初始事件
         let initial_events = ctx.generate_initial_events();

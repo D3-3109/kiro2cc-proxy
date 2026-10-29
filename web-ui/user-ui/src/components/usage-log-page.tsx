@@ -1,75 +1,17 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Brain, RefreshCw, BarChart3, DollarSign } from 'lucide-react'
+import { RefreshCw, BarChart3, DollarSign } from 'lucide-react'
 import { getUsageRecords } from '@/api/user'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useIpGeo } from '@/hooks/use-ip-geo'
 import { PageHead } from '@/components/page-head'
-import { CELL, PANEL, PANEL_FOOT, PANEL_TITLE, Pager, TH_BASE } from '@/components/table-kit'
-import type { ThinkingLoss } from '@/types/api'
+import { PANEL, PANEL_FOOT, PANEL_TITLE, Pager } from '@/components/table-kit'
+import { UsageLogTable, formatCost, formatTokens, getModelTone, recordCredits } from '@/components/usage-log-table'
 
 interface UsageLogPageProps {
   onBack: () => void
-}
-
-/** 模型色调：按名称映射到令牌色（brand/ok/warn/danger/ink-2 兜底），替代原硬编码 orange/blue/green */
-const MODEL_TONE: Record<string, string> = {
-  opus: 'text-brand',
-  sonnet: 'text-ok',
-  haiku: 'text-warn',
-}
-
-function getModelTone(model: string): string {
-  const lower = model.toLowerCase()
-  for (const [key, cls] of Object.entries(MODEL_TONE)) {
-    if (lower.includes(key)) return cls
-  }
-  return 'text-ink-2'
-}
-
-function formatCost(n: number) {
-  return `$${n.toFixed(4)}`
-}
-
-/** 流式/非流徽章基类：与 admin-ui BADGE_CLS 同构（user-ui 独立 app，不跨仓共享） */
-const BADGE_CLS = 'rounded-[4px] px-1 py-px text-[9.5px] font-semibold leading-tight'
-
-/** 历史推理未能回传上游时的红色小字说明（与 admin-ui 同款文案） */
-function ThinkingLossNote({ loss }: { loss: ThinkingLoss }) {
-  const lines: string[] = []
-  if (loss.signatureRejected) lines.push('思考丢失：签名被拒，已剥离')
-  if (loss.unsignedTurns) lines.push(`思考丢失 ${loss.unsignedTurns} 轮（无签名）`)
-  if (loss.renderedTurns) lines.push(`思考丢失 ${loss.renderedTurns} 轮（文本化思考）`)
-  return (
-    <span
-      className="block text-[10px] leading-tight text-danger"
-      title="历史推理未能回传上游，模型看不到这些轮次之前的思考"
-    >
-      {lines.map((line) => (
-        <span key={line} className="block">
-          {line}
-        </span>
-      ))}
-    </span>
-  )
-}
-
-/** UA 短标识：取首个空格前段（如 claude-cli/2.1.5），完整原文走 title 悬停展示 */
-function uaShort(ua: string): string {
-  return ua.split(/\s+/)[0] || ua
-}
-
-function formatTokens(n: number) {
-  return n.toLocaleString('zh-CN')
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
 }
 
 export function UsageLogPage({ onBack }: UsageLogPageProps) {
@@ -96,7 +38,7 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
   }, {})
 
   const pageCost = allRecords.reduce((s, r) => s + r.estimatedCost, 0)
-  const pageCredits = allRecords.reduce((s, r) => s + (r.creditsUsed ?? r.estimatedCost / 0.72), 0)
+  const pageCredits = allRecords.reduce((s, r) => s + recordCredits(r), 0)
   const pageCreditsSaved = allRecords.reduce((s, r) => s + (r.creditsSaved ?? 0), 0)
 
   return (
@@ -213,99 +155,8 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
               <div>
                 <h3 className={PANEL_TITLE}>请求明细</h3>
                 <section className={PANEL}>
-                  <div className="max-h-[70vh] overflow-y-auto">
-                    <table className="w-full border-separate border-spacing-0">
-                      <thead>
-                        <tr>
-                          <th className={TH_BASE}>时间</th>
-                          <th className={TH_BASE}>IP</th>
-                          <th className={TH_BASE}>模型</th>
-                          <th className={TH_BASE}>Token 用量</th>
-                          <th className={`${TH_BASE} text-right`}>费用</th>
-                          <th className={`${TH_BASE} text-right`}>Kiro Credits</th>
-                        </tr>
-                      </thead>
-                      <tbody className="[&_tr:last-child>td]:border-b-0">
-                        {allRecords.map((r) => {
-                          const geo = r.clientIp ? geoMap.get(r.clientIp) : undefined
-                          return (
-                            <tr key={r.createdAt} className="transition-colors hover:bg-surface-2">
-                              <td className={`${CELL} whitespace-nowrap font-mono text-[11.5px] text-ink-2`}>
-                                {formatDate(r.createdAt)}
-                              </td>
-                              <td className={`${CELL} whitespace-nowrap text-[11.5px] text-ink-2`}>
-                                {r.clientIp ? (
-                                  <span title={r.clientIp} className="flex flex-col items-start">
-                                    <span className="font-mono">{geo?.displayIp ?? r.clientIp}</span>
-                                    {geo && geo.country && (
-                                      <span className="text-ink-3">
-                                        {geo.city ? `${geo.country}·${geo.city}` : geo.country}
-                                      </span>
-                                    )}
-                                  </span>
-                                ) : (
-                                  <span className="text-ink-3">—</span>
-                                )}
-                                {r.userAgent && (
-                                  <span
-                                    className="mt-px block truncate font-mono text-[10px] text-ink-3"
-                                    title={r.userAgent}
-                                  >
-                                    {uaShort(r.userAgent)}
-                                  </span>
-                                )}
-                              </td>
-                              <td className={`${CELL} text-[11.5px] max-w-[200px]`}>
-                                <div className="flex flex-col items-start gap-px">
-                                  <span className={`max-w-full truncate font-mono ${getModelTone(r.model)}`} title={r.model}>
-                                    {r.model}
-                                  </span>
-                                  {r.isStream != null && (
-                                    <span
-                                      className={`${BADGE_CLS} ${
-                                        r.isStream ? 'bg-brand-soft text-brand' : 'bg-surface-3 text-ink-2'
-                                      }`}
-                                    >
-                                      {r.isStream ? '流式' : '非流'}
-                                    </span>
-                                  )}
-                                  {r.thinkingLoss && <ThinkingLossNote loss={r.thinkingLoss} />}
-                                </div>
-                              </td>
-                              <td className={CELL}>
-                                <div className="space-y-0.5 text-left text-[11.5px]">
-                                  <div>输入 Tokens：<span className="tabular-nums">{formatTokens(Math.max(0, r.inputTokens - (r.cacheReadInputTokens ?? 0)))}</span></div>
-                                  <div className={(r.thinkingTokenCount ?? 0) > 0 ? 'flex items-center gap-2' : undefined}>
-                                    <div>输出 Tokens：<span className="tabular-nums">{formatTokens(r.outputTokens)}</span></div>
-                                    {r.thinkingTokenCount != null && r.thinkingTokenCount > 0 && (
-                                      <div className="inline-flex items-center gap-0.5 text-warn" title="深度思考 Tokens">
-                                        <span className="sr-only">深度思考 Tokens：</span>
-                                        <Brain className="size-3" aria-hidden="true" />
-                                        <span className="tabular-nums">{formatTokens(r.thinkingTokenCount)}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="text-ok">缓存读取：<span className="tabular-nums">{formatTokens(r.cacheReadInputTokens ?? 0)}</span></div>
-                                  <div className="font-medium">输入总计：<span className="tabular-nums">{formatTokens(r.inputTokens)}</span></div>
-                                </div>
-                              </td>
-                              <td className={`${CELL} text-right tabular-nums font-medium text-[12px] text-warn`}>
-                                {formatCost(r.estimatedCost)}
-                              </td>
-                              <td className={`${CELL} text-right tabular-nums font-medium text-[12px] text-ok`}>
-                                {r.creditsUsed != null ? r.creditsUsed.toFixed(4) : (r.estimatedCost / 0.72).toFixed(4)}
-                                {r.creditsUsed != null && <span className="ml-1 text-xs text-ok">✓</span>}
-                                {r.creditsSaved != null && r.creditsSaved > 0 && (
-                                  <span className="ml-1 text-xs text-ok">
-                                    (省 {r.creditsSaved.toFixed(4)})
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="max-h-[70vh] overflow-auto">
+                    <UsageLogTable records={allRecords} geoMap={geoMap} />
                   </div>
 
                   {/* 面板脚（.panel-foot）：分页 */}

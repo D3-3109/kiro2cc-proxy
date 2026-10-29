@@ -106,6 +106,8 @@ pub struct StreamContext {
     thinking_loss: Option<crate::model::usage::ThinkingLoss>,
     /// 历史中回传上游的推理签名，供 credits 反推
     replayed_reasoning: crate::model::usage::ReplayedReasoning,
+    /// 客户端请求所用的 API 格式，随 usage 记录入库
+    api_format: Option<crate::model::usage::ApiFormat>,
     /// 思考文本化转换器（None = 关闭，出站事件原样输出）
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
     /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
@@ -169,6 +171,7 @@ impl StreamContext {
             thinking_budget_tokens: None,
             thinking_loss: None,
             replayed_reasoning: Default::default(),
+            api_format: None,
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
             request_started_at: None,
             first_token_at: None,
@@ -265,6 +268,12 @@ impl StreamContext {
         replayed: crate::model::usage::ReplayedReasoning,
     ) -> Self {
         self.replayed_reasoning = replayed;
+        self
+    }
+
+    /// 设置客户端请求所用的 API 格式（随 usage 记录入库）
+    pub fn with_api_format(mut self, api_format: crate::model::usage::ApiFormat) -> Self {
+        self.api_format = Some(api_format);
         self
     }
 
@@ -1105,6 +1114,7 @@ impl StreamContext {
                     is_stream: Some(true),
                     user_agent: self.user_agent.clone(),
                     thinking_loss: self.thinking_loss,
+                    api_format: self.api_format,
                 },
             );
         }

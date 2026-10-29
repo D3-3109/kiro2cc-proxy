@@ -4,12 +4,12 @@
 //! 每个 handler 都是"翻译 + 转发"的三段式：
 //!
 //! 1. OpenAI 请求 JSON → Anthropic 请求 JSON
-//! 2. 以普通函数调用方式转交 [`crate::anthropic::handlers::post_messages`]，
-//!    完整复用其下游链路（多账号故障转移、RPM 计数、用量追踪、prompt cache、限流处理）
+//! 2. 以普通函数调用方式转交 [`crate::anthropic::handlers::post_messages_as`]（`/v1/messages`
+//!    的处理主体），完整复用其下游链路（多账号故障转移、RPM 计数、用量追踪、prompt cache、
+//!    限流处理），并带上本端点的 API 格式供用量记录区分
 //! 3. 把返回的 Anthropic 响应（JSON 或 SSE 流）转回 OpenAI 格式
 //!
-//! 第 2 步不改动 `post_messages` 的签名或实现——它是 axum handler，同时也是普通 async fn，
-//! extractor 参数在这里手动构造即可。代价是请求体多一次序列化往返，换来对下游核心逻辑的零侵入。
+//! 代价是请求体多一次序列化往返，换来对下游核心逻辑的零侵入。
 
 use std::net::SocketAddr;
 
@@ -21,8 +21,9 @@ use axum::{Extension, Json};
 use futures::StreamExt;
 use serde_json::{Value, json};
 
-use crate::anthropic::handlers::post_messages;
+use crate::anthropic::handlers::post_messages_as;
 use crate::anthropic::middleware::{ApiKeyContext, AppState};
+use crate::model::usage::ApiFormat;
 
 use super::chat_request;
 use super::chat_response::{self, ChatStreamConverter};
@@ -97,6 +98,7 @@ pub(crate) async fn post_chat_completions(
         addr,
         headers,
         converted.anthropic_body,
+        ApiFormat::OpenaiChat,
         converted.stream,
         client_model,
         move || Box::new(ChatStreamConverter::new(&converter_model, include_usage)),
@@ -152,6 +154,7 @@ pub(crate) async fn post_responses(
         addr,
         headers,
         converted.anthropic_body,
+        ApiFormat::OpenaiResponses,
         converted.stream,
         client_model,
         move || {
@@ -214,12 +217,14 @@ async fn forward_and_wrap(
     addr: SocketAddr,
     headers: HeaderMap,
     anthropic_body: Value,
+    api_format: ApiFormat,
     stream: bool,
     client_model: String,
     make_converter: impl FnOnce() -> Box<dyn StreamConverter + Send>,
     convert_non_stream: impl FnOnce(&Value, &str) -> Value,
 ) -> Response {
-    let upstream = forward_to_anthropic(state, identity, addr, headers, &anthropic_body).await;
+    let upstream =
+        forward_to_anthropic(state, identity, addr, headers, &anthropic_body, api_format).await;
 
     let (parts, upstream_body) = upstream.into_parts();
     let status = parts.status;
@@ -259,6 +264,7 @@ fn forward_to_anthropic(
     addr: SocketAddr,
     headers: HeaderMap,
     anthropic_body: &Value,
+    api_format: ApiFormat,
 ) -> impl std::future::Future<Output = Response> + use<> {
     // OpenAI 协议是自动前缀缓存：断点记账开启时补顶层自动缓存标记（见 ensure_auto_cache_control）
     // 只有开启时才需要可变副本；默认关闭路径不做整包深拷贝
@@ -270,7 +276,7 @@ fn forward_to_anthropic(
     } else {
         Bytes::from(serde_json::to_vec(anthropic_body).unwrap_or_default())
     };
-    post_messages(State(state), identity, ConnectInfo(addr), headers, bytes)
+    post_messages_as(state, identity, addr, headers, bytes, api_format)
 }
 
 fn is_event_stream(headers: &HeaderMap) -> bool {

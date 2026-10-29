@@ -24,6 +24,7 @@ pub use models::set_models_official_aliases;
 pub use ping::ping;
 pub use post_messages::kiro_body_dump_enabled;
 pub use post_messages::post_messages;
+pub(crate) use post_messages::post_messages_as;
 pub use post_messages::set_kiro_body_dump_enabled;
 pub use post_messages_cc::post_messages_cc;
 
