@@ -735,3 +735,69 @@ fn test_chunking_note_is_deterministic_across_requests() {
     .unwrap();
     assert_eq!(a, b);
 }
+
+#[test]
+fn test_history_thinking_loss_counts_unreplayed_turns() {
+    use super::super::result::HistoryThinkingLoss;
+    use crate::anthropic::types::Message as AnthropicMessage;
+
+    let message = |role: &str, content: serde_json::Value| AnthropicMessage {
+        role: role.to_string(),
+        content,
+    };
+    let fake = crate::anthropic::stream::generate_fake_signature();
+    let real = "EqQBCkYIBhgCKkA".repeat(64);
+    let req = MessagesRequest {
+        model: "claude-sonnet-4".to_string(),
+        max_tokens: 1024,
+        messages: vec![
+            message("user", serde_json::json!("q1")),
+            // 无签名
+            message(
+                "assistant",
+                serde_json::json!([{"type": "thinking", "thinking": "a"}, {"type": "text", "text": "r1"}]),
+            ),
+            message("user", serde_json::json!("q2")),
+            // 伪造签名 + 同轮另一条带真签名：合并后回传了，不计
+            message(
+                "assistant",
+                serde_json::json!([{"type": "thinking", "thinking": "b", "signature": fake}]),
+            ),
+            message(
+                "assistant",
+                serde_json::json!([{"type": "thinking", "thinking": "c", "signature": real}, {"type": "text", "text": "r2"}]),
+            ),
+            message("user", serde_json::json!("q3")),
+            // 伪造签名
+            message(
+                "assistant",
+                serde_json::json!([{"type": "thinking", "thinking": "d", "signature": fake}, {"type": "text", "text": "r3"}]),
+            ),
+            message("user", serde_json::json!("q4")),
+            // thinkingAsText 渲染的文本
+            message(
+                "assistant",
+                serde_json::json!("💭 Thinking\ne\n💭 Thought for 1s (3 tokens)\nr4"),
+            ),
+            message("user", serde_json::json!("q5")),
+            // 没有推理：不计
+            message("assistant", serde_json::json!("r5")),
+            message("user", serde_json::json!("q6")),
+        ],
+        stream: false,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        thinking: None,
+        output_config: None,
+        metadata: None,
+    };
+
+    assert_eq!(
+        convert_request(&req).unwrap().history_thinking_loss,
+        HistoryThinkingLoss {
+            unsigned_turns: 2,
+            rendered_turns: 1,
+        }
+    );
+}

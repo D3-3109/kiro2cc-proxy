@@ -40,10 +40,6 @@ pub struct CacheSimulationConfig {
     pub fingerprint_max_breakpoints_per_account: usize,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 /// 0 = 按模型使用 Anthropic 官方最小可缓存长度（见 `cache::breakpoint::min_cacheable_tokens`）
 fn default_prompt_cache_min_tokens() -> i32 {
     0
@@ -207,9 +203,11 @@ pub struct Config {
     /// 终端入口（`cli`）用 ANSI 变暗斜体（灰色）；Claude Desktop、`local-agent` 等其他入口不解析
     /// ANSI，改用无转义的 Markdown 引用块 + 斜体（每行 `> *内容*`）近似变暗。
     /// 回传的历史里这些文本会被自动剥离，上游看不到；代理上报的 input_tokens 不含它们，output_tokens 默认也不含（见 outputTokensIncludeThinking）。
-    /// 默认 true（文本化展示）。
+    /// 默认 false。
+    /// 代价：改写后客户端拿不到推理签名，历史轮次的原始思维链无法回传上游，后续轮次的模型
+    /// 看不到自己之前的推理（文本化的思考摘要回传时同样被剥离）；面板使用日志会标出这类轮次。
     /// 副作用：客户端本地的消息列表仍包含这些文本，其本地估算与自身 compact 的输入会相应变长。
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub thinking_as_text: bool,
 
     /// 分块写入约束的行数上限（issue #46）
@@ -331,7 +329,7 @@ impl Default for Config {
             models_official_aliases: false,
             output_tokens_include_thinking: false,
             forward_suggestion_mode: false,
-            thinking_as_text: true,
+            thinking_as_text: false,
             write_chunking_max_lines: default_write_chunking_max_lines(),
             dump_kiro_body: false,
             log_file: None,
@@ -566,16 +564,16 @@ mod tests {
     }
 
     #[test]
-    fn test_thinking_as_text_default_is_true() {
+    fn test_thinking_as_text_default_is_false() {
         let config = Config::default();
-        assert!(config.thinking_as_text);
+        assert!(!config.thinking_as_text);
     }
 
     #[test]
-    fn test_thinking_as_text_deserialize_default_is_true() {
-        // 缺省该字段时必须为 true（新用户默认开启思考文本化展示）
+    fn test_thinking_as_text_deserialize_default_is_false() {
+        // 缺省该字段时必须为 false：文本化会丢掉推理签名，后续轮次看不到之前的推理
         let config: Config = serde_json::from_str("{}").unwrap();
-        assert!(config.thinking_as_text);
+        assert!(!config.thinking_as_text);
     }
 
     #[test]

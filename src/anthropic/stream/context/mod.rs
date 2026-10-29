@@ -102,6 +102,8 @@ pub struct StreamContext {
     effort: Option<String>,
     /// 实际生效的 thinking 文本标签预算，随 usage 记录入库
     thinking_budget_tokens: Option<i32>,
+    /// 历史推理丢失情况，随 usage 记录入库
+    thinking_loss: Option<crate::model::usage::ThinkingLoss>,
     /// 思考文本化转换器（None = 关闭，出站事件原样输出）
     thinking_text: Option<crate::anthropic::stream::ThinkingTextRewriter>,
     /// 响应前缀防护：剔除模型偶发回声用户 `<system-reminder>` 块的情况（见模块文档）
@@ -163,6 +165,7 @@ impl StreamContext {
             cache_accounting: None,
             effort: None,
             thinking_budget_tokens: None,
+            thinking_loss: None,
             echo_guard: super::echo_guard::ResponseEchoGuard::new(),
             request_started_at: None,
             first_token_at: None,
@@ -244,6 +247,12 @@ impl StreamContext {
     /// 设置 thinking 预算 tokens（随 usage 记录入库）
     pub fn with_thinking_budget_tokens(mut self, budget: Option<i32>) -> Self {
         self.thinking_budget_tokens = budget;
+        self
+    }
+
+    /// 设置历史推理丢失情况（随 usage 记录入库）
+    pub fn with_thinking_loss(mut self, loss: Option<crate::model::usage::ThinkingLoss>) -> Self {
+        self.thinking_loss = loss;
         self
     }
 
@@ -1081,6 +1090,7 @@ impl StreamContext {
                     thinking_token_count: (thinking_tokens > 0).then_some(thinking_tokens),
                     is_stream: Some(true),
                     user_agent: self.user_agent.clone(),
+                    thinking_loss: self.thinking_loss,
                 },
             );
         }

@@ -77,6 +77,35 @@ pub struct UsageRecord {
     /// 客户端 User-Agent（截断至 256 字符、最坏 1024 字节；None 表示旧数据或客户端未携带）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// 历史推理未能回传上游的情况（None 表示无丢失或旧数据）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_loss: Option<ThinkingLoss>,
+}
+
+/// 一次请求中未能回传给上游的历史推理，供面板审查签名回传是否回归
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThinkingLoss {
+    /// 带推理但没有可回传签名的历史 assistant 轮数
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub unsigned_turns: u32,
+    /// 推理以 thinkingAsText 文本形式回传、在历史中整块剥离的轮数
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rendered_turns: u32,
+    /// 上游拒绝历史签名，降级重试时剥离了全部历史推理
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signature_rejected: bool,
+}
+
+impl ThinkingLoss {
+    /// 有任何丢失时返回自身，否则 None（无丢失不落库）
+    pub fn non_empty(self) -> Option<Self> {
+        (self != Self::default()).then_some(self)
+    }
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl UsageRecord {
@@ -112,6 +141,7 @@ pub struct RecordOptions {
     pub thinking_token_count: Option<i32>,
     pub is_stream: Option<bool>,
     pub user_agent: Option<String>,
+    pub thinking_loss: Option<ThinkingLoss>,
 }
 
 /// 单个 API Key 的用量汇总
@@ -425,6 +455,7 @@ impl UsageTracker {
             thinking_token_count,
             is_stream,
             user_agent,
+            thinking_loss,
         } = options;
         let cost = calculate_cost(&model, input_tokens, output_tokens);
         let record = UsageRecord {
@@ -448,6 +479,7 @@ impl UsageTracker {
             thinking_token_count,
             is_stream,
             user_agent,
+            thinking_loss,
         };
         {
             let mut records = self.records.write();

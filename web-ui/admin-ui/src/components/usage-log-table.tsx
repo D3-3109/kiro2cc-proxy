@@ -4,7 +4,7 @@ import { Brain, DatabaseZap, Loader2, SearchX } from 'lucide-react'
 import { CELL, TH_BASE } from '@/components/table-kit'
 import { formatDateTime, formatTokenCount } from '@/lib/locale'
 import type { GeoInfo } from '@/hooks/use-ip-geo'
-import type { UsageRecord } from '@/types/api'
+import type { ThinkingLoss, UsageRecord } from '@/types/api'
 
 /**
  * 请求日志表（API Key 详情页 / 每日明细页共用）。
@@ -159,6 +159,24 @@ export function DurationCell({ record }: { record: UsageRecord }) {
   )
 }
 
+/** 历史推理未能回传上游时的红色小字说明，供审查签名回传是否回归 */
+function ThinkingLossNote({ loss }: { loss: ThinkingLoss }) {
+  const { t } = useTranslation()
+  const lines: string[] = []
+  if (loss.signatureRejected) lines.push(t('common.thinkingLossRejected'))
+  if (loss.unsignedTurns) lines.push(t('common.thinkingLossUnsigned', { turns: loss.unsignedTurns }))
+  if (loss.renderedTurns) lines.push(t('common.thinkingLossRendered', { turns: loss.renderedTurns }))
+  return (
+    <span className="block text-[10px] leading-tight text-danger" title={t('common.thinkingLossHint')}>
+      {lines.map((line) => (
+        <span key={line} className="block">
+          {line}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 const LOG_COLS: { labelKey: string; num?: boolean }[] = [
   { labelKey: 'common.colTime' },
   { labelKey: 'common.colIp' },
@@ -283,6 +301,7 @@ export function UsageLogTable({
                         )}
                       </div>
                     )}
+                    {record.thinkingLoss && <ThinkingLossNote loss={record.thinkingLoss} />}
                   </div>
                 </td>
                 <td className={`${CELL} whitespace-nowrap text-[11px] text-ink-2`}>

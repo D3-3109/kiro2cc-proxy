@@ -139,7 +139,8 @@ async fn main() {
     }
     if config.thinking_as_text {
         tracing::info!(
-            "思考文本化已开启（thinkingAsText=true）：Claude Code 的 thinking 将以引用文本逐行展示"
+            "思考文本化已开启（thinkingAsText=true）：Claude Code 的 thinking 将以引用文本逐行展示；\
+             推理签名不会回传，后续轮次的模型看不到之前的推理"
         );
     }
     if config.client_token_passthrough {

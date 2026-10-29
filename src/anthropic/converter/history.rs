@@ -18,7 +18,7 @@ use super::message::process_message_content_with_tool_filter;
 use super::prompt::{
     is_dynamic_hook_injection, is_token_budget_reminder, normalize_billing_header,
 };
-use super::result::ConversionError;
+use super::result::{ConversionError, HistoryThinkingLoss};
 use super::thinking::{
     generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags, thinking_prefix_budget,
 };
@@ -40,6 +40,8 @@ pub(super) struct BuiltHistory {
     pub injected_thinking_budget: Option<i32>,
     /// 缓存前缀是否已命中会话级冻结缓存（判定见 [`determine_prefix_cached`]）
     pub prefix_cached: bool,
+    /// 带推理却没能回传上游的 assistant 轮次
+    pub thinking_loss: HistoryThinkingLoss,
 }
 
 /// 构建历史消息
@@ -197,13 +199,13 @@ pub(super) fn build_history(
     // 收集并配对消息
     let mut user_buffer: Vec<&crate::anthropic::types::Message> = Vec::new();
     let mut assistant_buffer: Vec<&crate::anthropic::types::Message> = Vec::new();
+    let mut thinking_loss = HistoryThinkingLoss::default();
 
     for msg in &messages[..history_end_index] {
         if msg.role == "user" {
             // 先处理累积的 assistant 消息
             if !assistant_buffer.is_empty() {
-                let merged = merge_assistant_messages(&assistant_buffer)?;
-                history.push(Message::Assistant(merged));
+                push_assistant_turn(&mut history, &assistant_buffer, &mut thinking_loss)?;
                 assistant_buffer.clear();
             }
             user_buffer.push(msg);
@@ -221,8 +223,7 @@ pub(super) fn build_history(
 
     // 处理末尾累积的 assistant 消息
     if !assistant_buffer.is_empty() {
-        let merged = merge_assistant_messages(&assistant_buffer)?;
-        history.push(Message::Assistant(merged));
+        push_assistant_turn(&mut history, &assistant_buffer, &mut thinking_loss)?;
     }
 
     // 处理结尾的孤立 user 消息
@@ -240,7 +241,69 @@ pub(super) fn build_history(
         dynamic_system: dynamic_content,
         injected_thinking_budget,
         prefix_cached: determine_prefix_cached(history_end_index > 0, h0_frozen),
+        thinking_loss,
     })
+}
+
+/// 合并一轮 assistant 消息写入历史；没回传推理时按其中的推理形态计入 `loss`
+fn push_assistant_turn(
+    history: &mut Vec<Message>,
+    turn: &[&crate::anthropic::types::Message],
+    loss: &mut HistoryThinkingLoss,
+) -> Result<(), ConversionError> {
+    let merged = merge_assistant_messages(turn)?;
+    let replayed = merged
+        .assistant_response_message
+        .reasoning_content
+        .is_some();
+    match lost_thinking_form(turn).filter(|_| !replayed) {
+        Some(LostThinkingForm::Unsigned) => loss.unsigned_turns += 1,
+        Some(LostThinkingForm::Rendered) => loss.rendered_turns += 1,
+        None => {}
+    }
+    history.push(Message::Assistant(merged));
+    Ok(())
+}
+
+/// 没能回传的推理在客户端历史里的形态
+enum LostThinkingForm {
+    /// thinking 块，但没有可回传签名
+    Unsigned,
+    /// thinkingAsText 渲染出的文本
+    Rendered,
+}
+
+/// 一轮 assistant 消息里的推理形态；thinking 块优先（它才可能带签名）
+fn lost_thinking_form(turn: &[&crate::anthropic::types::Message]) -> Option<LostThinkingForm> {
+    let is_rendered = |text: &str| {
+        matches!(
+            crate::anthropic::stream::strip_rendered_thinking(text),
+            std::borrow::Cow::Owned(_)
+        )
+    };
+
+    let mut rendered = false;
+    for msg in turn {
+        match &msg.content {
+            serde_json::Value::String(s) => rendered |= is_rendered(s),
+            serde_json::Value::Array(blocks) => {
+                for block in blocks {
+                    match block.get("type").and_then(serde_json::Value::as_str) {
+                        Some("thinking") => return Some(LostThinkingForm::Unsigned),
+                        Some("text") => {
+                            rendered |= block
+                                .get("text")
+                                .and_then(serde_json::Value::as_str)
+                                .is_some_and(is_rendered);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    rendered.then_some(LostThinkingForm::Rendered)
 }
 
 /// `prefix_cached` 判定：本请求的缓存前缀（history[0] + 历史轮次）是否已命中会话级冻结缓存。

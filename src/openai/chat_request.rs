@@ -16,7 +16,7 @@
 use serde_json::{Value, json};
 
 use super::model_map::map_model;
-use super::reasoning::thinking_blocks_from_details;
+use super::reasoning::{thinking_block, thinking_blocks_from_details};
 
 /// 未指定 `max_tokens` 时的默认值，与 `/v1/models` 对外声明的 `max_tokens` 一致
 pub(super) const DEFAULT_MAX_TOKENS: i64 = 32000;
@@ -300,10 +300,18 @@ fn parse_data_url(url: &str) -> Option<(String, String)> {
 
 /// 转换 assistant 消息（推理 + 文本 + tool_calls）
 ///
-/// 推理只认带签名的 `reasoning_details`（见 [`super::reasoning`]），放在最前面；
-/// 纯文本的 `reasoning_content` 没有签名，上游用不了，不回传。
+/// 推理放在最前面：带签名的 `reasoning_details` 能回传上游（见 [`super::reasoning`]）；
+/// 没有时，纯文本的 `reasoning_content` 转成无签名 thinking 块，供 converter 计入推理丢失。
 fn convert_assistant_message(msg: &Value) -> Vec<Value> {
     let mut blocks = thinking_blocks_from_details(msg.get("reasoning_details"));
+    if blocks.is_empty()
+        && let Some(text) = msg
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+    {
+        blocks.push(thinking_block(text, None));
+    }
 
     match msg.get("content") {
         Some(Value::String(s)) if !s.is_empty() => {
@@ -705,6 +713,24 @@ mod tests {
             r.anthropic_body["messages"][1]["content"],
             json!([
                 {"type": "thinking", "thinking": "想一想", "signature": real_signature},
+                {"type": "text", "text": "好"},
+            ])
+        );
+    }
+
+    #[test]
+    fn unsigned_reasoning_content_becomes_unsigned_thinking_block() {
+        let r = convert_ok(json!({
+            "model": "gpt-5-codex",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "好", "reasoning_content": "想一想"},
+            ],
+        }));
+        assert_eq!(
+            r.anthropic_body["messages"][1]["content"],
+            json!([
+                {"type": "thinking", "thinking": "想一想"},
                 {"type": "text", "text": "好"},
             ])
         );

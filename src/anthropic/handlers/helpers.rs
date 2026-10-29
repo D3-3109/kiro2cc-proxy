@@ -31,6 +31,19 @@ pub(crate) fn reject_disallowed_model(
     Some((axum::http::StatusCode::FORBIDDEN, Json(error)).into_response())
 }
 
+/// 合并 converter 与 provider 两侧的推理丢失情况，供 usage 记录入库（无丢失为 None）
+pub(crate) fn thinking_loss(
+    history: crate::anthropic::converter::HistoryThinkingLoss,
+    history_reasoning_stripped: bool,
+) -> Option<crate::model::usage::ThinkingLoss> {
+    crate::model::usage::ThinkingLoss {
+        unsigned_turns: history.unsigned_turns,
+        rendered_turns: history.rendered_turns,
+        signature_rejected: history_reasoning_stripped,
+    }
+    .non_empty()
+}
+
 /// 去除 JSON 响应中模型可能添加的 Markdown 代码围栏
 ///
 /// 当请求 JSON schema 结构化输出时，部分模型仍会将结果包裹在 ```json...``` 中。

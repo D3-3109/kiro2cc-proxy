@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 
-use super::{UsageRecord, UsageTracker, get_k_ref};
+use super::{ThinkingLoss, UsageRecord, UsageTracker, get_k_ref};
 
 impl UsageTracker {
     /// 分页查询指定 API Key 的原始请求记录（按 created_at 降序）
@@ -148,6 +148,9 @@ pub struct UsageRecordItem {
     /// 客户端 User-Agent（截断至 256 字符、最坏 1024 字节；None 表示旧数据或客户端未携带）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// 历史推理未能回传上游的情况（None 表示无丢失或旧数据）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_loss: Option<ThinkingLoss>,
 }
 
 impl UsageTracker {
@@ -245,6 +248,7 @@ impl UsageRecordItem {
             thinking_token_count: r.thinking_token_count,
             is_stream: r.is_stream,
             user_agent: r.user_agent,
+            thinking_loss: r.thinking_loss,
         }
     }
 }

@@ -102,7 +102,7 @@ mod websearch;
 
 pub use convert::convert_request;
 pub(crate) use model::map_model;
-pub use result::{ConversionError, ConversionResult};
+pub use result::{ConversionError, ConversionResult, HistoryThinkingLoss};
 pub use tools::{
     DEFAULT_WRITE_CHUNKING_MAX_LINES, set_write_chunking_max_lines, write_chunking_max_lines,
 };

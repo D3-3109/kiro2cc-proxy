@@ -58,6 +58,14 @@ export interface UsageRecordItem {
   thinkingTokenCount?: number
   isStream?: boolean
   userAgent?: string
+  thinkingLoss?: ThinkingLoss
+}
+
+/** 历史推理未能回传上游的情况（字段缺省即 0 / false） */
+export interface ThinkingLoss {
+  unsignedTurns?: number
+  renderedTurns?: number
+  signatureRejected?: boolean
 }
 
 export interface UsageRecordsPage {

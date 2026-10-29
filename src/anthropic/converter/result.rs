@@ -37,6 +37,19 @@ pub struct ConversionResult {
     ///
     /// provider 按选中账号的 thinking 开关可能剥离该标签，调用方需结合裁决结果使用。
     pub thinking_budget_tokens: Option<i32>,
+    /// 历史中带推理却没能回传上游的 assistant 轮次
+    pub history_thinking_loss: HistoryThinkingLoss,
+}
+
+/// 历史中带推理却没能回传上游（无 `reasoningContent`）的 assistant 轮次统计
+///
+/// 一轮指相邻 assistant 消息合并后的一条历史；同一轮只计一次，thinking 块优先于文本化思考。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HistoryThinkingLoss {
+    /// 带 thinking 块但没有可回传签名（无签名或代理伪造）
+    pub unsigned_turns: u32,
+    /// 推理以 thinkingAsText 渲染的文本回传，历史中整块剥离
+    pub rendered_turns: u32,
 }
 
 /// 转换错误

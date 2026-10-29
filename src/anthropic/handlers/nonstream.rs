@@ -286,11 +286,17 @@ pub(crate) async fn handle_non_stream_request(
     cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
     // 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
     conversation_id: Option<String>,
+    // 历史中没能回传上游的推理（ConversionResult::history_thinking_loss），随 usage 记录入库
+    history_thinking_loss: crate::anthropic::converter::HistoryThinkingLoss,
 ) -> Response {
     // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
     let request_started_at = std::time::Instant::now();
     // 调用 Kiro API（支持多账号故障转移）
-    let (response, credential_id) = match provider
+    let crate::kiro::provider::ApiResponse {
+        response,
+        credential_id,
+        history_reasoning_stripped,
+    } = match provider
         .call_api(
             request_body,
             is_compact_request,
@@ -568,7 +574,8 @@ pub(crate) async fn handle_non_stream_request(
             )
             .await
         {
-            Ok((resp, _credential_id)) => {
+            // 续请求沿用首轮的历史；签名被拒的剥离已在首轮记过
+            Ok(crate::kiro::provider::ApiResponse { response: resp, .. }) => {
                 body_bytes = match resp.bytes().await {
                     Ok(bytes) => bytes,
                     Err(e) => {
@@ -811,6 +818,10 @@ pub(crate) async fn handle_non_stream_request(
                 thinking_token_count,
                 is_stream: Some(false),
                 user_agent,
+                thinking_loss: super::helpers::thinking_loss(
+                    history_thinking_loss,
+                    history_reasoning_stripped,
+                ),
             },
         );
     }

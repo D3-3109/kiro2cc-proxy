@@ -74,11 +74,11 @@ mod tests {
         assert!(convert(&json!({"model": "  ", "input": "hi"})).is_err());
         assert!(convert(&json!({"model": "gpt-5-codex"})).is_err());
         assert!(convert(&json!({"model": "gpt-5-codex", "input": []})).is_err());
-        // 只有 reasoning item：没有任何可转换内容
+        // 只有空 message：没有任何可转换内容
         assert!(
             convert(&json!({
                 "model": "gpt-5-codex",
-                "input": [{"type": "reasoning", "summary": []}],
+                "input": [{"type": "message", "role": "user", "content": []}],
             }))
             .is_err()
         );
@@ -94,8 +94,9 @@ mod tests {
                  "encrypted_content": "kiro2cc.v1:SIG"},
                 {"type": "function_call", "call_id": "c1", "name": "ls", "arguments": "{}"},
                 {"type": "function_call_output", "call_id": "c1", "output": "a.txt"},
-                // 他家的加密推理无法回传，丢弃
-                {"type": "reasoning", "summary": [], "encrypted_content": "gAAAAABfoo"},
+                // 他家的加密推理无法回传：转成无签名块，由 converter 计入推理丢失
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "读完了"}],
+                 "encrypted_content": "gAAAAABfoo"},
                 {"type": "message", "role": "assistant", "content": "只有 a.txt"},
             ],
         }));
@@ -109,7 +110,10 @@ mod tests {
         );
         assert_eq!(
             messages[3],
-            json!({"role": "assistant", "content": [{"type": "text", "text": "只有 a.txt"}]})
+            json!({"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "读完了"},
+                {"type": "text", "text": "只有 a.txt"},
+            ]})
         );
     }
 

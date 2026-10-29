@@ -447,7 +447,8 @@ pub(crate) async fn bridge_execute_round(
         )
         .await
     {
-        Ok((response, _credential_id)) => {
+        // 续请求沿用首轮的历史；签名被拒的剥离已在首轮记过
+        Ok(crate::kiro::provider::ApiResponse { response, .. }) => {
             // 演进基底更新为本轮续请求所用的状态（下一轮 clone 它）
             bridge.evolution_base = Some(kiro_request.conversation_state);
             BridgeRoundOutcome::Continued(response, EventStreamDecoder::new(), search_results)

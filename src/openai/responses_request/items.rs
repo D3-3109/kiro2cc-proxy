@@ -59,14 +59,10 @@ pub(crate) fn convert_input_items(
                     tools.push_list(list, 0);
                 }
             }
-            // Codex 会把上一轮的 reasoning item 原样回传。带本代理签名的还原为 thinking 块，
-            // 让上游看到上一轮的推理；其余（无签名、他家的加密内容）无法回传，静默跳过
-            // （每轮都出现，WARN 会成噪声）。
-            "reasoning" => {
-                if let Some(block) = reasoning_thinking_block(item) {
-                    acc.push("assistant", vec![block]);
-                }
-            }
+            // Codex 会把上一轮的 reasoning item 原样回传，还原为 thinking 块。只有带本代理
+            // 签名的能让上游看到上一轮推理；其余（无签名、他家的加密内容）转成无签名块，
+            // 由 converter 计入推理丢失（每轮都出现，不 WARN）。
+            "reasoning" => acc.push("assistant", vec![reasoning_thinking_block(item)]),
             // Codex remote compaction v2：客户端在 input 末尾追加该 item 触发服务端压缩。
             // 上游（Kiro/Anthropic 协议）不支持此机制；由代理层拦截并在响应侧模拟。
             // 把标志位置为 true；来自上游的真实请求内容（其余 input items）已正常转换。
@@ -162,10 +158,12 @@ fn convert_content_part(part: &Value) -> Option<Value> {
     }
 }
 
-/// 带本代理签名的 `reasoning` item → Anthropic thinking 块（摘要文本 + 签名）
-fn reasoning_thinking_block(item: &Value) -> Option<Value> {
-    let encrypted = item.get("encrypted_content").and_then(Value::as_str)?;
-    let signature = decode_encrypted_content(encrypted)?;
+/// `reasoning` item → Anthropic thinking 块（摘要文本 + 本代理签名，没有签名则不带）
+fn reasoning_thinking_block(item: &Value) -> Value {
+    let signature = item
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .and_then(decode_encrypted_content);
     let text: String = item
         .get("summary")
         .and_then(Value::as_array)
@@ -173,7 +171,7 @@ fn reasoning_thinking_block(item: &Value) -> Option<Value> {
         .flatten()
         .filter_map(|part| part.get("text").and_then(Value::as_str))
         .collect();
-    Some(thinking_block(&text, signature))
+    thinking_block(&text, signature)
 }
 
 /// `function_call` / `custom_tool_call` → Anthropic `tool_use` block

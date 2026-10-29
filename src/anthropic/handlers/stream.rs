@@ -60,6 +60,8 @@ pub(crate) async fn handle_stream_request(
     cache_accounting: Option<crate::cache::breakpoint::CacheAccounting>,
     // 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
     conversation_id: Option<String>,
+    // 历史中没能回传上游的推理（ConversionResult::history_thinking_loss），随 usage 记录入库
+    history_thinking_loss: crate::anthropic::converter::HistoryThinkingLoss,
 ) -> Response {
     // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
@@ -80,7 +82,12 @@ pub(crate) async fn handle_stream_request(
 
     // 上游响应头到达后构建 SSE 事件流（快慢两条路径共用）
     let stream_model = model.to_string();
-    let into_sse_stream = move |response: reqwest::Response, credential_id: u64| {
+    let into_sse_stream = move |upstream: crate::kiro::provider::ApiResponse| {
+        let crate::kiro::provider::ApiResponse {
+            response,
+            credential_id,
+            history_reasoning_stripped,
+        } = upstream;
         let model = stream_model.as_str();
 
         // 账号级 thinking 开关是最终裁决（开 = 强制思考，关 = 禁止思考），必须在选中账号后
@@ -121,7 +128,11 @@ pub(crate) async fn handle_stream_request(
             .with_thinking_budget_tokens(thinking_budget_tokens)
             // 计时起点在 call_api_stream 之前注入（见函数开头注释）
             .with_request_started_at(request_started_at)
-            .with_thinking_as_text(thinking_as_text);
+            .with_thinking_as_text(thinking_as_text)
+            .with_thinking_loss(super::helpers::thinking_loss(
+                history_thinking_loss,
+                history_reasoning_stripped,
+            ));
 
         // 生成初始事件
         let initial_events = ctx.generate_initial_events();
@@ -139,7 +150,7 @@ pub(crate) async fn handle_stream_request(
 
     // 宽限期内完成（含秒级返回的 400/402/429）→ 原有路径，HTTP 状态码语义不变
     match tokio::time::timeout(UPSTREAM_HEADERS_GRACE, upstream_call.as_mut()).await {
-        Ok(Ok((response, credential_id))) => sse_response(into_sse_stream(response, credential_id)),
+        Ok(Ok(upstream)) => sse_response(into_sse_stream(upstream)),
         Ok(Err(e)) => map_provider_error_with_context(e, model, input_tokens),
         Err(_) => {
             tracing::info!(
@@ -196,15 +207,16 @@ enum UpstreamPhase<C, B> {
 ///    ▼
 /// Streaming ──▶ 透传至结束
 /// ```
-pub(crate) fn create_awaiting_upstream_sse_stream<C, B, S>(
+pub(crate) fn create_awaiting_upstream_sse_stream<C, T, B, S>(
     upstream_call: Pin<Box<C>>,
     into_sse_stream: B,
     model: String,
     input_tokens: i32,
 ) -> impl Stream<Item = Result<Bytes, Infallible>>
 where
-    C: Future<Output = anyhow::Result<(reqwest::Response, u64)>> + Send + 'static,
-    B: FnOnce(reqwest::Response, u64) -> S + Send + 'static,
+    C: Future<Output = anyhow::Result<T>> + Send + 'static,
+    T: Send + 'static,
+    B: FnOnce(T) -> S + Send + 'static,
     S: Stream<Item = Result<Bytes, Infallible>> + Send + 'static,
 {
     // 首个 tick 立即触发：响应头后紧跟首个 body 字节，不依赖 hyper 在 body 未就绪时单独 flush 响应头
@@ -229,9 +241,7 @@ where
                 tokio::select! {
                     result = upstream_call.as_mut() => {
                         let mut events = match result {
-                            Ok((response, credential_id)) => {
-                                into_sse_stream(response, credential_id).boxed()
-                            }
+                            Ok(upstream) => into_sse_stream(upstream).boxed(),
                             Err(e) => {
                                 let event = provider_error_sse_event(&e, &model, input_tokens);
                                 let frame = Ok::<_, Infallible>(Bytes::from(event.to_sse_string()));

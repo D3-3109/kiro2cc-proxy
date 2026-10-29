@@ -210,6 +210,7 @@ mod tests {
             thinking_token_count: None,
             is_stream: None,
             user_agent: None,
+            thinking_loss: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["firstTokenMs"], 1234);
@@ -260,6 +261,7 @@ mod tests {
             thinking_token_count: Some(1034),
             is_stream: Some(true),
             user_agent: Some("claude-cli/2.1.5 (external, cli)".to_string()),
+            thinking_loss: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["thinkingTokenCount"], 1034);
@@ -321,6 +323,62 @@ mod tests {
         cleanup_usage_path(&path);
     }
 
+    /// thinking_loss：有丢失才落库并透传到分页 DTO；旧数据与无丢失都省略该字段
+    #[tokio::test]
+    async fn test_record_thinking_loss_persisted_and_paged() {
+        use crate::model::usage::ThinkingLoss;
+
+        assert_eq!(ThinkingLoss::default().non_empty(), None);
+        let loss = ThinkingLoss {
+            unsigned_turns: 2,
+            signature_rejected: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(loss).unwrap(),
+            serde_json::json!({"unsignedTurns": 2, "signatureRejected": true})
+        );
+
+        let path = temp_usage_path("thinking_loss_field");
+        let tracker = UsageTracker::load(&path).unwrap();
+        for thinking_loss in [loss.non_empty(), None] {
+            tracker.record(
+                1,
+                "claude-opus-4.6".to_string(),
+                100,
+                10,
+                RecordOptions {
+                    thinking_loss,
+                    ..Default::default()
+                },
+            );
+        }
+        let page = tracker.get_records_paged(1, 1, 10, &RecordLabels::default());
+        let json = serde_json::to_value(&page.records).unwrap();
+        let losses: Vec<_> = json
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.get("thinkingLoss"))
+            .collect();
+        assert_eq!(
+            losses,
+            [&serde_json::json!({"unsignedTurns": 2, "signatureRejected": true})]
+        );
+
+        let old_json = serde_json::json!({
+            "apiKeyId": 1,
+            "model": "claude-opus-4.6",
+            "inputTokens": 100,
+            "outputTokens": 10,
+            "estimatedCost": 0.0,
+            "createdAt": "2026-01-01T00:00:00Z"
+        });
+        let parsed: crate::model::usage::UsageRecord = serde_json::from_value(old_json).unwrap();
+        assert_eq!(parsed.thinking_loss, None);
+        cleanup_usage_path(&path);
+    }
+
     /// 构造指定 UTC 时间戳的记录并直接注入（绕过 record() 的 Utc::now()，
     /// 供 date_range 系列测试控制记录的 CST 归属日）
     fn inject_record_at(tracker: &UsageTracker, created_at: chrono::DateTime<chrono::Utc>) {
@@ -345,6 +403,7 @@ mod tests {
             thinking_token_count: None,
             is_stream: None,
             user_agent: None,
+            thinking_loss: None,
         };
         tracker.records.write().push(record);
     }
@@ -386,6 +445,7 @@ mod tests {
             thinking_token_count: None,
             is_stream: None,
             user_agent: None,
+            thinking_loss: None,
         };
         tracker.records.write().push(record);
     }

@@ -3,6 +3,15 @@ use tokio::time::sleep;
 
 use super::core::{KiroProvider, MAX_RETRIES_PER_CREDENTIAL, MAX_TOTAL_RETRIES};
 
+/// 上游成功响应及其来历
+pub struct ApiResponse {
+    pub response: reqwest::Response,
+    /// 实际服务本次请求的账号
+    pub credential_id: u64,
+    /// 上游拒绝了历史推理签名，本响应来自删除全部 `reasoningContent` 后的重试
+    pub history_reasoning_stripped: bool,
+}
+
 impl KiroProvider {
     pub async fn call_api(
         &self,
@@ -10,7 +19,7 @@ impl KiroProvider {
         is_compact: bool,
         thinking_adaptive_requested: bool,
         bound_ids: &[u64],
-    ) -> anyhow::Result<(reqwest::Response, u64)> {
+    ) -> anyhow::Result<ApiResponse> {
         self.call_api_with_retry(
             request_body,
             false,
@@ -42,7 +51,7 @@ impl KiroProvider {
         is_compact: bool,
         thinking_adaptive_requested: bool,
         bound_ids: &[u64],
-    ) -> anyhow::Result<(reqwest::Response, u64)> {
+    ) -> anyhow::Result<ApiResponse> {
         self.call_api_with_retry(
             request_body,
             true,

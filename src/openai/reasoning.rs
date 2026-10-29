@@ -59,12 +59,18 @@ pub(super) fn thinking_blocks_from_details(details: Option<&Value>) -> Vec<Value
         .filter_map(|d| {
             let signature = d.get("signature").and_then(Value::as_str)?;
             let text = d.get("text").and_then(Value::as_str).unwrap_or_default();
-            is_replayable_signature(signature).then(|| thinking_block(text, signature))
+            is_replayable_signature(signature).then(|| thinking_block(text, Some(signature)))
         })
         .collect()
 }
 
 /// Anthropic thinking 块
-pub(super) fn thinking_block(text: &str, signature: &str) -> Value {
-    json!({"type": "thinking", "thinking": text, "signature": signature})
+///
+/// 没有可回传签名的推理也转成 thinking 块（不带签名）：上游用不了它，但 converter
+/// 据此统计丢失的推理轮次，供面板审查。
+pub(super) fn thinking_block(text: &str, signature: Option<&str>) -> Value {
+    match signature {
+        Some(signature) => json!({"type": "thinking", "thinking": text, "signature": signature}),
+        None => json!({"type": "thinking", "thinking": text}),
+    }
 }

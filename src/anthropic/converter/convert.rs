@@ -189,6 +189,7 @@ pub(super) fn convert_request_with_chunking(
         dynamic_system,
         injected_thinking_budget,
         prefix_cached,
+        thinking_loss: history_thinking_loss,
     } = build_history(
         req,
         &messages,
@@ -315,6 +316,7 @@ pub(super) fn convert_request_with_chunking(
         prefix_cached,
         effort,
         thinking_budget_tokens: injected_thinking_budget,
+        history_thinking_loss,
     })
 }
 

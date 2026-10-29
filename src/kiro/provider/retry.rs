@@ -47,7 +47,7 @@ impl KiroProvider {
         is_compact: bool,
         thinking_adaptive_requested: bool,
         bound_ids: &[u64],
-    ) -> anyhow::Result<(reqwest::Response, u64)> {
+    ) -> anyhow::Result<super::ApiResponse> {
         // 模型感知路由：确保各账号的实际可用模型探测结果是新的。
         // 探测是全局共享的（缓存 + 串行锁），放在并发 permit 之前，
         // 避免冷启动时大量请求占着额度排队等探测
@@ -235,7 +235,11 @@ impl KiroProvider {
                 if let Some(rpm) = &self.rpm_tracker {
                     rpm.record_credential(ctx.id);
                 }
-                return Ok((response, ctx.id));
+                return Ok(super::ApiResponse {
+                    response,
+                    credential_id: ctx.id,
+                    history_reasoning_stripped: reasoning_stripped_body.is_some(),
+                });
             }
 
             // 失败响应：读取 body 用于日志/错误信息

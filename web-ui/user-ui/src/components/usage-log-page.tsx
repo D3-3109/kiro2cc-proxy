@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { useIpGeo } from '@/hooks/use-ip-geo'
 import { PageHead } from '@/components/page-head'
 import { CELL, PANEL, PANEL_FOOT, PANEL_TITLE, Pager, TH_BASE } from '@/components/table-kit'
+import type { ThinkingLoss } from '@/types/api'
 
 interface UsageLogPageProps {
   onBack: () => void
@@ -34,6 +35,26 @@ function formatCost(n: number) {
 
 /** 流式/非流徽章基类：与 admin-ui BADGE_CLS 同构（user-ui 独立 app，不跨仓共享） */
 const BADGE_CLS = 'rounded-[4px] px-1 py-px text-[9.5px] font-semibold leading-tight'
+
+/** 历史推理未能回传上游时的红色小字说明（与 admin-ui 同款文案） */
+function ThinkingLossNote({ loss }: { loss: ThinkingLoss }) {
+  const lines: string[] = []
+  if (loss.signatureRejected) lines.push('思考丢失：签名被拒，已剥离')
+  if (loss.unsignedTurns) lines.push(`思考丢失 ${loss.unsignedTurns} 轮（无签名）`)
+  if (loss.renderedTurns) lines.push(`思考丢失 ${loss.renderedTurns} 轮（文本化思考）`)
+  return (
+    <span
+      className="block text-[10px] leading-tight text-danger"
+      title="历史推理未能回传上游，模型看不到这些轮次之前的思考"
+    >
+      {lines.map((line) => (
+        <span key={line} className="block">
+          {line}
+        </span>
+      ))}
+    </span>
+  )
+}
 
 /** UA 短标识：取首个空格前段（如 claude-cli/2.1.5），完整原文走 title 悬停展示 */
 function uaShort(ua: string): string {
@@ -248,6 +269,7 @@ export function UsageLogPage({ onBack }: UsageLogPageProps) {
                                       {r.isStream ? '流式' : '非流'}
                                     </span>
                                   )}
+                                  {r.thinkingLoss && <ThinkingLossNote loss={r.thinkingLoss} />}
                                 </div>
                               </td>
                               <td className={CELL}>

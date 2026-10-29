@@ -27,7 +27,7 @@ mod tests {
         upstream_rx: oneshot::Receiver<UpstreamResult>,
     ) -> impl futures::Stream<Item = Result<Bytes, Infallible>> {
         let upstream_call = Box::pin(async move { upstream_rx.await.unwrap() });
-        let into_sse_stream = |_response: reqwest::Response, _credential_id: u64| {
+        let into_sse_stream = |_upstream: (reqwest::Response, u64)| {
             stream::iter([Ok::<_, Infallible>(Bytes::from_static(
                 MESSAGE_START_FRAME.as_bytes(),
             ))])
