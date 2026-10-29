@@ -333,7 +333,7 @@ docker compose pull
 docker compose down && docker compose up -d
 ```
 
-> **说明**：每次推送新 tag（如 `v1.x.x`）后，GitHub Actions 会自动构建并推送新镜像到 `ghcr.io`。`docker compose pull` 会拉取最新的 `latest` 镜像。
+> **说明**：每次推送到 `local` 分支，GitHub Actions 会先跑测试，通过后构建 amd64/arm64 镜像并推送到 `ghcr.io`，标签为 `latest`、`local` 和 `sha-<短提交号>`；推送 `v*` tag 时额外生成语义化版本标签。`docker compose pull` 会拉取最新的 `latest` 镜像。
 
 ### 方式二：systemd 一键安装
 

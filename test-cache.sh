@@ -13,9 +13,9 @@
 set -uo pipefail
 
 # ──────── 配置 ────────
-API_KEY="sk-2b3f2712f19746c6a85272c48125f20e"
-ADMIN_KEY="Hackair007!"
-BASE_URL="http://localhost:5678"
+API_KEY="${API_KEY:?set API_KEY to a proxy API key}"
+ADMIN_KEY="${ADMIN_KEY:?set ADMIN_KEY to the admin password}"
+BASE_URL="${BASE_URL:-http://localhost:5678}"
 MODEL="claude-sonnet-4-5"
 ROUNDS=5
 # k_ref（sonnet 实测值）

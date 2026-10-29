@@ -48,3 +48,4 @@ server.env
 .pnpm-store/
 **/pnpm-workspace.yaml
 
+/app/config/throttle_log.json
