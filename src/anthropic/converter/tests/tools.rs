@@ -374,6 +374,54 @@ fn test_convert_assistant_message_with_text_and_tool_use() {
 }
 
 #[test]
+fn test_history_thinking_signature_replayed_as_reasoning_content() {
+    use crate::anthropic::types::Message as AnthropicMessage;
+
+    let real_signature = "CAQS".repeat(250);
+    let msg = AnthropicMessage {
+        role: "assistant".to_string(),
+        content: serde_json::json!([
+            {"type": "thinking", "thinking": "secret 4829163", "signature": real_signature},
+            {"type": "text", "text": "ready"}
+        ]),
+    };
+
+    let am = convert_assistant_message(&msg)
+        .expect("应该成功转换")
+        .assistant_response_message;
+
+    assert_eq!(am.content, "ready", "thinking 明文不进 content");
+    let wire = serde_json::to_value(&am).unwrap();
+    assert_eq!(
+        wire["reasoningContent"],
+        serde_json::json!({"reasoningText": {"text": "secret 4829163", "signature": real_signature}})
+    );
+}
+
+#[test]
+fn test_history_fake_signature_not_replayed() {
+    use crate::anthropic::types::Message as AnthropicMessage;
+
+    let msg = AnthropicMessage {
+        role: "assistant".to_string(),
+        content: serde_json::json!([
+            {"type": "thinking", "thinking": "x", "signature": crate::anthropic::stream::generate_fake_signature()},
+            {"type": "text", "text": "ready"}
+        ]),
+    };
+
+    let am = convert_assistant_message(&msg)
+        .expect("应该成功转换")
+        .assistant_response_message;
+
+    let wire = serde_json::to_value(&am).unwrap();
+    assert!(
+        wire.get("reasoningContent").is_none(),
+        "伪造签名不得回传上游"
+    );
+}
+
+#[test]
 fn test_remove_orphaned_tool_uses() {
     use crate::kiro::model::requests::tool::ToolUseEntry;
 

@@ -22,7 +22,7 @@ pub use calib::{
 };
 pub use context::StreamContext;
 pub(crate) use echo_guard::ResponseEchoGuard;
-pub(crate) use helpers::generate_fake_signature;
+pub(crate) use helpers::{generate_fake_signature, is_fake_signature};
 pub use state::SseEvent;
 pub(crate) use termination::{
     CONTENT_LENGTH_EXCEEDED_EXCEPTION, UpstreamTermination, upstream_aborted_message,

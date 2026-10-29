@@ -15,6 +15,7 @@ const THROTTLE_JITTER_MAX_MS: u64 = 1500;
 const RETRY_BACKOFF_MAX_EXPONENT: usize = 6;
 const RPM_GATE_DEFAULT_WAIT_SECS: u64 = 3;
 const RPM_GATE_MAX_WAIT_SECS: u64 = 5;
+const THINKING_SIGNATURE_INVALID_REASON: &str = "THINKING_SIGNATURE_INVALID";
 
 impl KiroProvider {
     pub(crate) fn retry_delay(attempt: usize) -> Duration {
@@ -108,6 +109,36 @@ impl KiroProvider {
     /// 属账号级缺陷而非请求级错误，应故障转移到其他账号。
     pub(crate) fn is_profile_arn_required_error(body: &str) -> bool {
         body.contains("profileArn is required")
+    }
+
+    /// 检测数据面 400 是否为"历史推理签名无效"。
+    ///
+    /// 回传的 `reasoningContent` 签名不被当前账号/模型认可（或已损坏）时，上游返回
+    /// `400 {"message":"messages.3.content.0: Invalid `signature` in `thinking` block",
+    /// "reason":"THINKING_SIGNATURE_INVALID"}`。删掉签名即可正常请求，见 [`Self::strip_history_reasoning`]。
+    pub(crate) fn is_thinking_signature_invalid(body: &str) -> bool {
+        body.contains(THINKING_SIGNATURE_INVALID_REASON)
+    }
+
+    /// 删除 history 中所有 `assistantResponseMessage.reasoningContent`，用于签名被拒后的降级重试。
+    ///
+    /// 没有可删的字段（或 JSON 无法解析）时返回 None：此时重试结果不会变，调用方应直接报错。
+    pub(crate) fn strip_history_reasoning(body: &str) -> Option<String> {
+        let mut value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+        let history = value
+            .pointer_mut("/conversationState/history")?
+            .as_array_mut()?;
+
+        let mut stripped = false;
+        for entry in history {
+            if let Some(message) = entry
+                .get_mut("assistantResponseMessage")
+                .and_then(|m| m.as_object_mut())
+            {
+                stripped |= message.remove("reasoningContent").is_some();
+            }
+        }
+        stripped.then(|| value.to_string())
     }
 
     /// 无 profile_arn 账号的数据面 fallback ARN。

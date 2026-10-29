@@ -8,8 +8,8 @@ use std::time::Instant;
 
 use crate::anthropic::types::{ContentBlock, MessagesRequest};
 use crate::kiro::model::requests::conversation::{
-    AssistantMessage, HistoryAssistantMessage, HistoryUserMessage, Message,
-    UserInputMessageContext, UserMessage,
+    AssistantMessage, HistoryAssistantMessage, HistoryUserMessage, Message, ReasoningContent,
+    ReasoningText, UserInputMessageContext, UserMessage,
 };
 use crate::kiro::model::requests::tool::ToolUseEntry;
 
@@ -313,6 +313,7 @@ pub(super) fn convert_assistant_message(
 ) -> Result<HistoryAssistantMessage, ConversionError> {
     let mut text_content = String::new();
     let mut tool_uses = Vec::new();
+    let mut reasoning: Option<ReasoningContent> = None;
 
     match &msg.content {
         serde_json::Value::String(s) => {
@@ -322,10 +323,21 @@ pub(super) fn convert_assistant_message(
             for item in arr {
                 match serde_json::from_value::<ContentBlock>(item.clone()) {
                     Ok(block) => match block.block_type.as_str() {
-                        // 原生 thinking 块在历史中整块丢弃：thinking 仅对当轮推理有意义，
-                        // 保留在 history 中会导致 payload 膨胀（Opus 每轮可产生数万字符），
-                        // 触发 Kiro 400 "Improperly formed request"。
-                        "thinking" => {}
+                        // 带上游真实签名的 thinking 块回传为 reasoningContent（明文 + 签名配对）；
+                        // 无签名或代理伪造签名的块不回传。
+                        // 一条消息含多个块时取最后一个：它覆盖到该轮结束的推理。
+                        "thinking" => {
+                            if let Some(signature) = block.signature.filter(|s| {
+                                !s.is_empty() && !crate::anthropic::stream::is_fake_signature(s)
+                            }) {
+                                reasoning = Some(ReasoningContent {
+                                    reasoning_text: ReasoningText {
+                                        text: block.thinking.unwrap_or_default(),
+                                        signature,
+                                    },
+                                });
+                            }
+                        }
                         "text" => {
                             if let Some(text) = block.text {
                                 // thinkingAsText 渲染出的 text 块：与上方原生 thinking 一致整块
@@ -396,6 +408,7 @@ pub(super) fn convert_assistant_message(
         message_id: Some(message_id),
         content: final_content,
         tool_uses: None,
+        reasoning_content: reasoning,
     };
     if !tool_uses.is_empty() {
         assistant = assistant.with_tool_uses(tool_uses);
@@ -418,6 +431,7 @@ pub(super) fn merge_assistant_messages(
 
     let mut all_tool_uses: Vec<ToolUseEntry> = Vec::new();
     let mut content_parts: Vec<String> = Vec::new();
+    let mut reasoning_content = None;
 
     for msg in messages {
         let converted = convert_assistant_message(msg)?;
@@ -427,6 +441,10 @@ pub(super) fn merge_assistant_messages(
         }
         if let Some(tus) = am.tool_uses {
             all_tool_uses.extend(tus);
+        }
+        // 合并后保留最新一条的推理：它覆盖到合并轮次结束
+        if am.reasoning_content.is_some() {
+            reasoning_content = am.reasoning_content;
         }
     }
 
@@ -471,6 +489,7 @@ pub(super) fn merge_assistant_messages(
         message_id: Some(message_id),
         content,
         tool_uses: None,
+        reasoning_content,
     };
     if !all_tool_uses.is_empty() {
         assistant = assistant.with_tool_uses(all_tool_uses);

@@ -603,13 +603,15 @@ fn test_consecutive_thinking_only_assistants_merge_to_non_empty_content() {
     };
     let r = convert_request(&req).unwrap();
     let hist = serde_json::to_string(&r.conversation_state.history).unwrap();
-    assert!(!hist.contains("secret"), "{hist}");
     let mut assistants = 0;
     for m in &r.conversation_state.history {
         if let crate::kiro::model::requests::conversation::Message::Assistant(a) = m {
             assistants += 1;
+            let content = &a.assistant_response_message.content;
+            // 思考明文只允许经 reasoningContent 回传，不得混入可见 content
+            assert!(!content.contains("secret"), "{hist}");
             assert!(
-                !a.assistant_response_message.content.is_empty(),
+                !content.is_empty(),
                 "合并后的 assistant content 不得为空: {hist}"
             );
         }

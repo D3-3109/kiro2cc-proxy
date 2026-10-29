@@ -75,6 +75,8 @@ impl KiroProvider {
         let continuation_id = Self::extract_continuation_id_from_request(request_body);
         // 本次请求内已限流的账号：重试时避开，但不销毁 sticky 绑定
         let mut throttled_in_request: Vec<u64> = Vec::new();
+        // 历史推理签名被拒后改用的请求体（已删 reasoningContent），整个请求只降级一次
+        let mut reasoning_stripped_body: Option<String> = None;
 
         for attempt in 0..max_retries {
             // 获取调用上下文（优先路由到同一会话的缓存账号）
@@ -175,7 +177,7 @@ impl KiroProvider {
 
             let url = self.base_url_for(&ctx.credentials, &endpoint);
             let effective_body = Self::rewrite_request_body(
-                request_body,
+                reasoning_stripped_body.as_deref().unwrap_or(request_body),
                 &ctx.credentials,
                 thinking_adaptive_requested,
             );
@@ -295,6 +297,28 @@ impl KiroProvider {
                             body
                         );
                     }
+                    last_error = Some(anyhow::anyhow!(
+                        "{} API 请求失败: {} {}",
+                        api_type,
+                        status,
+                        body
+                    ));
+                    continue;
+                }
+                // 历史推理签名无效（跨账号/跨模型或签名损坏）：删掉签名立即重试一次。
+                // 属请求内容问题，不计入账号失败、不退避；模型只是看不到之前的思考。
+                let retry_without_reasoning =
+                    reasoning_stripped_body.is_none() && Self::is_thinking_signature_invalid(&body);
+                if retry_without_reasoning
+                    && let Some(stripped) = Self::strip_history_reasoning(request_body)
+                {
+                    tracing::warn!(
+                        "历史推理签名被上游拒绝，删除 reasoningContent 后重试（尝试 {}/{}）: {}",
+                        attempt + 1,
+                        max_retries,
+                        body
+                    );
+                    reasoning_stripped_body = Some(stripped);
                     last_error = Some(anyhow::anyhow!(
                         "{} API 请求失败: {} {}",
                         api_type,

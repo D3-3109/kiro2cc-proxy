@@ -107,6 +107,57 @@ mod tests {
     }
 
     #[test]
+    fn test_is_thinking_signature_invalid_matches_upstream_body() {
+        // 线上实测返回体（伪造签名回传）
+        assert!(KiroProvider::is_thinking_signature_invalid(
+            r#"{"message":"messages.3.content.0: Invalid `signature` in `thinking` block","reason":"THINKING_SIGNATURE_INVALID"}"#
+        ));
+        assert!(!KiroProvider::is_thinking_signature_invalid(
+            r#"{"message":"Improperly formed request.","reason":null}"#
+        ));
+    }
+
+    #[test]
+    fn test_strip_history_reasoning_removes_every_reasoning_content() {
+        let body = serde_json::json!({
+            "conversationState": {
+                "history": [
+                    {"userInputMessage": {"content": "q1"}},
+                    {"assistantResponseMessage": {"content": "a1",
+                        "reasoningContent": {"reasoningText": {"text": "", "signature": "s1"}}}},
+                    {"userInputMessage": {"content": "q2"}},
+                    {"assistantResponseMessage": {"content": "a2",
+                        "reasoningContent": {"reasoningText": {"text": "t", "signature": "s2"}}}}
+                ],
+                "currentMessage": {"userInputMessage": {"content": "q3"}}
+            }
+        })
+        .to_string();
+
+        let stripped: serde_json::Value =
+            serde_json::from_str(&KiroProvider::strip_history_reasoning(&body).unwrap()).unwrap();
+        let history = stripped["conversationState"]["history"].as_array().unwrap();
+        assert_eq!(history.len(), 4, "只删字段，不删消息");
+        assert!(history.iter().all(|m| {
+            m.pointer("/assistantResponseMessage/reasoningContent")
+                .is_none()
+        }));
+        assert_eq!(history[3]["assistantResponseMessage"]["content"], "a2");
+    }
+
+    #[test]
+    fn test_strip_history_reasoning_none_when_nothing_to_strip() {
+        let body = serde_json::json!({
+            "conversationState": {
+                "history": [{"assistantResponseMessage": {"content": "a1"}}]
+            }
+        })
+        .to_string();
+        assert!(KiroProvider::strip_history_reasoning(&body).is_none());
+        assert!(KiroProvider::strip_history_reasoning("not json").is_none());
+    }
+
+    #[test]
     fn test_extract_agent_task_type_vibe_default() {
         assert_eq!(
             KiroProvider::extract_agent_task_type_from_request("{}"),

@@ -328,6 +328,24 @@ pub struct AssistantMessage {
     /// 工具使用列表
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_uses: Option<Vec<ToolUseEntry>>,
+    /// 该轮的加密推理，回传后上游模型可见上一轮思考
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<ReasoningContent>,
+}
+
+/// 回传的推理块（Bedrock Converse `ReasoningContentBlock` 形态）：
+/// `{"reasoningText": {"text": ..., "signature": ...}}`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningContent {
+    pub reasoning_text: ReasoningText,
+}
+
+/// 明文推理与上游签名，签名须与该段明文配对
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningText {
+    pub text: String,
+    pub signature: String,
 }
 
 impl AssistantMessage {
@@ -337,6 +355,7 @@ impl AssistantMessage {
             message_id: None,
             content: content.into(),
             tool_uses: None,
+            reasoning_content: None,
         }
     }
 
