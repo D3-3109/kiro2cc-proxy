@@ -159,6 +159,7 @@ pub async fn post_messages_cc(
     let effort = conversion_result.effort.clone();
     let thinking_budget_tokens = conversion_result.thinking_budget_tokens;
     let history_thinking_loss = conversion_result.history_thinking_loss;
+    let history_reasoning_replay = conversion_result.history_reasoning_replay;
 
     // web_search server tool 桥接上下文（D5/D7：未携带时为 None，零行为变化）
     // 必须在 KiroRequest 构建（conversation_state 被 move）前构造
@@ -292,6 +293,7 @@ pub async fn post_messages_cc(
             cache_accounting,
             conversation_id,
             history_thinking_loss,
+            history_reasoning_replay,
         )
         .await
     } else {
@@ -320,6 +322,7 @@ pub async fn post_messages_cc(
             cache_accounting,
             conversation_id,
             history_thinking_loss,
+            history_reasoning_replay,
         )
         .await
     }

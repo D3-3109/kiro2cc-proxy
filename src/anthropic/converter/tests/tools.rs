@@ -737,8 +737,8 @@ fn test_chunking_note_is_deterministic_across_requests() {
 }
 
 #[test]
-fn test_history_thinking_loss_counts_unreplayed_turns() {
-    use super::super::result::HistoryThinkingLoss;
+fn test_history_thinking_loss_and_replay_counted_per_turn() {
+    use super::super::result::{HistoryReasoningReplay, HistoryThinkingLoss};
     use crate::anthropic::types::Message as AnthropicMessage;
 
     let message = |role: &str, content: serde_json::Value| AnthropicMessage {
@@ -793,11 +793,20 @@ fn test_history_thinking_loss_counts_unreplayed_turns() {
         metadata: None,
     };
 
+    let result = convert_request(&req).unwrap();
     assert_eq!(
-        convert_request(&req).unwrap().history_thinking_loss,
+        result.history_thinking_loss,
         HistoryThinkingLoss {
             unsigned_turns: 2,
             rendered_turns: 1,
+        }
+    );
+    // 只有第 2 轮回传了真签名
+    assert_eq!(
+        result.history_reasoning_replay,
+        HistoryReasoningReplay {
+            signature_chars: real.len(),
+            blocks: 1,
         }
     );
 }

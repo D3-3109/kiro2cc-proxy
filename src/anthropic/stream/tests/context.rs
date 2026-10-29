@@ -4,8 +4,8 @@
 mod tests {
     use crate::anthropic::stream::{StreamContext, context_window_for_model};
 
-    /// 捕获 INFO 级 tracing 输出（同步闭包），返回 (闭包返回值, 日志文本)
-    fn capture_info_logs<T>(f: impl FnOnce() -> T) -> (T, String) {
+    /// 捕获 DEBUG 及以上 tracing 输出（同步闭包），返回 (闭包返回值, 日志文本)
+    fn capture_debug_logs<T>(f: impl FnOnce() -> T) -> (T, String) {
         use std::io::Write;
         use std::sync::{Arc, Mutex};
 
@@ -24,7 +24,7 @@ mod tests {
         let buf = BufWriter::default();
         let writer = buf.clone();
         let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::DEBUG)
             .with_ansi(false)
             .with_writer(move || writer.clone())
             .finish();
@@ -271,7 +271,7 @@ mod tests {
             ctx.output_full_text = "a".repeat(346 * 8);
             let metering_event = crate::kiro::model::events::Event::Metering(
                 crate::kiro::model::events::MeteringEvent {
-                    usage: 0.0904,
+                    usage: 0.06475,
                     unit_plural: "credits".to_string(),
                     unit: String::new(),
                     cache_read_input_tokens: None,
@@ -284,7 +284,7 @@ mod tests {
             }
             // [cache-miss] 诊断：非续流轮 credits 反推生效（命中率 ~39%）应触发一次；
             // 续流轮回退静态前缀（inference_applied=false）不触发
-            let (final_events, diag_out) = capture_info_logs(|| ctx.generate_final_events());
+            let (final_events, diag_out) = capture_debug_logs(|| ctx.generate_final_events());
             if continued {
                 assert!(!diag_out.contains("[cache-miss]"), "{diag_out}");
             } else {
@@ -309,7 +309,7 @@ mod tests {
             } else {
                 assert!((20_000..=22_500).contains(&recorded_read));
             }
-            assert_eq!(page.records[0].credits_used, Some(0.0904));
+            assert_eq!(page.records[0].credits_used, Some(0.06475));
 
             // 2. 末尾 message_delta 保持静态前缀口径，与 message_start 一致
             let delta_evt = final_events

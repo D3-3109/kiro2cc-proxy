@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! credits 反推发现上游缓存部分未命中时的 INFO 诊断日志。
+//! credits 反推发现上游缓存部分未命中时的 DEBUG 诊断日志。
 //!
 //! 触发：creditsUsed 反推实际生效，且反推读取 < 前缀估算 × 0.8（命中率 < 80%）。
 //! 诊断字段与候选原因的对应：
@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use crate::model::usage::{BilledOutput, MIN_INFER_INPUT_TOKENS, infer_cache_read_from_credits};
+use crate::model::usage::{
+    BilledOutput, MIN_INFER_INPUT_TOKENS, ReplayedReasoning, infer_cache_read_from_credits,
+};
 
 /// 命中率低于该比例视为部分未命中，输出诊断
 const HIT_RATIO_TRIGGER: f64 = 0.8;
@@ -45,6 +47,7 @@ pub fn maybe_log(
     model: &str,
     prefix_estimated_tokens: i32,
     final_input_tokens: i32,
+    replayed: &ReplayedReasoning,
     billed_output: &BilledOutput,
     credits_used: Option<f64>,
     inference_applied: bool,
@@ -84,14 +87,14 @@ pub fn maybe_log(
         return;
     };
     let Some(inferred) =
-        infer_cache_read_from_credits(model, final_input_tokens, billed_output, credits)
+        infer_cache_read_from_credits(model, final_input_tokens, replayed, billed_output, credits)
     else {
         return;
     };
     if inferred as f64 >= prefix_estimated_tokens as f64 * HIT_RATIO_TRIGGER {
         return;
     }
-    tracing::info!(
+    tracing::debug!(
         session = %conversation_id,
         model = %model,
         prefix_estimated = prefix_estimated_tokens,
@@ -101,6 +104,7 @@ pub fn maybe_log(
         input = final_input_tokens,
         output = billed_output.tokens,
         signature_chars = billed_output.signature_chars,
+        replayed_signature_chars = replayed.signature_chars,
         credits,
         // 闲置间隔 = 本轮请求开始 - 上次结算：结算时刻在响应读完后，若用 settled_at
         // 计算会含本轮生成耗时，把短闲置误判为 TTL 逐出；并发时序倒挂时不输出该字段
@@ -134,10 +138,15 @@ mod tests {
         }
     }
 
+    const NO_REPLAY: ReplayedReasoning = ReplayedReasoning {
+        signature_chars: 0,
+        blocks: 0,
+    };
+
     /// haiku 5.5 部分未命中：prefix 53650、input 53776、输出 346，
     /// credits 按计费曲线取 21000 命中 → 命中率约 39%，应触发
     fn event_credits() -> (i32, i32, BilledOutput, f64) {
-        (53_650, 53_776, plain(346), 0.0904)
+        (53_650, 53_776, plain(346), 0.06475)
     }
 
     #[derive(Clone, Default)]
@@ -157,7 +166,7 @@ mod tests {
         let buf = BufWriter::default();
         let writer = buf.clone();
         let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::DEBUG)
             .with_ansi(false)
             .with_writer(move || writer.clone())
             .finish();
@@ -175,6 +184,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -201,8 +211,9 @@ mod tests {
                 "claude-haiku-5-5",
                 53_650,
                 53_776,
+                &NO_REPLAY,
                 &plain(346),
-                Some(0.0170),
+                Some(0.0127),
                 true,
                 64,
                 Instant::now(),
@@ -221,6 +232,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -232,6 +244,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -259,6 +272,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -270,6 +284,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -297,6 +312,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -308,9 +324,10 @@ mod tests {
                 "claude-opus-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 // opus 5.5 计费曲线下 21000 命中所需的部分未命中 credits
-                Some(1.1896),
+                Some(0.8607),
                 true,
                 64,
                 Instant::now(),
@@ -352,6 +369,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,
@@ -378,8 +396,9 @@ mod tests {
                 "claude-haiku-5-5",
                 53_650,
                 53_776,
+                &NO_REPLAY,
                 &plain(346),
-                Some(0.0904),
+                Some(0.06475),
                 false,
                 64,
                 Instant::now(),
@@ -394,6 +413,7 @@ mod tests {
                 "claude-haiku-5-5",
                 prefix,
                 input,
+                &NO_REPLAY,
                 &output,
                 Some(credits),
                 true,

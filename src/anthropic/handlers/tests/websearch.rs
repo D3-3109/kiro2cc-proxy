@@ -108,7 +108,7 @@ mod tests {
         let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
             .with_prefix_estimated_tokens(53_650);
         // haiku 5.5 53776 输入全未命中价：续流前反推为 0
-        let full_miss_credits = Some(0.1345);
+        let full_miss_credits = Some(0.0953);
         assert_eq!(
             ctx.derive_report_cache_usage(53_776, full_miss_credits, &Default::default()),
             (53_776, 0, 0)

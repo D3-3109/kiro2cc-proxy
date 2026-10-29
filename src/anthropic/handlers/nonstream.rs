@@ -288,6 +288,8 @@ pub(crate) async fn handle_non_stream_request(
     conversation_id: Option<String>,
     // 历史中没能回传上游的推理（ConversionResult::history_thinking_loss），随 usage 记录入库
     history_thinking_loss: crate::anthropic::converter::HistoryThinkingLoss,
+    // 历史中回传上游的推理签名（ConversionResult::history_reasoning_replay），供 credits 反推
+    history_reasoning_replay: crate::anthropic::converter::HistoryReasoningReplay,
 ) -> Response {
     // 总耗时起点：进入 handler 即计时（到 record 落库前，口径见 proposal）
     let request_started_at = std::time::Instant::now();
@@ -725,10 +727,13 @@ pub(crate) async fn handle_non_stream_request(
     };
     // 显式注入：handler 始终算出了 prefix_estimated_tokens（可能为 0），
     // 结合 metering_usage 反推校准后以 Some 传入 select_final_usage 选用 prefix 分支
+    let replayed_reasoning =
+        super::helpers::replayed_reasoning(history_reasoning_replay, history_reasoning_stripped);
     let prefix_estimated = Some(crate::model::usage::refine_prefix_cache_read(
         model,
         prefix_estimated_tokens,
         final_input_tokens,
+        &replayed_reasoning,
         &billed_output,
         // 多轮累计输出与末轮积分不匹配，仅退回静态前缀，不改积分落库。
         if has_continuation {
@@ -744,6 +749,7 @@ pub(crate) async fn handle_non_stream_request(
         model,
         prefix_estimated_tokens,
         final_input_tokens,
+        &replayed_reasoning,
         &billed_output,
         metering_usage,
         // 与实际用量选路（metering_pair）同口径：read/creation 任一缺失即无完整真值
@@ -1013,8 +1019,8 @@ mod native_tests {
             let billed = visible + count_thinking_tokens(&content).unwrap();
             // haiku 5.5 计费曲线：cold − 命中比例 · (cold − cached) + 输出
             let input_mtok = final_input_tokens as f64 / 1_000_000.0;
-            let cold = 0.00083 + 2.485 * input_mtok;
-            let cached = 0.00082 + 0.248 * input_mtok;
+            let cold = 0.00014 + 1.768 * input_mtok;
+            let cached = 0.00023 + 0.177 * input_mtok;
             let read_ratio = 20_000.0 / final_input_tokens as f64;
             let credits = cold - read_ratio * (cold - cached) + 8.4 * billed as f64 / 1_000_000.0;
             // 原生块（仅 native 时位于首位）拆出摘要与签名；签名 "sig" 的估算值低于摘要，
@@ -1062,6 +1068,7 @@ mod native_tests {
                             "claude-haiku-5-5",
                             prefix_estimated_tokens,
                             final_input_tokens,
+                            &Default::default(),
                             &output,
                             Some(credits),
                         ),

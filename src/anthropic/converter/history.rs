@@ -18,7 +18,7 @@ use super::message::process_message_content_with_tool_filter;
 use super::prompt::{
     is_dynamic_hook_injection, is_token_budget_reminder, normalize_billing_header,
 };
-use super::result::{ConversionError, HistoryThinkingLoss};
+use super::result::{ConversionError, HistoryReasoningReplay, HistoryThinkingLoss};
 use super::thinking::{
     generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags, thinking_prefix_budget,
 };
@@ -42,6 +42,8 @@ pub(super) struct BuiltHistory {
     pub prefix_cached: bool,
     /// 带推理却没能回传上游的 assistant 轮次
     pub thinking_loss: HistoryThinkingLoss,
+    /// 回传上游的推理签名
+    pub reasoning_replay: HistoryReasoningReplay,
 }
 
 /// 构建历史消息
@@ -200,12 +202,18 @@ pub(super) fn build_history(
     let mut user_buffer: Vec<&crate::anthropic::types::Message> = Vec::new();
     let mut assistant_buffer: Vec<&crate::anthropic::types::Message> = Vec::new();
     let mut thinking_loss = HistoryThinkingLoss::default();
+    let mut reasoning_replay = HistoryReasoningReplay::default();
 
     for msg in &messages[..history_end_index] {
         if msg.role == "user" {
             // 先处理累积的 assistant 消息
             if !assistant_buffer.is_empty() {
-                push_assistant_turn(&mut history, &assistant_buffer, &mut thinking_loss)?;
+                push_assistant_turn(
+                    &mut history,
+                    &assistant_buffer,
+                    &mut thinking_loss,
+                    &mut reasoning_replay,
+                )?;
                 assistant_buffer.clear();
             }
             user_buffer.push(msg);
@@ -223,7 +231,12 @@ pub(super) fn build_history(
 
     // 处理末尾累积的 assistant 消息
     if !assistant_buffer.is_empty() {
-        push_assistant_turn(&mut history, &assistant_buffer, &mut thinking_loss)?;
+        push_assistant_turn(
+            &mut history,
+            &assistant_buffer,
+            &mut thinking_loss,
+            &mut reasoning_replay,
+        )?;
     }
 
     // 处理结尾的孤立 user 消息
@@ -242,21 +255,25 @@ pub(super) fn build_history(
         injected_thinking_budget,
         prefix_cached: determine_prefix_cached(history_end_index > 0, h0_frozen),
         thinking_loss,
+        reasoning_replay,
     })
 }
 
-/// 合并一轮 assistant 消息写入历史；没回传推理时按其中的推理形态计入 `loss`
+/// 合并一轮 assistant 消息写入历史；回传的推理签名计入 `replay`，
+/// 没回传推理时按其中的推理形态计入 `loss`
 fn push_assistant_turn(
     history: &mut Vec<Message>,
     turn: &[&crate::anthropic::types::Message],
     loss: &mut HistoryThinkingLoss,
+    replay: &mut HistoryReasoningReplay,
 ) -> Result<(), ConversionError> {
     let merged = merge_assistant_messages(turn)?;
-    let replayed = merged
-        .assistant_response_message
-        .reasoning_content
-        .is_some();
-    match lost_thinking_form(turn).filter(|_| !replayed) {
+    let replayed = merged.assistant_response_message.reasoning_content.as_ref();
+    if let Some(reasoning) = replayed {
+        replay.signature_chars += reasoning.reasoning_text.signature.len();
+        replay.blocks += 1;
+    }
+    match lost_thinking_form(turn).filter(|_| replayed.is_none()) {
         Some(LostThinkingForm::Unsigned) => loss.unsigned_turns += 1,
         Some(LostThinkingForm::Rendered) => loss.rendered_turns += 1,
         None => {}
