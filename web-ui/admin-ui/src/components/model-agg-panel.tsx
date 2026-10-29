@@ -5,15 +5,22 @@ import { useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
 import { CELL, PANEL, TH_BASE } from '@/components/table-kit'
-import { formatCost, getModelColor, recordCredits } from '@/components/usage-log-table'
+import {
+  cacheHitPercent,
+  formatCost,
+  formatHitPercent,
+  getModelColor,
+  recordCredits,
+} from '@/components/usage-log-table'
 import { formatTokenCount, localeTag } from '@/lib/locale'
 import type { UsageRecord } from '@/types/api'
 
-/** 逐模型用量表头：模型 + 5 个右对齐数值列 */
+/** 逐模型用量表头：模型 + 6 个右对齐数值列 */
 const MODEL_COLS: { labelKey: string; num?: boolean }[] = [
   { labelKey: 'common.colModel' },
   { labelKey: 'apiKeys.colRequests', num: true },
   { labelKey: 'apiKeys.colInputTokens', num: true },
+  { labelKey: 'common.colCacheHit', num: true },
   { labelKey: 'apiKeys.colOutputTokens', num: true },
   { labelKey: 'common.colCost', num: true },
   { labelKey: 'apiKeys.colCredits', num: true },
@@ -22,6 +29,7 @@ const MODEL_COLS: { labelKey: string; num?: boolean }[] = [
 interface ModelAgg {
   requests: number
   inputTokens: number
+  cacheReadTokens: number
   outputTokens: number
   cost: number
   credits: number
@@ -31,10 +39,18 @@ interface ModelAgg {
 // 逐模型聚合仅覆盖当前页（全量聚合需后端新接口），标题文案已含「（当前页）」限定
 function aggregateByModel(records: UsageRecord[]): Record<string, ModelAgg> {
   return records.reduce<Record<string, ModelAgg>>((acc, r) => {
-    const entry =
-      acc[r.model] ?? { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, credits: 0, creditsSaved: 0 }
+    const entry = acc[r.model] ?? {
+      requests: 0,
+      inputTokens: 0,
+      cacheReadTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+      credits: 0,
+      creditsSaved: 0,
+    }
     entry.requests += 1
     entry.inputTokens += r.inputTokens
+    entry.cacheReadTokens += r.cacheReadInputTokens ?? 0
     entry.outputTokens += r.outputTokens
     entry.cost += r.estimatedCost
     entry.credits += recordCredits(r)
@@ -103,6 +119,12 @@ export function ModelAggPanel({ records }: { records: UsageRecord[] }) {
                     </td>
                     <td className={`${CELL} text-right font-mono text-[12px] tabular-nums text-ink-2`}>
                       {formatTokenCount(m.inputTokens)}
+                    </td>
+                    <td
+                      className={`${CELL} text-right font-mono text-[12px] tabular-nums text-ok`}
+                      title={t('common.cacheHitEstimateHint')}
+                    >
+                      {formatHitPercent(cacheHitPercent(m.cacheReadTokens, m.inputTokens))}
                     </td>
                     <td className={`${CELL} text-right font-mono text-[12px] tabular-nums text-ink-2`}>
                       {formatTokenCount(m.outputTokens)}

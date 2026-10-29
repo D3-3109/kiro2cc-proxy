@@ -181,6 +181,8 @@ export interface UsageSummary {
   totalRequests: number
   totalInputTokens: number
   totalOutputTokens: number
+  /** 缓存命中的输入 tokens（已含于 totalInputTokens） */
+  totalCacheReadTokens: number
   totalCost: number
   totalCredits: number
   totalCreditsSaved?: number
@@ -192,6 +194,8 @@ export interface ModelUsage {
   requests: number
   inputTokens: number
   outputTokens: number
+  /** 缓存命中的输入 tokens（已含于 inputTokens） */
+  cacheReadTokens: number
   cost: number
   credits: number
   creditsSaved: number

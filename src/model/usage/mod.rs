@@ -85,6 +85,11 @@ impl UsageRecord {
         self.credits_used
             .unwrap_or_else(|| self.estimated_cost * get_k_ref(&self.model))
     }
+
+    /// 缓存命中的输入 tokens；旧记录（None）按 0 计
+    fn cache_read_tokens(&self) -> i64 {
+        self.cache_read_input_tokens.unwrap_or(0).max(0) as i64
+    }
 }
 
 /// `record()` 的可选参数集合：位置参数已达 14 个且多次追加（thinking/is_stream），
@@ -121,6 +126,8 @@ pub struct UsageSummary {
     pub total_input_tokens: i64,
     /// 总输出 tokens
     pub total_output_tokens: i64,
+    /// 缓存命中的输入 tokens（已含于 total_input_tokens；与之同为现存明细口径）
+    pub total_cache_read_tokens: i64,
     /// 总估算费用（美元）
     pub total_cost: f64,
     /// 累计真实 credits 消耗（旧记录按 estimated_cost * k_ref 回退估算）
@@ -132,13 +139,15 @@ pub struct UsageSummary {
 }
 
 /// 按模型分组的用量
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsage {
     pub model: String,
     pub requests: u64,
     pub input_tokens: i64,
     pub output_tokens: i64,
+    /// 缓存命中的输入 tokens（已含于 input_tokens）
+    pub cache_read_tokens: i64,
     pub cost: f64,
     /// 累计真实 credits 消耗（旧记录按 estimated_cost * k_ref 回退估算）
     pub credits: f64,
@@ -513,22 +522,25 @@ impl UsageTracker {
             .filter(|r| r.api_key_id == api_key_id)
             .collect();
 
-        let mut by_model: HashMap<String, (u64, i64, i64, f64, f64, f64)> = HashMap::new();
+        let mut by_model: HashMap<String, ModelUsage> = HashMap::new();
         for r in &filtered {
-            let credits = r
-                .credits_used
-                .unwrap_or_else(|| r.estimated_cost * get_k_ref(&r.model));
             let credits_saved = r
                 .credits_used
                 .map(|cu| r.estimated_cost * get_k_ref(&r.model) - cu)
                 .unwrap_or(0.0);
-            let entry = by_model.entry(r.model.clone()).or_default();
-            entry.0 += 1;
-            entry.1 += r.input_tokens as i64;
-            entry.2 += r.output_tokens as i64;
-            entry.3 += r.estimated_cost;
-            entry.4 += credits;
-            entry.5 += credits_saved;
+            let entry = by_model
+                .entry(r.model.clone())
+                .or_insert_with(|| ModelUsage {
+                    model: r.model.clone(),
+                    ..Default::default()
+                });
+            entry.requests += 1;
+            entry.input_tokens += r.input_tokens as i64;
+            entry.output_tokens += r.output_tokens as i64;
+            entry.cache_read_tokens += r.cache_read_tokens();
+            entry.cost += r.estimated_cost;
+            entry.credits += r.credits_or_estimate();
+            entry.credits_saved += credits_saved;
         }
 
         let total_credits_saved: f64 = filtered
@@ -554,23 +566,11 @@ impl UsageTracker {
             total_requests: base.pruned_requests + filtered.len() as u64,
             total_input_tokens: filtered.iter().map(|r| r.input_tokens as i64).sum(),
             total_output_tokens: filtered.iter().map(|r| r.output_tokens as i64).sum(),
+            total_cache_read_tokens: filtered.iter().map(|r| r.cache_read_tokens()).sum(),
             total_cost: base.pruned_cost + filtered.iter().map(|r| r.estimated_cost).sum::<f64>(),
             total_credits,
             total_credits_saved,
-            by_model: by_model
-                .into_iter()
-                .map(
-                    |(model, (requests, input, output, cost, credits, credits_saved))| ModelUsage {
-                        model,
-                        requests,
-                        input_tokens: input,
-                        output_tokens: output,
-                        cost,
-                        credits,
-                        credits_saved,
-                    },
-                )
-                .collect(),
+            by_model: by_model.into_values().collect(),
         }
     }
 

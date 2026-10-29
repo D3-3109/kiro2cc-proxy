@@ -1369,4 +1369,33 @@ mod tests {
         assert_eq!(tracker.get_total_cost(4), 0.0);
         cleanup_usage_path(&path);
     }
+
+    /// Key 汇总与分模型汇总携带缓存命中 tokens（None 按 0 计），供面板计算命中率
+    #[tokio::test]
+    async fn test_summary_includes_cache_read_tokens() {
+        let path = temp_usage_path("summary_cache_read");
+        let tracker = UsageTracker::load(&path).unwrap();
+        let with_read = |read: Option<i32>| RecordOptions {
+            cache_read_input_tokens: read,
+            ..Default::default()
+        };
+        tracker.record(5, "claude-opus-4.6".into(), 1000, 10, with_read(Some(800)));
+        tracker.record(5, "claude-opus-4.6".into(), 500, 10, with_read(None));
+        tracker.record(5, "claude-haiku-4.5".into(), 400, 10, with_read(Some(100)));
+
+        let summary = tracker.get_summary(5);
+        assert_eq!(summary.total_input_tokens, 1900);
+        assert_eq!(summary.total_cache_read_tokens, 900);
+        let opus = summary
+            .by_model
+            .iter()
+            .find(|m| m.model == "claude-opus-4.6")
+            .unwrap();
+        assert_eq!(opus.requests, 2);
+        assert_eq!(opus.input_tokens, 1500);
+        assert_eq!(opus.cache_read_tokens, 800);
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["totalCacheReadTokens"], 900);
+        cleanup_usage_path(&path);
+    }
 }

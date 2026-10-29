@@ -8,7 +8,7 @@ import { FootSep, Metric, MetricFoot, MetricValue, MetricsBar } from '@/componen
 import { ModelAggPanel } from '@/components/model-agg-panel'
 import { PageHead } from '@/components/page-head'
 import { PANEL, PANEL_FOOT, PANEL_TITLE, Pager } from '@/components/table-kit'
-import { UsageLogTable, formatCost, recordCredits } from '@/components/usage-log-table'
+import { UsageLogTable, cacheHitPercent, formatCost, recordCredits } from '@/components/usage-log-table'
 import {
   useCredentials,
   useCredentialUsageRecords,
@@ -75,6 +75,9 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
   const totalCredits = usageSummary?.totalCredits ?? 0
   const totalCreditsSaved = usageSummary?.totalCreditsSaved ?? 0
   const hasUsageSummary = usageSummary !== undefined
+  const totalCacheHit = usageSummary
+    ? cacheHitPercent(usageSummary.totalCacheReadTokens, usageSummary.totalInputTokens)
+    : null
 
   // refetch 默认不抛异常，失败只体现在返回结果上，须显式检查（与 API Key 详情页同口径）。
   // 明细与两个汇总查询一并刷新，避免同屏数据时间点不一致；refreshing 重入锁与
@@ -135,9 +138,16 @@ export function CredentialDetailPage({ credentialId, onBack }: CredentialDetailP
         <Metric label={t('dailyStats.metricTotalTokensLabel')}>
           <MetricValue value={hasUsageSummary ? tokenText(totalTokens) : '—'} />
           <MetricFoot className="min-w-0">
-            <span className="min-w-0 truncate" title={t('dailyStats.totalTokensHint')}>
-              {t('dailyStats.totalTokensHint')}
-            </span>
+            {totalCacheHit != null ? (
+              <span className="min-w-0 truncate" title={t('common.cacheHitEstimateHint')}>
+                {t('common.cacheHitPrefix')}{' '}
+                <b className="font-semibold text-ok">{totalCacheHit.toFixed(1)}%</b>
+              </span>
+            ) : (
+              <span className="min-w-0 truncate" title={t('dailyStats.totalTokensHint')}>
+                {t('dailyStats.totalTokensHint')}
+              </span>
+            )}
           </MetricFoot>
         </Metric>
         <Metric label={t('dailyStats.metricTotalCostLabel')}>

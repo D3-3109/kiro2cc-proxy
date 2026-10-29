@@ -38,26 +38,25 @@ function uaShort(ua: string): string {
 }
 
 /**
- * 缓存命中百分比胶囊的展示开关。
+ * 缓存命中率 = 缓存读取 / 输入总计（百分比，0–100）。
  *
- * meteringEvent 当前不返回 cache_read 真值，命中率由 credits 反推；反推在
- * 「实际 credits 高于全未命中基线」时被 clamp 成 0%，会把缓存写入轮误显成 0%。
- * 口径校准前先隐藏，改回 true 即可恢复（图标、函数、i18n 键均保留）。
+ * 分母为输入总计，本身已含缓存读取。数值为估算：已标定模型且输入 ≥ 4K 时
+ * 由 credits 反推（缓存写入轮会被截断为 0%），其余按静态前缀上限计（偏高）。
+ * 输入为 0 时无意义，返回 null。
  */
-const SHOW_CACHE_HIT_RATE = false
+export function cacheHitPercent(cacheRead: number, input: number): number | null {
+  if (!(input > 0)) return null
+  return Math.min(100, Math.max(0, (cacheRead / input) * 100))
+}
 
-/**
- * 缓存命中率 = 缓存读取 / 输入总计。
- *
- * 分母取 `inputTokens`（输入总计，本身已含缓存读取），与同一单元格第三、四行
- * 展示的「缓存读取」和「输入总计」同源，保证三个数字互相自洽。旧记录可能缺
- * `cacheReadInputTokens`（按 0 计）；`inputTokens` 为 0 时无意义，返回 null 不渲染。
- */
+/** 命中率表格单元格文本：无意义（输入为 0）时显示「—」 */
+export function formatHitPercent(percent: number | null): string {
+  return percent == null ? '—' : `${percent.toFixed(1)}%`
+}
+
+/** 单条记录的缓存命中率；旧记录缺 `cacheReadInputTokens` 时按 0 计 */
 export function cacheHitRate(record: UsageRecord): number | null {
-  const total = record.inputTokens
-  if (!total || total <= 0) return null
-  const read = record.cacheReadInputTokens ?? 0
-  return Math.min(100, Math.max(0, (read / total) * 100))
+  return cacheHitPercent(record.cacheReadInputTokens ?? 0, record.inputTokens)
 }
 
 /**
@@ -315,7 +314,7 @@ export function UsageLogTable({
                       <span className="font-mono tabular-nums">
                         {formatTokenCount(record.cacheReadInputTokens ?? 0)}
                       </span>
-                      {SHOW_CACHE_HIT_RATE && hitRate != null && (
+                      {hitRate != null && (
                         <span
                           className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-brand-soft px-1.5 py-px align-middle font-mono text-[10px] font-semibold tabular-nums text-brand"
                           title={t('common.cacheHitRateTitle', { rate: hitRate.toFixed(1) })}

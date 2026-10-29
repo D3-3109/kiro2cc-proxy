@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { FootSep, Metric, MetricFoot, MetricValue, MetricsBar } from '@/components/metrics'
-import { formatCost, recordCredits } from '@/components/usage-log-table'
+import { cacheHitPercent, formatCost, recordCredits } from '@/components/usage-log-table'
 import { formatCompactToken, formatTokenCount, localeTag } from '@/lib/locale'
 import type { DailySummary, UsageRecord } from '@/types/api'
 
@@ -72,10 +72,13 @@ export function UsageMetricsBar({
         cost: sum.cost + day.totalCost,
         credits: sum.credits + day.totalCredits,
         tokens: sum.tokens + day.totalInputTokens + day.totalOutputTokens,
+        input: sum.input + day.totalInputTokens,
+        cacheRead: sum.cacheRead + day.totalCacheReadTokens,
       }),
-      { requests: 0, cost: 0, credits: 0, tokens: 0 },
+      { requests: 0, cost: 0, credits: 0, tokens: 0, input: 0, cacheRead: 0 },
     )
   const hasDaily = daily !== undefined
+  const rangeCacheHit = hasDaily ? cacheHitPercent(totals.cacheRead, totals.input) : null
   const pageCost = records.reduce((s, r) => s + r.estimatedCost, 0)
   const pageCredits = records.reduce((s, r) => s + recordCredits(r), 0)
   const pageSaved = records.reduce((s, r) => s + (r.creditsSaved ?? 0), 0)
@@ -123,7 +126,14 @@ export function UsageMetricsBar({
         <Metric label={t('dailyStats.metricTotalTokensLabel')}>
           <MetricValue value={hasDaily ? tokenText(totals.tokens) : '—'} />
           <MetricFoot className="min-w-0">
-            <FootText title={t('dailyStats.totalTokensHint')}>{t('dailyStats.totalTokensHint')}</FootText>
+            {rangeCacheHit != null ? (
+              <FootText title={t('common.cacheHitEstimateHint')}>
+                {t('common.cacheHitPrefix')}{' '}
+                <b className="font-semibold text-ok">{rangeCacheHit.toFixed(1)}%</b>
+              </FootText>
+            ) : (
+              <FootText title={t('dailyStats.totalTokensHint')}>{t('dailyStats.totalTokensHint')}</FootText>
+            )}
           </MetricFoot>
         </Metric>
         <Metric label={t('common.pageCost')}>

@@ -4,11 +4,18 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { ChevronDown, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Metric, MetricValue, MetricsBar } from '@/components/metrics'
+import { Metric, MetricFoot, MetricValue, MetricsBar } from '@/components/metrics'
 import { PageHead } from '@/components/page-head'
 import { STATUS_VISUAL, TAG_BASE, type KeyStatus } from '@/components/api-key-row'
 import { CELL, PANEL, PANEL_FOOT, PANEL_TITLE, Pager, TH_BASE } from '@/components/table-kit'
-import { UsageLogTable, fallbackCredits, formatCost, getModelColor } from '@/components/usage-log-table'
+import {
+  UsageLogTable,
+  cacheHitPercent,
+  fallbackCredits,
+  formatCost,
+  formatHitPercent,
+  getModelColor,
+} from '@/components/usage-log-table'
 import { useApiKeys, useAllUsage, useKeyUsageRecords } from '@/hooks/use-credentials'
 import { useIpGeo } from '@/hooks/use-ip-geo'
 import { extractErrorMessage } from '@/lib/utils'
@@ -33,6 +40,7 @@ const MODEL_COLS: { labelKey: string; num?: boolean }[] = [
   { labelKey: 'common.colModel' },
   { labelKey: 'apiKeys.colRequests', num: true },
   { labelKey: 'apiKeys.colInputTokens', num: true },
+  { labelKey: 'common.colCacheHit', num: true },
   { labelKey: 'apiKeys.colOutputTokens', num: true },
   { labelKey: 'common.colCost', num: true },
   { labelKey: 'apiKeys.colCredits', num: true },
@@ -70,6 +78,7 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
   const totalRecords = recordsData?.total ?? 0
   const totalPages = Math.max(1, recordsData?.totalPages ?? 1)
   const savedCredits = summary?.totalCreditsSaved ?? 0
+  const cacheHit = summary ? cacheHitPercent(summary.totalCacheReadTokens, summary.totalInputTokens) : null
 
   // refetch 默认不抛异常，失败只体现在返回结果上，须显式检查（与列表页刷新同口径）
   const handleRefresh = async () => {
@@ -115,6 +124,14 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
         </Metric>
         <Metric label={t('apiKeys.colInputTokens')}>
           <MetricValue value={formatTokenCount(summary?.totalInputTokens ?? 0)} />
+          {cacheHit != null && (
+            <MetricFoot className="min-w-0">
+              <span className="min-w-0 truncate" title={t('common.cacheHitEstimateHint')}>
+                {t('common.cacheHitPrefix')}{' '}
+                <b className="font-semibold text-ok">{cacheHit.toFixed(1)}%</b>
+              </span>
+            </MetricFoot>
+          )}
         </Metric>
         <Metric label={t('apiKeys.colOutputTokens')}>
           <MetricValue value={formatTokenCount(summary?.totalOutputTokens ?? 0)} />
@@ -182,6 +199,12 @@ export function ApiKeyDetailPage({ keyId, onBack }: ApiKeyDetailPageProps) {
                       </td>
                       <td className={`${CELL} text-right font-mono text-[12px] tabular-nums text-ink-2`}>
                         {formatTokenCount(m.inputTokens)}
+                      </td>
+                      <td
+                        className={`${CELL} text-right font-mono text-[12px] tabular-nums text-ok`}
+                        title={t('common.cacheHitEstimateHint')}
+                      >
+                        {formatHitPercent(cacheHitPercent(m.cacheReadTokens, m.inputTokens))}
                       </td>
                       <td className={`${CELL} text-right font-mono text-[12px] tabular-nums text-ink-2`}>
                         {formatTokenCount(m.outputTokens)}

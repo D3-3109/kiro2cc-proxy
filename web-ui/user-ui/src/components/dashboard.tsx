@@ -24,6 +24,15 @@ interface DashboardProps {
   onLogout: () => void
 }
 
+const CACHE_HIT_HINT =
+  '估算值：缓存读取 / 输入总计。已标定模型且输入 ≥ 4K 时按 credits 反推，其余按前缀上限计（偏高）'
+
+/** 缓存命中率（%）= 缓存读取 / 输入总计（输入已含缓存读取）；输入为 0 时返回 null */
+function cacheHitPercent(cacheRead: number, input: number): number | null {
+  if (!(input > 0)) return null
+  return Math.min(100, Math.max(0, (cacheRead / input) * 100))
+}
+
 export function Dashboard({ onLogout }: DashboardProps) {
   const { theme, toggleTheme } = useTheme()
   const [showLog, setShowLog] = useState(false)
@@ -77,6 +86,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   const isCredits = data?.limitUnit === 'credits'
   const usedAmount = isCredits ? data?.totalCredits ?? 0 : data?.totalCost ?? 0
+  const totalCacheHit = data ? cacheHitPercent(data.totalCacheReadTokens, data.totalInputTokens) : null
 
   const getStatusBadge = () => {
     if (!data) return null
@@ -239,6 +249,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
                     输入 Tokens
                   </div>
                   <div className="text-2xl font-bold">{formatTokens(data.totalInputTokens)}</div>
+                  {totalCacheHit != null && (
+                    <div className="text-xs text-ink-3 mt-1" title={CACHE_HIT_HINT}>
+                      缓存命中（估算）{totalCacheHit.toFixed(1)}%
+                    </div>
+                  )}
                 </CardContent>
               </Card>
               <Card>
@@ -270,22 +285,30 @@ export function Dashboard({ onLogout }: DashboardProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {data.byModel.map((m) => (
-                    <div key={m.model} className="flex items-center justify-between py-2 border-b border-hairline last:border-0">
-                      <div>
-                        <div className="font-medium text-sm">{m.model}</div>
-                        <div className="text-xs text-ink-3 mt-0.5">
-                          {m.requests} 次请求
+                  {data.byModel.map((m) => {
+                    const modelCacheHit = cacheHitPercent(m.cacheReadTokens, m.inputTokens)
+                    return (
+                      <div key={m.model} className="flex items-center justify-between py-2 border-b border-hairline last:border-0">
+                        <div>
+                          <div className="font-medium text-sm">{m.model}</div>
+                          <div className="text-xs text-ink-3 mt-0.5">
+                            {m.requests} 次请求
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">{formatCost(m.cost)}</div>
+                          <div className="text-xs text-ink-3 mt-0.5">
+                            {formatTokens(m.inputTokens)} in / {formatTokens(m.outputTokens)} out
+                          </div>
+                          {modelCacheHit != null && (
+                            <div className="text-xs text-ink-3 mt-0.5" title={CACHE_HIT_HINT}>
+                              缓存命中 {modelCacheHit.toFixed(1)}%
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm font-medium">{formatCost(m.cost)}</div>
-                        <div className="text-xs text-ink-3 mt-0.5">
-                          {formatTokens(m.inputTokens)} in / {formatTokens(m.outputTokens)} out
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </CardContent>
             </Card>
