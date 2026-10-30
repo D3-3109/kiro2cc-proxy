@@ -118,6 +118,10 @@ pub struct StreamContext {
     conversation_id: Option<String>,
     /// 上游异常终止判定（handler 逐个喂入事件，流结束时据此决定收尾方式）
     pub(crate) termination: super::UpstreamTermination,
+    /// 上游结果回报（限流帧、空响应、正常完成），由 handler 注入；None = 不回报（测试）
+    upstream_feedback: Option<crate::kiro::provider::UpstreamFeedback>,
+    /// 限流帧已回报过
+    throttle_reported: bool,
 }
 
 impl StreamContext {
@@ -173,6 +177,8 @@ impl StreamContext {
             request_started_at: None,
             first_token_at: None,
             conversation_id: None,
+            upstream_feedback: None,
+            throttle_reported: false,
             termination: Default::default(),
         }
     }
@@ -267,6 +273,49 @@ impl StreamContext {
     pub fn with_api_format(mut self, api_format: crate::model::usage::ApiFormat) -> Self {
         self.api_format = Some(api_format);
         self
+    }
+
+    /// 设置上游结果的回报对象（限流帧、空响应、正常完成）
+    pub fn with_upstream_feedback(
+        mut self,
+        feedback: crate::kiro::provider::UpstreamFeedback,
+    ) -> Self {
+        self.upstream_feedback = Some(feedback);
+        self
+    }
+
+    /// 已收到限流帧则回报一次；每个上游事件后调用，流怎么结束（EOF、读错误、客户端断开）都不漏报
+    pub(crate) fn report_upstream_throttle(&mut self) {
+        if self.throttle_reported {
+            return;
+        }
+        let (Some(message), Some(feedback)) =
+            (self.termination.throttle_message(), &self.upstream_feedback)
+        else {
+            return;
+        };
+        feedback.throttled(message);
+        self.throttle_reported = true;
+    }
+
+    /// 上游流读到 EOF 后回报结果（须在 `termination.observe_eof` 之后调用）
+    ///
+    /// 异常终止不回报（其中的限流帧已由 [`Self::report_upstream_throttle`] 回报）；
+    /// 空响应计入健康度，上下文过大导致的除外（换账号也一样）；其余视为正常完成。
+    pub(crate) fn report_upstream_outcome_at_eof(&self) {
+        let Some(feedback) = &self.upstream_feedback else {
+            return;
+        };
+        if self.termination.failure().is_some() {
+            return;
+        }
+        if !self.is_empty_response() {
+            feedback.completed();
+            return;
+        }
+        if !self.empty_response_is_oversized_context() {
+            feedback.empty_response();
+        }
     }
 
     /// 设置用量追踪

@@ -88,6 +88,7 @@ pub(crate) async fn handle_stream_request(
             credential_id,
             signature_repair,
             credential_in_flight,
+            route,
         } = upstream;
         let model = stream_model.as_str();
         crate::anthropic::converter::remember_rejected_signatures(
@@ -142,7 +143,11 @@ pub(crate) async fn handle_stream_request(
                 history_reasoning_replay,
                 &signature_repair,
             ))
-            .with_api_format(api_format);
+            .with_api_format(api_format)
+            .with_upstream_feedback(crate::kiro::provider::UpstreamFeedback::new(
+                std::sync::Arc::clone(&provider),
+                route,
+            ));
 
         // 生成初始事件
         let initial_events = ctx.generate_initial_events();
@@ -459,6 +464,7 @@ fn create_sse_stream(
                                         match Event::from_frame(frame) {
                                             Ok(event) => {
                                                 ctx.termination.observe_event(&event);
+                                                ctx.report_upstream_throttle();
                                                 let sse_events = ctx.process_kiro_event(&event);
                                                 // 首字埋点：按「本帧是否产出客户端可见的 SSE 事件」
                                                 // 判定，而非按事件变体名 —— 空 content / thinking 关闭的
@@ -529,6 +535,7 @@ fn create_sse_stream(
                         }
                         None => {
                             ctx.termination.observe_eof(decoder.buffer_len());
+                            ctx.report_upstream_outcome_at_eof();
                             let mut out_events = Vec::new();
                             if let Some(reason) = ctx.termination.failure() {
                                 tracing::warn!(
@@ -589,7 +596,9 @@ mod tests {
     #[tokio::test]
     async fn held_guard_is_released_only_when_stream_is_dropped() {
         let tracker = Arc::new(RpmTracker::new());
-        let guard = tracker.begin_api_key_request(Some(1));
+        let guard = tracker
+            .try_begin_api_key_request(Some(1), Default::default())
+            .unwrap();
         let mut held = Box::pin(hold_while_streaming(stream::iter([1, 2]), guard));
 
         // 流读尽前后都不释放：释放时机是流被 drop（正常结束或客户端断开）

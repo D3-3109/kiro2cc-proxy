@@ -2,6 +2,7 @@
 
 //! API Key 数据模型：子密钥结构、额度限制（次数/Token）与持久化读写。
 use crate::common::fs::atomic_write;
+use crate::model::rpm::LocalLimits;
 use chrono::{DateTime, Utc};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,12 @@ pub struct ApiKey {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_models: Option<Vec<String>>,
+    /// 每分钟请求数上限，0 = 不限
+    #[serde(default)]
+    pub rpm_limit: u32,
+    /// 同时在途请求数上限（含流式生成），0 = 不限
+    #[serde(default)]
+    pub concurrency_limit: u32,
 }
 
 fn default_enabled() -> bool {
@@ -68,6 +75,7 @@ impl ApiKey {
         duration_days: Option<f64>,
         bound_credential_ids: Option<Vec<u64>>,
         allowed_models: Option<Vec<String>>,
+        limits: LocalLimits,
     ) -> Self {
         Self {
             id,
@@ -82,6 +90,16 @@ impl ApiKey {
             activated_at: None,
             bound_credential_ids,
             allowed_models,
+            rpm_limit: limits.rpm,
+            concurrency_limit: limits.concurrency,
+        }
+    }
+
+    /// 本 Key 的本地限额
+    pub fn local_limits(&self) -> LocalLimits {
+        LocalLimits {
+            rpm: self.rpm_limit,
+            concurrency: self.concurrency_limit,
         }
     }
 
@@ -131,6 +149,7 @@ pub enum ApiKeyAuthResult {
         limit_unit: String,
         bound_credential_ids: Option<Vec<u64>>,
         allowed_models: Option<Vec<String>>,
+        limits: LocalLimits,
     },
     /// Key 已被禁用
     Disabled,
@@ -297,6 +316,7 @@ impl ApiKeyManager {
                         limit_unit: api_key.limit_unit.clone(),
                         bound_credential_ids: api_key.bound_credential_ids.clone(),
                         allowed_models: api_key.allowed_models.clone(),
+                        limits: api_key.local_limits(),
                     }
                 }
             }
@@ -316,6 +336,7 @@ impl ApiKeyManager {
                 limit_unit: api_key.limit_unit.clone(),
                 bound_credential_ids: api_key.bound_credential_ids.clone(),
                 allowed_models: api_key.allowed_models.clone(),
+                limits: api_key.local_limits(),
             },
             None => ApiKeyAuthResult::NotFound,
         }
@@ -336,6 +357,7 @@ impl ApiKeyManager {
         duration_days: Option<f64>,
         bound_credential_ids: Option<Vec<u64>>,
         allowed_models: Option<Vec<String>>,
+        limits: LocalLimits,
     ) -> anyhow::Result<ApiKey> {
         // 先分配 id 再取写锁：allocate_new_id 内含 fsync 磁盘写，不应持写锁跨越
         let next_id = self.allocate_new_id();
@@ -348,13 +370,14 @@ impl ApiKeyManager {
             duration_days,
             bound_credential_ids,
             allowed_models,
+            limits,
         );
         self.keys.write().push(api_key.clone());
         self.save()?;
         Ok(api_key)
     }
 
-    /// 更新 key（name, enabled, expires_at, spending_limit, limit_unit, duration_days）
+    /// 更新 key（各参数 None = 不改）
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &self,
@@ -367,6 +390,8 @@ impl ApiKeyManager {
         duration_days: Option<Option<f64>>,
         bound_credential_ids: Option<Option<Vec<u64>>>,
         allowed_models: Option<Option<Vec<String>>>,
+        rpm_limit: Option<u32>,
+        concurrency_limit: Option<u32>,
     ) -> anyhow::Result<Option<ApiKey>> {
         let mut keys = self.keys.write();
         let Some(api_key) = keys.iter_mut().find(|k| k.id == id) else {
@@ -432,6 +457,12 @@ impl ApiKeyManager {
         }
         if let Some(models) = allowed_models {
             api_key.allowed_models = models;
+        }
+        if let Some(rpm_limit) = rpm_limit {
+            api_key.rpm_limit = rpm_limit;
+        }
+        if let Some(concurrency_limit) = concurrency_limit {
+            api_key.concurrency_limit = concurrency_limit;
         }
         let updated = api_key.clone();
         drop(keys);
@@ -499,8 +530,17 @@ mod tests {
     }
 
     fn create_key(mgr: &ApiKeyManager, name: &str) -> ApiKey {
-        mgr.create(name.to_string(), None, None, None, None, None, None)
-            .unwrap()
+        mgr.create(
+            name.to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            LocalLimits::default(),
+        )
+        .unwrap()
     }
 
     /// 回归测试：同进程内删除 key 后，新建的 key 不得复用被删除的 id。
@@ -600,6 +640,8 @@ mod tests {
                 Some(Some(7.0)),
                 None,
                 None,
+                None,
+                None,
             )
             .unwrap()
             .unwrap();
@@ -631,6 +673,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .unwrap()
             .unwrap();
@@ -645,6 +689,8 @@ mod tests {
                 None,
                 None,
                 Some(Some(7.0)),
+                None,
+                None,
                 None,
                 None,
             )
@@ -667,7 +713,16 @@ mod tests {
         let dir = TempDirGuard::new();
         let mgr = ApiKeyManager::load(dir.keys_path()).unwrap();
         let key = mgr
-            .create("k1".to_string(), None, None, None, Some(3.0), None, None)
+            .create(
+                "k1".to_string(),
+                None,
+                None,
+                None,
+                Some(3.0),
+                None,
+                None,
+                LocalLimits::default(),
+            )
             .unwrap();
         assert!(key.activated_at.is_none());
 
@@ -680,6 +735,8 @@ mod tests {
                 None,
                 None,
                 Some(Some(7.0)),
+                None,
+                None,
                 None,
                 None,
             )
@@ -708,6 +765,7 @@ mod tests {
                 None,
                 None,
                 Some(models.clone()),
+                LocalLimits::default(),
             )
             .unwrap();
         assert_eq!(key.allowed_models, Some(models.clone()));
@@ -729,6 +787,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .unwrap()
             .unwrap();
@@ -736,13 +796,75 @@ mod tests {
 
         // null（Some(None)）→ 清除
         let cleared = mgr
-            .update(key.id, None, None, None, None, None, None, None, Some(None))
+            .update(
+                key.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(None),
+                None,
+                None,
+            )
             .unwrap()
             .unwrap();
         assert!(cleared.allowed_models.is_none());
 
         let reloaded = ApiKeyManager::load(dir.keys_path()).unwrap();
         assert!(reloaded.list()[0].allowed_models.is_none());
+    }
+
+    /// 本地限额：创建写入、认证透传、单项更新不动另一项，并跨重启持久化；存量 key 默认不限
+    #[test]
+    fn test_local_limits_create_update_and_persist() {
+        let dir = TempDirGuard::new();
+        let mgr = ApiKeyManager::load(dir.keys_path()).unwrap();
+        let limits = LocalLimits {
+            rpm: 30,
+            concurrency: 2,
+        };
+        let key = mgr
+            .create("k1".to_string(), None, None, None, None, None, None, limits)
+            .unwrap();
+
+        let ApiKeyAuthResult::Valid { limits: authed, .. } = mgr.authenticate(&key.key) else {
+            panic!("新建 key 应认证通过");
+        };
+        assert_eq!(authed, limits);
+
+        let updated = mgr
+            .update(
+                key.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(0),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            updated.local_limits(),
+            LocalLimits {
+                rpm: 0,
+                concurrency: 2
+            }
+        );
+
+        let reloaded = ApiKeyManager::load(dir.keys_path()).unwrap();
+        assert_eq!(reloaded.list()[0].local_limits(), updated.local_limits());
+
+        let legacy = r#"{"id":1,"key":"sk-x","name":"old","createdAt":"2026-01-01T00:00:00Z"}"#;
+        let legacy: ApiKey = serde_json::from_str(legacy).unwrap();
+        assert_eq!(legacy.local_limits(), LocalLimits::default());
     }
 
     /// 存量 api_keys.json 无 allowedModels 字段：反序列化为 None（不限制）

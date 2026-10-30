@@ -7,11 +7,68 @@ use crate::anthropic::types::{
     CountTokensRequest, CountTokensResponse, ErrorResponse, MessagesRequest, OutputConfig, Thinking,
 };
 
+use crate::model::rpm::{InFlightGuard, LimitFull, LocalLimits, RpmTracker};
 use crate::token;
 use axum::{
     Json as JsonExtractor,
+    http::{StatusCode, header},
     response::{IntoResponse, Json},
 };
+use std::sync::Arc;
+use std::time::Duration;
+
+/// API Key 本地限额满时排队的最长时间，超出返回 429
+const API_KEY_QUEUE: Duration = Duration::from_secs(10);
+
+/// 并发满时建议客户端的重试间隔（秒）：何时有在途请求结束无从预知，与上游限流的 429 一致
+const CONCURRENCY_RETRY_AFTER_SECS: u64 = 5;
+
+/// 请求准入：计入全局与本 Key 的 RPM、并发（未启用监控时返回 `Ok(None)`）
+///
+/// 本 Key 的 RPM / 并发满时排队，[`API_KEY_QUEUE`] 内仍满则返回 429 + Retry-After。
+/// 返回的守卫须持有到响应体发完。
+pub(crate) async fn admit_request(
+    rpm: Option<&Arc<RpmTracker>>,
+    identity: Option<&ApiKeyContext>,
+) -> Result<Option<InFlightGuard>, Box<axum::response::Response>> {
+    let Some(rpm) = rpm else {
+        return Ok(None);
+    };
+    let key_id = identity.map(|ctx| ctx.id);
+    let limits = identity.map_or(LocalLimits::default(), |ctx| ctx.limits);
+    let deadline = tokio::time::Instant::now() + API_KEY_QUEUE;
+    let full = match rpm.begin_api_key_request_by(key_id, limits, deadline).await {
+        Ok(guard) => return Ok(Some(guard)),
+        Err(full) => full,
+    };
+
+    tracing::warn!(api_key_id = ?key_id, "API Key 本地限额排队超时：{}", full);
+    let (retry_after_secs, message) = match full {
+        LimitFull::Rpm { retry_after } => (
+            retry_after.as_secs(),
+            format!(
+                "API key rate limit reached: {} requests per minute. Please retry shortly.",
+                limits.rpm
+            ),
+        ),
+        LimitFull::Concurrency => (
+            CONCURRENCY_RETRY_AFTER_SECS,
+            format!(
+                "API key concurrency limit reached: {} concurrent requests. Please retry shortly.",
+                limits.concurrency
+            ),
+        ),
+    };
+    let error = ErrorResponse::new("rate_limit_error", message);
+    Err(Box::new(
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, retry_after_secs.to_string())],
+            Json(error),
+        )
+            .into_response(),
+    ))
+}
 
 /// 模型白名单拦截：Key 无权调用 `model` 时返回 403，放行时返回 None
 pub(crate) fn reject_disallowed_model(
@@ -429,12 +486,52 @@ mod tests {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 
+    fn limited_key(limits: LocalLimits) -> ApiKeyContext {
+        ApiKeyContext {
+            id: 7,
+            bound_credential_ids: None,
+            allowed_models: None,
+            limits,
+        }
+    }
+
+    /// 暂停时钟：排队到截止时刻瞬间完成
+    #[tokio::test(start_paused = true)]
+    async fn admit_request_returns_429_after_queueing_on_full_key() {
+        let tracker = Arc::new(RpmTracker::new());
+        let key = limited_key(LocalLimits {
+            rpm: 0,
+            concurrency: 1,
+        });
+        let _held = admit_request(Some(&tracker), Some(&key)).await.unwrap();
+
+        let started = tokio::time::Instant::now();
+        let resp = *admit_request(Some(&tracker), Some(&key))
+            .await
+            .err()
+            .expect("并发已满应拒绝");
+        assert_eq!(started.elapsed(), API_KEY_QUEUE);
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(resp.headers()[header::RETRY_AFTER], "5");
+        let v: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(v["error"]["type"], "rate_limit_error");
+
+        // 其它 Key、无 Key 请求不受影响
+        let other = ApiKeyContext {
+            id: 8,
+            ..limited_key(LocalLimits::default())
+        };
+        assert!(admit_request(Some(&tracker), Some(&other)).await.is_ok());
+        assert!(admit_request(Some(&tracker), None).await.is_ok());
+    }
+
     #[tokio::test]
     async fn reject_disallowed_model_returns_403_only_outside_whitelist() {
         let ctx = ApiKeyContext {
             id: 1,
             bound_credential_ids: None,
             allowed_models: Some(vec!["claude-opus-4.8".to_string()]),
+            limits: Default::default(),
         };
         assert!(reject_disallowed_model(None, "claude-opus-4.7").is_none());
         assert!(reject_disallowed_model(Some(&ctx), "claude-opus-4-8").is_none());

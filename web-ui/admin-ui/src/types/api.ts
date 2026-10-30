@@ -39,6 +39,12 @@ export interface CredentialStatusItem {
   /** 账号级 thinking adaptive 注入开关（客户端请求 thinking: adaptive 时按此开关注入 Kiro） */
   thinkingAdaptive: boolean
   healthStatus: 'healthy' | 'warning' | 'degraded' | 'unhealthy' | 'disabled'
+  /** 健康度判定依据：最近 10 分钟上游限流 / 空响应次数、连续上游失败次数 */
+  recentThrottleCount: number
+  recentEmptyResponseCount: number
+  consecutiveFailures: number
+  /** 不健康时冷却期剩余秒数（冷却期内选号排除），其它状态缺省 */
+  cooldownRemainingSecs?: number
   throttleCount: number
   /**
    * 禁用原因；与 `disabled` 配套使用。
@@ -152,6 +158,10 @@ export interface ApiKeyItem {
   boundCredentialIds?: number[]
   /** 可调用模型白名单；缺省表示不限制 */
   allowedModels?: string[]
+  /** 每分钟请求数上限，0 = 不限 */
+  rpmLimit: number
+  /** 同时在途请求数上限，0 = 不限 */
+  concurrencyLimit: number
 }
 
 export interface CreateApiKeyRequest {
@@ -162,6 +172,8 @@ export interface CreateApiKeyRequest {
   durationDays?: number | null
   boundCredentialIds?: number[] | null
   allowedModels?: string[] | null
+  rpmLimit?: number
+  concurrencyLimit?: number
 }
 
 export interface UpdateApiKeyRequest {
@@ -173,6 +185,8 @@ export interface UpdateApiKeyRequest {
   durationDays?: number | null
   boundCredentialIds?: number[] | null
   allowedModels?: string[] | null
+  rpmLimit?: number
+  concurrencyLimit?: number
 }
 
 // API Key 用量汇总
@@ -358,6 +372,15 @@ export interface ThrottleLogRecord {
   statusCode: number
   responseBody: string
   createdAt: string
+  // 以下为限流现场，旧记录没有
+  endpoint?: string
+  /** 该账号最近 60 秒成功请求数 */
+  credentialRpm?: number
+  /** 该账号正在生成中的响应数 */
+  credentialInFlight?: number
+  /** 本次请求内第几次尝试（从 1 起） */
+  attempt?: number
+  model?: string
 }
 
 // 限流日志分页响应

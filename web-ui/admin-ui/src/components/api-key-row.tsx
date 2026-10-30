@@ -281,6 +281,14 @@ export function ApiKeyRow({
         ) : (
           <span className="text-ink-3">—</span>
         )}
+        {/* 设了上限时副行给出「并发 / RPM」上限，0 = 不限显示为 ∞ */}
+        {(apiKey.concurrencyLimit > 0 || apiKey.rpmLimit > 0) && (
+          <div className="whitespace-nowrap font-mono text-[10.5px] tabular-nums text-ink-3" title={t('apiKeys.requestLimitsLabel')}>
+            ≤ {apiKey.concurrencyLimit || '∞'}
+            <span className="px-0.5 opacity-60">/</span>
+            {apiKey.rpmLimit || '∞'}
+          </div>
+        )}
       </td>
 
       {/* 启用时间（原「最后使用」降级：后端无 lastUsedAt） */}

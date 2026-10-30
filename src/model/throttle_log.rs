@@ -27,6 +27,27 @@ pub struct ThrottleEvent {
     /// `None` 表示非 LB 路径（如 MCP）或旧调用点（向后兼容：序列化时不写出）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    #[serde(flatten)]
+    pub context: ThrottleContext,
+}
+
+/// 限流发生时该账号的负载与请求信息，供判断限流成因（RPM / 并发）
+///
+/// 旧记录没有这些字段（反序列化为 None），序列化时 None 不写出。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThrottleContext {
+    /// 该账号最近 60 秒发往上游的请求数（含本次及被限流、失败的尝试）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_rpm: Option<u64>,
+    /// 该账号在途请求数（含本次）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_in_flight: Option<u64>,
+    /// 本次请求内第几次尝试（从 1 起）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// 每个 credential 的最大限流记录数
@@ -126,6 +147,8 @@ impl ThrottleLogStore {
 
     /// 记录一次限流事件
     ///
+    /// `request_type`：`"api"` / `"mcp"` 为 HTTP 429；`"stream"` 为 200 之后流内的限流帧。
+    ///
     /// `endpoint`：
     /// - `Some("ide" / "runtime" / "codewhisperer" / "amazonq")`：多端点 LB 命中桶
     /// - `None`：MCP 路径或旧调用点（向后兼容，序列化时跳过字段）
@@ -136,6 +159,7 @@ impl ThrottleLogStore {
         status_code: u16,
         response_body: &str,
         endpoint: Option<&str>,
+        context: ThrottleContext,
     ) {
         let body_summary = if response_body.len() > 200 {
             let boundary = response_body
@@ -156,6 +180,7 @@ impl ThrottleLogStore {
             response_body: body_summary,
             created_at: Utc::now(),
             endpoint: endpoint.map(|s| s.to_string()),
+            context,
         };
 
         {
@@ -236,6 +261,7 @@ impl ThrottleLogStore {
                 response_body: e.response_body,
                 created_at: e.created_at,
                 endpoint: e.endpoint,
+                context: e.context,
             })
             .collect();
 
@@ -304,6 +330,8 @@ pub struct ThrottleLogItem {
     /// 多端点 LB：限流命中的端点名（None 时不序列化，向后兼容）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    #[serde(flatten)]
+    pub context: ThrottleContext,
 }
 
 #[cfg(test)]
@@ -313,7 +341,14 @@ mod tests {
     #[test]
     fn test_record_with_endpoint_serializes_field() {
         let store = ThrottleLogStore::empty("unused");
-        store.record(1, "api", 429, "rate limited", Some("codewhisperer"));
+        store.record(
+            1,
+            "api",
+            429,
+            "rate limited",
+            Some("codewhisperer"),
+            ThrottleContext::default(),
+        );
         let page = store.get_paged(1, 0, 10);
         assert_eq!(page.records.len(), 1);
         assert_eq!(page.records[0].endpoint.as_deref(), Some("codewhisperer"));
@@ -327,7 +362,14 @@ mod tests {
     fn test_record_without_endpoint_omits_field_in_json() {
         // 向后兼容：MCP / 旧调用点 endpoint=None → JSON 不写出 endpoint 字段
         let store = ThrottleLogStore::empty("unused");
-        store.record(1, "mcp", 429, "rate limited", None);
+        store.record(
+            1,
+            "mcp",
+            429,
+            "rate limited",
+            None,
+            ThrottleContext::default(),
+        );
         let page = store.get_paged(1, 0, 10);
         assert_eq!(page.records.len(), 1);
         assert_eq!(page.records[0].endpoint, None);
@@ -359,6 +401,7 @@ mod tests {
             response_body: "x".to_string(),
             created_at: Utc::now(),
             endpoint: Some("runtime".to_string()),
+            context: ThrottleContext::default(),
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"endpoint\":\"runtime\""));
@@ -367,12 +410,38 @@ mod tests {
     }
 
     #[test]
+    fn test_throttle_context_roundtrip_and_legacy_default() {
+        let context = ThrottleContext {
+            credential_rpm: Some(12),
+            credential_in_flight: Some(3),
+            attempt: Some(2),
+            model: Some("claude-opus-5.5".to_string()),
+        };
+        let store = ThrottleLogStore::empty("unused");
+        store.record(1, "api", 429, "{}", Some("ide"), context.clone());
+        let json = serde_json::to_value(&store.get_paged(1, 1, 10).records[0]).unwrap();
+        assert_eq!(json["credentialRpm"], 12);
+        assert_eq!(json["credentialInFlight"], 3);
+        assert_eq!(json["attempt"], 2);
+        assert_eq!(json["model"], "claude-opus-5.5");
+
+        // 旧记录无上下文字段：反序列化为空，序列化不写出
+        let legacy: ThrottleEvent = serde_json::from_str(
+            r#"{"credentialId":1,"requestType":"api","statusCode":429,
+                "responseBody":"x","createdAt":"2026-07-30T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.context, ThrottleContext::default());
+        assert!(!serde_json::to_string(&legacy).unwrap().contains("attempt"));
+    }
+
+    #[test]
     fn count_within_includes_recent_only() {
         use chrono::{Duration, Utc};
         let store = ThrottleLogStore::empty("unused");
         let now = Utc::now();
         for _ in 0..5 {
-            store.record(1, "api", 429, "{}", None);
+            store.record(1, "api", 429, "{}", None, ThrottleContext::default());
         }
         store.with_events_for_test(1, |events| {
             for e in events.iter_mut() {
@@ -380,7 +449,7 @@ mod tests {
             }
         });
         for _ in 0..3 {
-            store.record(1, "api", 429, "{}", None);
+            store.record(1, "api", 429, "{}", None, ThrottleContext::default());
         }
         assert_eq!(store.count_within(1, now - Duration::days(7)), 3);
     }
@@ -389,8 +458,8 @@ mod tests {
     fn count_within_boundary_includes_exact_seven_days() {
         use chrono::{Duration, Utc};
         let store = ThrottleLogStore::empty("unused");
-        store.record(1, "api", 429, "{}", None);
-        store.record(1, "api", 429, "{}", None);
+        store.record(1, "api", 429, "{}", None, ThrottleContext::default());
+        store.record(1, "api", 429, "{}", None, ThrottleContext::default());
         let now = Utc::now();
         store.with_events_for_test(1, |events| {
             events[0].created_at = now - Duration::days(7);

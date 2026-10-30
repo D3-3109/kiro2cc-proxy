@@ -16,10 +16,15 @@ use crate::kiro::parser::error::ParseError;
 /// 输出超长异常：上游的 max_tokens 语义，不属于异常终止
 pub(crate) const CONTENT_LENGTH_EXCEEDED_EXCEPTION: &str = "ContentLengthExceededException";
 
+/// 流中途限流：响应头已是 200，限流只能以流内 exception / error 帧下发
+const THROTTLING_EXCEPTION: &str = "ThrottlingException";
+
 #[derive(Debug, Default)]
 pub(crate) struct UpstreamTermination {
     /// 首个致命信号（日志与错误文案用）
     fatal: Option<String>,
+    /// 收到限流帧时的帧内文案（未收到为 None），供回报上游限流
+    throttle_message: Option<String>,
     /// 最后一次带 stopReason 的 metadataEvent 是否为 TOOL_USE
     claimed_tool_use: bool,
     /// 是否收到过 toolUseEvent
@@ -42,13 +47,32 @@ impl UpstreamTermination {
                     self.mark_fatal(format!("stopReason={raw}"));
                 }
             }
-            Event::Error { error_code, .. } => self.mark_fatal(error_code.clone()),
-            Event::Exception { exception_type, .. }
-                if exception_type != CONTENT_LENGTH_EXCEEDED_EXCEPTION =>
-            {
+            Event::Error {
+                error_code,
+                error_message,
+            } => {
+                self.note_throttle(error_code, error_message);
+                self.mark_fatal(error_code.clone())
+            }
+            Event::Exception {
+                exception_type,
+                message,
+            } if exception_type != CONTENT_LENGTH_EXCEEDED_EXCEPTION => {
+                self.note_throttle(exception_type, message);
                 self.mark_fatal(exception_type.clone())
             }
             _ => {}
+        }
+    }
+
+    /// 流内收到过限流帧时返回帧内文案：该账号应按 429 记账避让
+    pub(crate) fn throttle_message(&self) -> Option<&str> {
+        self.throttle_message.as_deref()
+    }
+
+    fn note_throttle(&mut self, kind: &str, message: &str) {
+        if kind == THROTTLING_EXCEPTION && self.throttle_message.is_none() {
+            self.throttle_message = Some(format!("{kind}: {message}"));
         }
     }
 
@@ -161,9 +185,28 @@ mod tests {
         let mut t = UpstreamTermination::default();
         t.observe_event(&Event::Exception {
             exception_type: "ThrottlingException".to_string(),
-            message: String::new(),
+            message: "slow down".to_string(),
         });
         assert_eq!(t.failure().as_deref(), Some("ThrottlingException"));
+        assert_eq!(t.throttle_message(), Some("ThrottlingException: slow down"));
+    }
+
+    #[test]
+    fn test_throttle_detected_in_error_frame_only_for_throttling() {
+        let mut t = UpstreamTermination::default();
+        t.observe_event(&Event::Error {
+            error_code: "InternalServerError".to_string(),
+            error_message: String::new(),
+        });
+        assert_eq!(t.throttle_message(), None);
+
+        // 限流晚于其它致命信号到达也要记下：failure 只记首个，限流回报与之独立
+        t.observe_event(&Event::Error {
+            error_code: "ThrottlingException".to_string(),
+            error_message: "rate".to_string(),
+        });
+        assert_eq!(t.failure().as_deref(), Some("InternalServerError"));
+        assert_eq!(t.throttle_message(), Some("ThrottlingException: rate"));
     }
 
     #[test]

@@ -1,11 +1,15 @@
 //! 重试与故障转移：端点选择（select_endpoint）与 call_api_with_retry 多账号多轮重试。
-use tokio::time::sleep;
+use std::time::Duration;
+
+use tokio::time::{Instant, sleep};
 
 use crate::kiro::endpoint::{BUCKET_THROTTLE_DURATION, Endpoint, EndpointName};
 use crate::kiro::model::credentials::KiroCredentials;
+use crate::model::throttle_log::ThrottleContext;
 
 use super::SignatureRepair;
 use super::core::{KiroProvider, MAX_RETRIES_PER_CREDENTIAL, MAX_TOTAL_RETRIES};
+use super::errors::LOCAL_LIMIT_QUEUE;
 
 /// 一次请求内逐个删除坏签名的上限；仍被拒则删除全部历史推理
 ///
@@ -230,7 +234,6 @@ impl KiroProvider {
             .refresh_model_support_if_stale(model.as_deref(), bound_ids)
             .await;
 
-        let _permit = self.concurrency_limit.acquire().await?;
         // 流式请求的响应体在上游 200 headers 返回后仍持续生成，受 reqwest
         // 总超时约束，统一使用 `UPSTREAM_TIMEOUT_SECS` 长超时档；若使用较短
         // 档位会在长生成中途被掐断（历史分档背景见常量注释）
@@ -247,16 +250,29 @@ impl KiroProvider {
 
         // 尝试从请求体中提取会话 ID（模型信息已在上方提取）
         let continuation_id = Self::extract_continuation_id_from_request(request_body);
-        // 本次请求内已限流的账号：重试时避开，但不销毁 sticky 绑定
+        // 本次请求内已限流的账号（上游限流或本地限额满）：重试时避开，但不销毁 sticky 绑定
         let mut throttled_in_request: Vec<u64> = Vec::new();
+        // 其中被上游限流的账号：没有别的可换、重回它时须先退避
+        let mut upstream_throttled: Vec<u64> = Vec::new();
+        // 本地限额排队截止时刻：首次真正排队时起算，本请求内各次排队共用
+        let mut queue_deadline: Option<Instant> = None;
         // 历史推理签名被拒后的请求体删改
         let mut signature_repair = SignatureRepairState::default();
         // 删改签名后的重试属请求内容问题，不占故障转移配额：每删改一次放宽一次上限
         let mut attempt_limit = max_retries;
+        // 本次请求遇到过上游限流（429，或因限流跳过账号）：最终失败时按 429 告知客户端
+        let mut throttled = false;
+        // 瞬态错误后的退避：在下一轮开头、尚未持有任何 permit 时执行
+        let mut backoff: Option<Duration> = None;
+        // 本次请求内重回已限流账号的次数，决定限流退避档位
+        let mut throttle_rehits = 0;
 
         for attempt in 0.. {
             if attempt >= attempt_limit {
                 break;
+            }
+            if let Some(delay) = backoff.take() {
+                sleep(delay).await;
             }
             // 获取调用上下文（优先路由到同一会话的缓存账号）
             let ctx = match self
@@ -276,27 +292,11 @@ impl KiroProvider {
                 }
             };
 
-            // RPM 硬限制：精确等待或多账号时 skip（先于并发 permit 获取，避免等待期间占用账号级并发槛位）
-            let rpm_ok = self.wait_for_rpm_gate(ctx.id, "").await;
-            if !rpm_ok && !small_pool {
-                tracing::info!("[RPM-GATE] credential={} RPM 满，跳过切换下一账号", ctx.id);
-                self.token_manager.report_throttled_for_rotation(ctx.id);
-                if let Some(cid) = continuation_id.as_deref() {
-                    self.token_manager.report_sticky_throttled(cid, ctx.id);
-                }
-                if !throttled_in_request.contains(&ctx.id) {
-                    throttled_in_request.push(ctx.id);
-                }
-                last_error = Some(anyhow::anyhow!(
-                    "RPM limit exceeded for credential {}",
-                    ctx.id
-                ));
-                continue;
+            // 换到本次请求内未限流的账号立即发送；只有重回被上游限流的账号（没有别的可换）才退避
+            if upstream_throttled.contains(&ctx.id) {
+                sleep(Self::throttle_delay(throttle_rehits)).await;
+                throttle_rehits += 1;
             }
-
-            // 获取单账号并发 permit（非 sleep 的 continue/Err 分支依赖 _cred_permit 随作用域结束隐式释放；
-            // 仅进入 sleep 退避的分支需要显式 drop，以便退避等待期间归还槛位）
-            let _cred_permit = self.semaphore_for(ctx.id).acquire_owned().await?;
 
             // 选择下一个可用端点（单账号内轮询，跳过被封禁桶）
             let endpoint = match self.select_endpoint(&ctx.credentials, attempt) {
@@ -324,25 +324,15 @@ impl KiroProvider {
                         ctx.id,
                         ids
                     );
-                    if !throttled_in_request.contains(&ctx.id) {
-                        throttled_in_request.push(ctx.id);
-                    }
+                    push_unique(&mut throttled_in_request, ctx.id);
+                    push_unique(&mut upstream_throttled, ctx.id);
+                    throttled = true;
                     last_error = Some(anyhow::anyhow!(
                         "All endpoints throttled for credential {} (tried: [{}])",
                         ctx.id,
                         ids
                     ));
-                    // 所有候选账号都已端点全封时立刻换号是空转，需要退避等待桶解封。
-                    // 单账号池同理。桶封禁窗口固定，退避比连续空转更快拿到可用端点。
-                    let all_avoided = self
-                        .token_manager
-                        .credential_ids()
-                        .iter()
-                        .all(|id| throttled_in_request.contains(id));
-                    if (small_pool || all_avoided) && attempt + 1 < max_retries {
-                        drop(_cred_permit);
-                        sleep(Self::throttle_delay(attempt)).await;
-                    }
+                    // 所有候选账号都已端点全封时，下一轮只能重回已限流账号，届时先退避等桶解封
                     continue;
                 }
             };
@@ -378,6 +368,52 @@ impl KiroProvider {
                     continue;
                 }
             };
+
+            // 本地限额（每账号 RPM / 并发）：还有别的账号可换就换，否则排队。
+            // 名额从发出起占用到响应体发完（成功时随 ApiResponse 交给 handler）；先于并发
+            // permit 占用，排队期间不占槛位
+            let can_switch = !small_pool && !throttled_in_request.contains(&ctx.id);
+            let reserved = match self.reserve_credential(ctx.id, None).await {
+                Err(_) if !can_switch => {
+                    let deadline =
+                        *queue_deadline.get_or_insert_with(|| Instant::now() + LOCAL_LIMIT_QUEUE);
+                    self.reserve_credential(ctx.id, Some(deadline)).await
+                }
+                reserved => reserved,
+            };
+            let credential_in_flight = match reserved {
+                Ok(guard) => guard,
+                Err(full) => {
+                    throttled = true;
+                    tracing::info!(
+                        "[LOCAL-LIMIT] credential={} {}，{}",
+                        ctx.id,
+                        full,
+                        if can_switch {
+                            "换下一账号"
+                        } else {
+                            "排队超时"
+                        }
+                    );
+                    self.token_manager.report_throttled_for_rotation(ctx.id);
+                    if let Some(cid) = continuation_id.as_deref() {
+                        self.token_manager.report_sticky_throttled(cid, ctx.id);
+                    }
+                    push_unique(&mut throttled_in_request, ctx.id);
+                    last_error = Some(anyhow::anyhow!("账号 {} 本地限额：{}", ctx.id, full));
+                    if can_switch {
+                        continue;
+                    }
+                    // 没有别的账号可换，且已排队到截止时刻
+                    break;
+                }
+            };
+
+            // 全局与单账号并发 permit：只覆盖本轮发送到拿到响应头，随本轮作用域结束释放。
+            // 所有退避都在下一轮开头进行，等待期间不占槛位
+            let _global_permit = self.concurrency_limit.acquire().await?;
+            let _cred_permit = self.semaphore_for(ctx.id).acquire_owned().await?;
+
             // 请求体可能含敏感上下文，禁止整包入日志，只记录 URL 与长度（cr-result C6）
             tracing::debug!(
                 "[KIRO-REQUEST] url={} body_len={}",
@@ -400,28 +436,32 @@ impl KiroProvider {
                         e
                     );
                     last_error = Some(e.into());
-                    if attempt + 1 < max_retries {
-                        drop(_cred_permit);
-                        sleep(Self::retry_delay(attempt)).await;
-                    }
+                    backoff = (attempt + 1 < attempt_limit).then(|| Self::retry_delay(attempt));
                     continue;
                 }
             };
 
             let status = response.status();
+            let route = super::UpstreamRoute {
+                credential_id: ctx.id,
+                endpoint: endpoint.name,
+                continuation_id: continuation_id.clone(),
+                model: model.clone(),
+                attempt: attempt as u32 + 1,
+            };
 
             // 成功响应
             if status.is_success() {
                 self.token_manager.report_success(ctx.id);
-                let credential_in_flight = self
-                    .rpm_tracker
-                    .as_ref()
-                    .map(|rpm| rpm.begin_credential_request(ctx.id));
+                if let Some(cid) = continuation_id.as_deref() {
+                    self.token_manager.report_sticky_success(cid, ctx.id);
+                }
                 return Ok(super::ApiResponse {
                     response,
                     credential_id: ctx.id,
                     signature_repair: signature_repair.finish(),
                     credential_in_flight,
+                    route,
                 });
             }
 
@@ -546,7 +586,8 @@ impl KiroProvider {
                 continue;
             }
 
-            // 429 Too Many Requests - 限流：驱逐 sticky cache + rotation bias 轮转 + 封禁当前端点桶
+            // 429 Too Many Requests - 限流：账号与端点桶记账，下一轮避开该账号
+            // （没有别的账号可换时，下一轮开头先退避再重回）
             if status.as_u16() == 429 {
                 tracing::warn!(
                     "API 请求失败（上游限流，{}重试，尝试 {}/{}）: {} {}",
@@ -556,41 +597,20 @@ impl KiroProvider {
                         "切换账号"
                     },
                     attempt + 1,
-                    max_retries,
+                    attempt_limit,
                     status,
                     body
                 );
-                self.token_manager.report_throttled(ctx.id);
-                self.token_manager.report_throttled_for_rotation(ctx.id);
-                // 端点级：封禁当前命中桶 30s（不动其它桶，不动账号）
-                self.endpoint_registry
-                    .throttle(ctx.id, endpoint.name, BUCKET_THROTTLE_DURATION);
-                if let Some(cid) = continuation_id.as_deref() {
-                    self.token_manager.report_sticky_throttled(cid, ctx.id);
-                }
-                if !throttled_in_request.contains(&ctx.id) {
-                    throttled_in_request.push(ctx.id);
-                }
-                if let Some(ref store) = self.throttle_log_store {
-                    store.record(
-                        ctx.id,
-                        "api",
-                        status.as_u16(),
-                        &body,
-                        Some(endpoint.name.as_str()),
-                    );
-                }
+                self.note_upstream_throttle(&route, "api", status.as_u16(), &body);
+                push_unique(&mut throttled_in_request, ctx.id);
+                push_unique(&mut upstream_throttled, ctx.id);
+                throttled = true;
                 last_error = Some(anyhow::anyhow!(
                     "{} API 请求失败: {} {}",
                     api_type,
                     status,
                     body
                 ));
-                if attempt + 1 < max_retries {
-                    let delay = Self::throttle_delay(attempt);
-                    drop(_cred_permit);
-                    sleep(delay).await;
-                }
                 continue;
             }
 
@@ -600,7 +620,7 @@ impl KiroProvider {
                 tracing::warn!(
                     "API 请求失败（上游瞬态错误，尝试 {}/{}）: {} {}",
                     attempt + 1,
-                    max_retries,
+                    attempt_limit,
                     status,
                     body
                 );
@@ -610,10 +630,7 @@ impl KiroProvider {
                     status,
                     body
                 ));
-                if attempt + 1 < max_retries {
-                    drop(_cred_permit);
-                    sleep(Self::retry_delay(attempt)).await;
-                }
+                backoff = (attempt + 1 < attempt_limit).then(|| Self::retry_delay(attempt));
                 continue;
             }
 
@@ -636,19 +653,80 @@ impl KiroProvider {
                 status,
                 body
             ));
-            if attempt + 1 < max_retries {
-                drop(_cred_permit);
-                sleep(Self::retry_delay(attempt)).await;
-            }
+            backoff = (attempt + 1 < attempt_limit).then(|| Self::retry_delay(attempt));
         }
 
         // 所有重试都失败
-        Err(last_error.unwrap_or_else(|| {
+        let last_error = last_error.unwrap_or_else(|| {
             anyhow::anyhow!(
                 "{} API 请求失败：已达到最大重试次数（{}次）",
                 api_type,
-                max_retries
+                attempt_limit
             )
-        }))
+        });
+        // 遇到过限流就按 429 收尾：最后一次尝试可能是「本地限额满」「端点全封」等不带
+        // 429 字样的错误，按它分类会变成 502，客户端不会自动重试
+        if throttled {
+            return Err(anyhow::anyhow!(
+                "{api_type} API 请求失败（限流）: 429 Too Many Requests；最后一次错误: {last_error}"
+            ));
+        }
+        Err(last_error)
+    }
+
+    /// 上游限流记账：账号限流计数与轮转偏移、端点桶封禁、sticky 连续限流、限流日志
+    fn note_upstream_throttle(
+        &self,
+        route: &super::UpstreamRoute,
+        request_type: &str,
+        status_code: u16,
+        body: &str,
+    ) {
+        let id = route.credential_id;
+        self.token_manager.report_throttled(id);
+        self.token_manager.report_throttled_for_rotation(id);
+        // 端点级：封禁命中桶（不动其它桶）
+        self.endpoint_registry
+            .throttle(id, route.endpoint, BUCKET_THROTTLE_DURATION);
+        if let Some(cid) = route.continuation_id.as_deref() {
+            self.token_manager.report_sticky_throttled(cid, id);
+        }
+        if let Some(store) = &self.throttle_log_store {
+            let context = ThrottleContext {
+                credential_rpm: self.rpm_tracker.as_ref().map(|rpm| rpm.credential_rpm(id)),
+                credential_in_flight: self
+                    .rpm_tracker
+                    .as_ref()
+                    .map(|rpm| rpm.credential_in_flight(id)),
+                attempt: Some(route.attempt),
+                model: route.model.clone(),
+            };
+            store.record(
+                id,
+                request_type,
+                status_code,
+                body,
+                Some(route.endpoint.as_str()),
+                context,
+            );
+        }
+    }
+
+    /// 流中途收到限流帧（响应头已是 200，无法再换号重试）：与 HTTP 429 同样记账，
+    /// 让后续请求避让该账号与端点
+    pub(super) fn report_stream_throttled(&self, route: &super::UpstreamRoute, message: &str) {
+        tracing::warn!(
+            credential_id = route.credential_id,
+            endpoint = route.endpoint.as_str(),
+            "上游流中途限流: {}",
+            message
+        );
+        self.note_upstream_throttle(route, "stream", 200, message);
+    }
+}
+
+pub(super) fn push_unique(ids: &mut Vec<u64>, id: u64) {
+    if !ids.contains(&id) {
+        ids.push(id);
     }
 }

@@ -1,10 +1,11 @@
 //! 错误分类与退避：重试/限流退避延迟、月度限额与 Profile ARN 错误判定、请求体改写。
 use std::time::Duration;
-use tokio::time::sleep;
 
 use crate::anthropic::converter::native_thinking_supported;
 use crate::kiro::model::credentials::{KiroCredentials, fallback_profile_arn_value};
 use crate::kiro::model::requests::conversation::HistoryAssistantMessage;
+
+use crate::model::rpm::{InFlightGuard, LimitFull, LocalLimits};
 
 use super::core::KiroProvider;
 
@@ -13,8 +14,8 @@ const THROTTLE_STEP_MS: u64 = 1000;
 const THROTTLE_MAX_MS: u64 = 8_000;
 const THROTTLE_JITTER_MAX_MS: u64 = 1500;
 const RETRY_BACKOFF_MAX_EXPONENT: usize = 6;
-const RPM_GATE_DEFAULT_WAIT_SECS: u64 = 3;
-const RPM_GATE_MAX_WAIT_SECS: u64 = 5;
+/// 每个请求为等待账号本地限额（RPM / 并发）名额最多排队的总时长
+pub(crate) const LOCAL_LIMIT_QUEUE: Duration = Duration::from_secs(10);
 const THINKING_SIGNATURE_INVALID_REASON: &str = "THINKING_SIGNATURE_INVALID";
 /// converter 注入的前缀对：history[0] 的 user + history[1] 的确认语 assistant
 const INJECTED_PAIR_LEN: usize = 2;
@@ -42,43 +43,30 @@ impl KiroProvider {
         Duration::from_millis(capped.saturating_add(jitter))
     }
 
-    /// RPM 硬限制：精确等待到下一个 slot 释放（上限 5s，短兜底避免长尾阻塞）
+    /// 向账号发出一次请求前占用其本地限额名额（RPM 计 1 次、在途 +1，守卫 drop 时在途 -1）
     ///
-    /// 返回 true 表示等待后已有 slot 可用或本身未满；返回 false 表示等待超时仍满
-    pub(crate) async fn wait_for_rpm_gate(&self, credential_id: u64, tag: &str) -> bool {
+    /// `queue_until` 为 None 时满了立即返回（还有别的账号可换）；为 Some 时排队到该时刻。
+    /// 未启用 RPM 监控时不设限，返回 `Ok(None)`。
+    pub(crate) async fn reserve_credential(
+        &self,
+        credential_id: u64,
+        queue_until: Option<tokio::time::Instant>,
+    ) -> Result<Option<InFlightGuard>, LimitFull> {
         let Some(rpm) = &self.rpm_tracker else {
-            return true;
+            return Ok(None);
         };
-        let max_rpm = self.token_manager.max_rpm_per_credential();
-        if max_rpm == 0 || rpm.credential_rpm(credential_id) < max_rpm as u64 {
-            return true;
-        }
-
-        // 精确计算等待时间
-        let wait_duration = rpm
-            .time_until_slot(credential_id, max_rpm)
-            .unwrap_or(Duration::from_secs(RPM_GATE_DEFAULT_WAIT_SECS))
-            .min(Duration::from_secs(RPM_GATE_MAX_WAIT_SECS));
-
-        tracing::info!(
-            "[RPM-GATE] credential={} rpm={} limit={}, waiting {:.1}s{}",
-            credential_id,
-            rpm.credential_rpm(credential_id),
-            max_rpm,
-            wait_duration.as_secs_f64(),
-            tag
-        );
-        sleep(wait_duration).await;
-
-        if rpm.credential_rpm(credential_id) >= max_rpm as u64 {
-            tracing::warn!(
-                "[RPM-GATE] credential={} still over limit after wait{}, proceeding anyway",
-                credential_id,
-                tag
-            );
-            return false;
-        }
-        true
+        let limits = LocalLimits {
+            rpm: self.token_manager.max_rpm_per_credential(),
+            concurrency: self.token_manager.max_concurrency_per_credential(),
+        };
+        let guard = match queue_until {
+            None => rpm.try_begin_credential_request(credential_id, limits)?,
+            Some(deadline) => {
+                rpm.begin_credential_request_by(credential_id, limits, deadline)
+                    .await?
+            }
+        };
+        Ok(Some(guard))
     }
 
     pub(crate) fn is_monthly_request_limit(body: &str) -> bool {

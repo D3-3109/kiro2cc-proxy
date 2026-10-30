@@ -1,4 +1,5 @@
 //! 单凭据条目：健康状态（HealthStatus）、禁用原因（DisabledReason）与统计计数。
+use super::upstream_failures::UpstreamFailures;
 use crate::kiro::model::credentials::KiroCredentials;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -27,9 +28,9 @@ pub(crate) struct CredentialEntry {
     pub(crate) last_used_at: Option<String>,
     /// 被限流次数（429 响应，累计）
     pub(crate) throttle_count: u64,
-    /// 最后一次被限流时间（内存中，不持久化）
-    pub(crate) last_throttled_at: Option<Instant>,
-    /// 最后一次被限流时间（UTC，持久化，用于健康状态窗口计算）
+    /// 近期上游失败（限流、空响应），健康度据此判定；仅内存
+    pub(crate) upstream_failures: UpstreamFailures,
+    /// 最后一次被限流时间（UTC，随统计持久化；健康度不使用）
     pub(crate) last_throttled_wall: Option<DateTime<Utc>>,
     /// 最后一次 token 刷新时间（用于冷却期控制）
     pub(crate) last_refreshed_at: Option<Instant>,
@@ -73,17 +74,17 @@ impl DisabledReason {
     }
 }
 
-/// 账号健康状态
+/// 账号健康状态（判定规则见 `MultiTokenManager::compute_health_at`）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthStatus {
-    /// 正常，无失败无限流
+    /// 正常
     Healthy,
-    /// 轻微问题，有少量历史限流或 1 次失败
+    /// 近期有少量上游失败或 1 次认证失败；仅提示
     Warning,
-    /// 降级，近期频繁限流或 2 次连续失败
+    /// 近期上游失败较多或连续失败；同优先级内最后被选中
     Degraded,
-    /// 不健康，极近期高频限流或即将被禁用
+    /// 冷却期内且连续失败或近期失败很多；选号时排除
     Unhealthy,
     /// 已禁用（手动或自动）
     Disabled,

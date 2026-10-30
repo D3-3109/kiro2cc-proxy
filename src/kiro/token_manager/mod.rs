@@ -24,13 +24,14 @@ mod entry;
 mod manager;
 mod refresh;
 mod types;
+mod upstream_failures;
 
 pub use entry::{DisabledReason, HealthStatus};
 pub(crate) use refresh::UsageLimitsUnsupportedError;
 #[cfg(test)]
 pub(crate) use refresh::{is_token_expired, is_token_expiring_soon, refresh_token};
 pub(crate) use types::QUOTA_EXHAUSTED_ALL_MARKER;
-pub use types::{CallContext, MultiTokenManager};
+pub use types::{CallContext, HealthDetail, MultiTokenManager};
 
 #[cfg(test)]
 mod tests;

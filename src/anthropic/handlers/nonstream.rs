@@ -2,9 +2,11 @@
 //! 非流式响应构建：将 Kiro 事件聚合为完整 Anthropic message 响应（含 thinking 块 flush），用于非流式请求。
 
 use crate::anthropic::stream::{
-    CONTENT_LENGTH_EXCEEDED_EXCEPTION, UpstreamTermination, upstream_aborted_message,
+    CONTENT_LENGTH_EXCEEDED_EXCEPTION, UpstreamTermination, empty_response_oversized_threshold,
+    upstream_aborted_message,
 };
 use crate::anthropic::types::ErrorResponse;
+use std::sync::Arc;
 
 use crate::kiro::model::events::{Event, EventType, ReasoningContentEvent, UpstreamStop};
 use crate::kiro::parser::decoder::EventStreamDecoder;
@@ -232,6 +234,7 @@ pub(crate) async fn handle_non_stream_request(
         signature_repair,
         // 持有到函数返回：非流式响应体在返回前已完整生成
         credential_in_flight: _credential_in_flight,
+        route,
     } = match provider
         .call_api(
             request_body,
@@ -396,8 +399,23 @@ pub(crate) async fn handle_non_stream_request(
         }
     }
     termination.observe_eof(decoder.buffer_len());
+    let feedback = crate::kiro::provider::UpstreamFeedback::new(Arc::clone(&provider), route);
+    if let Some(message) = termination.throttle_message() {
+        feedback.throttled(message);
+    }
 
     flush_native_reasoning(&mut native_reasoning, &mut native_thinking_blocks);
+
+    // 健康度记账：与流式 `report_upstream_outcome_at_eof` 同口径。空响应 = 无正文、无工具调用、
+    // 无推理，上下文过大导致的不计；只记账，返回给客户端的内容不变
+    if termination.failure().is_none() {
+        let empty = text_content.is_empty() && !has_tool_use && native_thinking_blocks.is_empty();
+        if !empty {
+            feedback.completed();
+        } else if input_tokens < empty_response_oversized_threshold(model) {
+            feedback.empty_response();
+        }
+    }
 
     // 异常终止不得组装成正常响应（客户端会当成任务完成），返回可重试错误
     if let Some(reason) = termination.failure() {

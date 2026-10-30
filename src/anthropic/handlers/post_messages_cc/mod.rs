@@ -18,7 +18,7 @@ use crate::anthropic::types::ErrorResponse;
 
 use super::error::parse_messages_request;
 use super::helpers::{
-    extract_client_ip, extract_user_agent, is_suggestion_mode_request,
+    admit_request, extract_client_ip, extract_user_agent, is_suggestion_mode_request,
     override_thinking_from_model_name, reject_disallowed_model, resolve_thinking_enabled,
     suggestion_mode_response,
 };
@@ -78,11 +78,12 @@ pub async fn post_messages_cc(
         "Received POST /cc/v1/messages request"
     );
 
-    // 记录 RPM 与并发（与 /v1/messages 同口径）；非流式持有到本函数返回，流式随 SSE 流存活
-    let api_key_in_flight = state
-        .rpm_tracker
-        .as_ref()
-        .map(|rpm| rpm.begin_api_key_request(identity.as_ref().map(|ext| ext.0.id)));
+    // 准入并记录 RPM 与并发（与 /v1/messages 同口径）；非流式持有到本函数返回，流式随 SSE 流存活
+    let api_key_in_flight =
+        match admit_request(state.rpm_tracker.as_ref(), identity.as_deref()).await {
+            Ok(guard) => guard,
+            Err(resp) => return *resp,
+        };
 
     // 检查 KiroProvider 是否可用
     let provider = match &state.kiro_provider {

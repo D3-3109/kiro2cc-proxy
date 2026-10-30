@@ -158,6 +158,7 @@ impl AdminService {
                 proxy_url: entry.proxy_url,
                 thinking_adaptive: entry.thinking_adaptive,
                 health_status: entry.health_status,
+                health_detail: entry.health_detail,
                 throttle_count: self
                     .throttle_log_store
                     .as_ref()
@@ -501,6 +502,16 @@ impl AdminService {
     /// 获取每账号 RPM 上限运行时当前值（含热切换后的值；0 = 不限）
     pub fn max_rpm_per_credential(&self) -> u32 {
         self.token_manager.max_rpm_per_credential()
+    }
+
+    /// 热切换每账号并发上限（0 = 不限），仅影响运行时，持久化由 handler 负责
+    pub fn set_max_concurrency_per_credential(&self, value: u32) {
+        self.token_manager.set_max_concurrency_per_credential(value);
+    }
+
+    /// 获取每账号并发上限运行时当前值（0 = 不限）
+    pub fn max_concurrency_per_credential(&self) -> u32 {
+        self.token_manager.max_concurrency_per_credential()
     }
 
     // ============ 余额缓存持久化 ============
@@ -995,8 +1006,9 @@ mod tests {
         // 准备 store：5 条 8 天前（窗口外）+ 3 条 当前（窗口内）
         let store = crate::model::throttle_log::ThrottleLogStore::empty("unused");
         let now = Utc::now();
+        let record = |id| store.record(id, "api", 429, "{}", None, Default::default());
         for _ in 0..5 {
-            store.record(1, "api", 429, "{}", None);
+            record(1);
         }
         store.with_events_for_test(1, |events| {
             for e in events.iter_mut() {
@@ -1004,10 +1016,10 @@ mod tests {
             }
         });
         for _ in 0..3 {
-            store.record(1, "api", 429, "{}", None);
+            record(1);
         }
         // 无关 id 的事件，应被过滤
-        store.record(999, "api", 429, "{}", None);
+        record(999);
 
         // 构造一个真实 entry
         let cred = make_valid_cred("t1");

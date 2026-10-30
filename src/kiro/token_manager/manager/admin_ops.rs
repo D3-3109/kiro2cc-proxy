@@ -11,6 +11,7 @@ use super::super::refresh::{
 use super::super::types::{
     CredentialEntrySnapshot, ManagerSnapshot, MultiTokenManager, TOKEN_REFRESH_COOLDOWN,
 };
+use super::super::upstream_failures::UpstreamFailures;
 use crate::kiro::model::available_models::AvailableModelsResponse;
 use crate::kiro::model::credentials::KiroCredentials;
 use crate::kiro::model::credentials::canonicalize_auth_method_value;
@@ -80,6 +81,7 @@ impl MultiTokenManager {
         let entries = self.entries.lock();
         let current_id = *self.current_id.lock();
         let available = entries.iter().filter(|e| !e.disabled).count();
+        let now = Instant::now();
 
         ManagerSnapshot {
             entries: entries
@@ -110,7 +112,8 @@ impl MultiTokenManager {
                     refresh_failure_count: e.refresh_failure_count,
                     has_proxy: e.credentials.proxy_url.is_some(),
                     proxy_url: e.credentials.proxy_url.clone(),
-                    health_status: Self::compute_health(e),
+                    health_status: Self::compute_health_at(e, now),
+                    health_detail: Self::health_detail_at(e, now),
                     throttle_count: e.throttle_count,
                     disabled_reason: e.disabled_reason,
                     thinking_adaptive: e.credentials.thinking_adaptive,
@@ -725,7 +728,7 @@ impl MultiTokenManager {
                 success_count: 0,
                 last_used_at: None,
                 throttle_count: 0,
-                last_throttled_at: None,
+                upstream_failures: UpstreamFailures::new(Instant::now()),
                 last_throttled_wall: None,
                 last_refreshed_at: None,
                 rotation_bias: 0,

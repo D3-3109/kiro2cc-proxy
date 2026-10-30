@@ -79,8 +79,8 @@ export function maskEmail(email: string): string {
  * 由凭据状态与余额查询情况派生唯一账号状态。
  * 判定顺序即优先级，逐条对应 spec.md 状态映射表：
  *   1. disabled 为真              → disabled
- *   2. healthStatus 不健康 / 降级 → error
- *   3. healthStatus 警告          → warning
+ *   2. healthStatus 不健康        → error
+ *   3. healthStatus 降级 / 警告   → warning（降级只是同优先级内最后被选中，仍可服务）
  *   4. 健康 + 零成功调用 + 未查额度 → pending
  *   5. 其余                       → healthy
  * @param hasBalance 该账号在 balanceMap 中是否已有余额结果（会话内内存态）
@@ -93,8 +93,8 @@ export function deriveAccountState(
   // 都不应吞掉这一类，让用户能在筛选里精确看到下月自动恢复的账号
   if (item.disabled && item.disabledReason === 'quota_exceeded') return 'quota_exceeded'
   if (item.disabled) return 'disabled'
-  if (item.healthStatus === 'unhealthy' || item.healthStatus === 'degraded') return 'error'
-  if (item.healthStatus === 'warning') return 'warning'
+  if (item.healthStatus === 'unhealthy') return 'error'
+  if (item.healthStatus === 'degraded' || item.healthStatus === 'warning') return 'warning'
   if (item.healthStatus === 'healthy' && item.successCount === 0 && !hasBalance) return 'pending'
   if (item.healthStatus === 'healthy') return 'healthy'
   // 兜底：后端 HealthStatus 日后新增变体时宁可张扬为异常，不静默显示为「健康」

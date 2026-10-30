@@ -436,6 +436,7 @@ fn persist_debug_logs(config_path: &std::path::Path, enabled: bool) -> anyhow::R
 /// 获取运行时配置（maxRpm / port / proxyUrl / writeChunkingMaxLines）
 pub async fn get_runtime_config(State(state): State<AdminState>) -> impl IntoResponse {
     let max_rpm = state.service.max_rpm_per_credential();
+    let max_concurrency = state.service.max_concurrency_per_credential();
 
     // port / proxyUrl 无运行时热值概念，读取 config.json 持久化值；
     // 文件缺失或字段缺失时回退默认值（与 Config serde default 一致）
@@ -453,6 +454,7 @@ pub async fn get_runtime_config(State(state): State<AdminState>) -> impl IntoRes
 
     Json(super::types::RuntimeConfigResponse {
         max_rpm_per_credential: max_rpm,
+        max_concurrency_per_credential: max_concurrency,
         port,
         proxy_url,
         write_chunking_max_lines: crate::anthropic::write_chunking_max_lines(),
@@ -500,6 +502,11 @@ pub async fn set_runtime_config(
     if let Some(max_rpm) = payload.max_rpm_per_credential {
         state.service.set_max_rpm_per_credential(max_rpm);
     }
+    if let Some(max_concurrency) = payload.max_concurrency_per_credential {
+        state
+            .service
+            .set_max_concurrency_per_credential(max_concurrency);
+    }
     if let Some(lines) = payload.write_chunking_max_lines {
         crate::anthropic::set_write_chunking_max_lines(lines);
     }
@@ -507,6 +514,9 @@ pub async fn set_runtime_config(
         let result = persist_config_field(config_path, |json| {
             if let Some(max_rpm) = payload.max_rpm_per_credential {
                 json["maxRpmPerCredential"] = serde_json::json!(max_rpm);
+            }
+            if let Some(max_concurrency) = payload.max_concurrency_per_credential {
+                json["maxConcurrencyPerCredential"] = serde_json::json!(max_concurrency);
             }
             if let Some(lines) = payload.write_chunking_max_lines {
                 json["writeChunkingMaxLines"] = serde_json::json!(lines);
@@ -536,6 +546,9 @@ pub async fn set_runtime_config(
     let mut parts = Vec::new();
     if payload.max_rpm_per_credential.is_some() {
         parts.push("maxRpmPerCredential 已热生效");
+    }
+    if payload.max_concurrency_per_credential.is_some() {
+        parts.push("maxConcurrencyPerCredential 已热生效");
     }
     if payload.write_chunking_max_lines.is_some() {
         parts.push("writeChunkingMaxLines 已热生效（仅影响之后的新请求）");

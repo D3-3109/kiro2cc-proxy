@@ -50,6 +50,20 @@ const SW_DOT = 'absolute top-0.5 size-3 rounded-full bg-white shadow-[0_1px_2px_
 /** 管理密码掩码：固定 12 位，不随真实长度变化以免泄露长度信息 */
 const PSW_MASK = '∗'.repeat(12)
 
+/** 运行时配置中可单独编辑的字段 */
+type RuntimeField = 'maxRpm' | 'maxConcurrency' | 'chunkLines' | 'port' | 'proxyUrl'
+
+const RUNTIME_LABEL_KEY: Record<RuntimeField, string> = {
+  maxRpm: 'settings.maxRpmPerCredential',
+  maxConcurrency: 'settings.maxConcurrencyPerCredential',
+  chunkLines: 'settings.writeChunkingMaxLines',
+  port: 'settings.port',
+  proxyUrl: 'settings.proxyUrl',
+}
+
+/** 与后端 u32 对齐：非负整数且 ≤ 4294967295 */
+const isU32 = (s: string) => /^\d+$/.test(s) && Number(s) <= 4294967295
+
 /** 配置分区：`.set-cap` 标题 + `.set-card` 卡片 */
 function Section({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
   return (
@@ -194,13 +208,14 @@ export function SettingsPanel({
   const [editingAdminPsw, setEditingAdminPsw] = useState(false)
   const { data: runtimeConfigData, isError: isRuntimeConfigError, isLoading: isLoadingRuntimeConfig } = useRuntimeConfig()
   const { mutate: setRuntimeConfigMut, isPending: isSettingRuntimeConfig } = useSetRuntimeConfig()
-  const [runtimeDraft, setRuntimeDraft] = useState<{ maxRpm: string; chunkLines: string; port: string; proxyUrl: string }>({
+  const [runtimeDraft, setRuntimeDraft] = useState<Record<RuntimeField, string>>({
     maxRpm: '',
+    maxConcurrency: '',
     chunkLines: '',
     port: '',
     proxyUrl: '',
   })
-  const [editingRuntime, setEditingRuntime] = useState<'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl' | null>(null)
+  const [editingRuntime, setEditingRuntime] = useState<RuntimeField | null>(null)
 
   const lang = i18n.language === 'en' ? 'en' : 'zh'
 
@@ -235,14 +250,16 @@ export function SettingsPanel({
     )
   }
 
-  const saveRuntimeField = (field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl') => {
+  const saveRuntimeField = (field: RuntimeField) => {
     const payload: {
       maxRpmPerCredential?: number
+      maxConcurrencyPerCredential?: number
       writeChunkingMaxLines?: number
       port?: number
       proxyUrl?: string
     } = {}
     if (field === 'maxRpm') payload.maxRpmPerCredential = Number(runtimeDraft.maxRpm)
+    else if (field === 'maxConcurrency') payload.maxConcurrencyPerCredential = Number(runtimeDraft.maxConcurrency)
     else if (field === 'chunkLines') payload.writeChunkingMaxLines = Number(runtimeDraft.chunkLines)
     else if (field === 'port') payload.port = Number(runtimeDraft.port)
     else payload.proxyUrl = runtimeDraft.proxyUrl.trim()
@@ -256,8 +273,10 @@ export function SettingsPanel({
     })
   }
 
-  const startEditRuntime = (field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl') => {
+  const startEditRuntime = (field: RuntimeField) => {
     if (field === 'maxRpm') setRuntimeDraft((d) => ({ ...d, maxRpm: String(runtimeConfigData?.maxRpmPerCredential ?? '') }))
+    else if (field === 'maxConcurrency')
+      setRuntimeDraft((d) => ({ ...d, maxConcurrency: String(runtimeConfigData?.maxConcurrencyPerCredential ?? '') }))
     else if (field === 'chunkLines') setRuntimeDraft((d) => ({ ...d, chunkLines: String(runtimeConfigData?.writeChunkingMaxLines ?? '') }))
     else if (field === 'port') setRuntimeDraft((d) => ({ ...d, port: String(runtimeConfigData?.port ?? '') }))
     else setRuntimeDraft((d) => ({ ...d, proxyUrl: runtimeConfigData?.proxyUrl ?? '' }))
@@ -266,17 +285,12 @@ export function SettingsPanel({
 
   const cancelEditRuntime = () => {
     setEditingRuntime(null)
-    setRuntimeDraft({ maxRpm: '', chunkLines: '', port: '', proxyUrl: '' })
+    setRuntimeDraft({ maxRpm: '', maxConcurrency: '', chunkLines: '', port: '', proxyUrl: '' })
   }
 
-  const runtimeCanSave = (field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl') => {
-    if (field === 'maxRpm') {
-      // 与后端 Option<u32> 对齐：非负整数且 ≤ 4294967295
-      return /^\d+$/.test(runtimeDraft.maxRpm) && Number(runtimeDraft.maxRpm) <= 4294967295
-    }
-    if (field === 'chunkLines') {
-      // 与后端 Option<u32> 对齐：非负整数且 ≤ 4294967295（0 = 不追加约束）
-      return /^\d+$/.test(runtimeDraft.chunkLines) && Number(runtimeDraft.chunkLines) <= 4294967295
+  const runtimeCanSave = (field: RuntimeField) => {
+    if (field === 'maxRpm' || field === 'maxConcurrency' || field === 'chunkLines') {
+      return isU32(runtimeDraft[field])
     }
     if (field === 'port') {
       return /^\d+$/.test(runtimeDraft.port) && Number(runtimeDraft.port) >= 1 && Number(runtimeDraft.port) <= 65535
@@ -286,7 +300,7 @@ export function SettingsPanel({
 
   /** 运行时配置行共用的编辑态控件（Input + 保存/取消按钮） */
   const runtimeEditor = (
-    field: 'maxRpm' | 'chunkLines' | 'port' | 'proxyUrl',
+    field: RuntimeField,
     value: string,
     onChange: (v: string) => void,
     inputType: 'text' | 'number',
@@ -295,15 +309,7 @@ export function SettingsPanel({
     <>
       <Input
         type={inputType}
-        aria-label={t(
-          field === 'maxRpm'
-            ? 'settings.maxRpmPerCredential'
-            : field === 'chunkLines'
-              ? 'settings.writeChunkingMaxLines'
-              : field === 'port'
-                ? 'settings.port'
-                : 'settings.proxyUrl'
-        )}
+        aria-label={t(RUNTIME_LABEL_KEY[field])}
         autoFocus
         disabled={isSettingRuntimeConfig}
         value={value}
@@ -394,6 +400,27 @@ export function SettingsPanel({
               <>
                 <div className={FIELD_S}>{isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.maxRpmPerCredential ?? '—')}</div>
                 <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('maxRpm')}>
+                  <Pencil />
+                  {t('common.edit')}
+                </Button>
+              </>
+            )}
+          </Row>
+          <Row label={t('settings.maxConcurrencyPerCredential')} desc={t('settings.maxConcurrencyPerCredentialDesc')}>
+            {editingRuntime === 'maxConcurrency' ? (
+              runtimeEditor(
+                'maxConcurrency',
+                runtimeDraft.maxConcurrency,
+                (v) => setRuntimeDraft((d) => ({ ...d, maxConcurrency: v })),
+                'number',
+                runtimeCanSave('maxConcurrency')
+              )
+            ) : (
+              <>
+                <div className={FIELD_S}>
+                  {isLoadingRuntimeConfig ? t('common.loading') : (runtimeConfigData?.maxConcurrencyPerCredential ?? '—')}
+                </div>
+                <Button variant="ghost" size="sm" disabled={isLoadingRuntimeConfig || isRuntimeConfigError || isSettingRuntimeConfig} onClick={() => startEditRuntime('maxConcurrency')}>
                   <Pencil />
                   {t('common.edit')}
                 </Button>

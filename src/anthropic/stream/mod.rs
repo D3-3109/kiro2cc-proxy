@@ -15,7 +15,9 @@ mod thinking_text;
 pub use calib::cap_input_tokens_pub;
 #[cfg(test)]
 pub(crate) use calib::scale_for_client_with;
-pub(crate) use calib::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
+pub(crate) use calib::{
+    CLIENT_ASSUMED_CONTEXT_WINDOW, empty_response_oversized_threshold, scale_for_client,
+};
 pub use calib::{
     client_token_passthrough_enabled, output_tokens_include_thinking, set_client_token_passthrough,
     set_output_tokens_include_thinking,

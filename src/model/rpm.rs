@@ -1,19 +1,24 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
-//! RPM（Requests Per Minute）与并发实时监控
+//! RPM（Requests Per Minute）与并发实时监控，兼本地限额
 //!
 //! 使用滑动窗口统计最近 60 秒内的请求数量，另计正在处理的请求数（并发），
 //! 支持全局、按账号、按 API Key 三个维度。
 //!
-//! 并发的区间：
-//! - 全局 / API Key：进入 handler 起，到响应体发完或客户端断开；
-//! - 账号：上游选中该账号并返回成功起，到响应体发完或客户端断开（故障转移试过的账号不计）。
+//! 计数口径：
+//! - 全局 / API Key：进入 handler 计 1 次请求；并发从进入 handler 起，到响应体发完或客户端断开；
+//! - 账号：每向上游发出一次请求计 1 次（含之后被限流、失败的尝试）；并发从发出起，
+//!   到响应体发完、客户端断开或本次尝试失败。
+//!
+//! 本地限额（[`LocalLimits`]）在计入前原子检查：满了不计入，返回 [`LimitFull`]。
 
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use tokio::sync::Notify;
+use tokio::time::Instant;
 
 /// 滑动窗口大小（秒）
 const WINDOW_SECS: usize = 60;
@@ -79,6 +84,37 @@ impl TimestampQueue {
 /// 内存开销恒定：每个队列固定为 `[Bucket; 60]` 大小。
 pub struct RpmTracker {
     inner: Mutex<RpmTrackerInner>,
+    /// 有在途请求结束时唤醒排队者
+    released: Notify,
+}
+
+/// 单个维度的本地限额，0 = 不限
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LocalLimits {
+    /// 最近 60 秒请求数上限
+    pub rpm: u32,
+    /// 同时在途请求数上限
+    pub concurrency: u32,
+}
+
+/// 本地限额已满
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitFull {
+    /// 最近 60 秒请求数已达上限；`retry_after` 为最早一个名额释放的等待时长
+    Rpm { retry_after: Duration },
+    /// 在途请求数已达上限（何时释放取决于在途请求何时结束）
+    Concurrency,
+}
+
+impl std::fmt::Display for LimitFull {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rpm { retry_after } => {
+                write!(f, "RPM 已满，{}s 后释放名额", retry_after.as_secs())
+            }
+            Self::Concurrency => write!(f, "并发已满"),
+        }
+    }
 }
 
 struct RpmTrackerInner {
@@ -146,16 +182,24 @@ impl RpmTracker {
                 in_flight_by_credential: HashMap::new(),
                 in_flight_by_api_key: HashMap::new(),
             }),
+            released: Notify::new(),
         }
     }
 
-    /// 一次请求进入 handler：计入全局与该 Key 的 RPM 和并发
-    pub fn begin_api_key_request(self: &Arc<Self>, api_key_id: Option<u32>) -> InFlightGuard {
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+    /// 一次请求进入 handler：该 Key 未超 `limits` 时计入全局与该 Key 的 RPM 和并发
+    ///
+    /// 无 Key（`None`）时只计全局，不受 `limits` 约束。
+    pub fn try_begin_api_key_request(
+        self: &Arc<Self>,
+        api_key_id: Option<u32>,
+        limits: LocalLimits,
+    ) -> Result<InFlightGuard, LimitFull> {
+        let now_secs = now_secs();
         let mut inner = self.lock();
+        if let Some(key_id) = api_key_id {
+            let in_flight = inner.in_flight_by_api_key.get(&key_id).copied();
+            check_limits(inner.by_api_key.get(&key_id), in_flight, limits, now_secs)?;
+        }
         inner.global.record(now_secs);
         inner.in_flight_global += 1;
         if let Some(key_id) = api_key_id {
@@ -166,76 +210,120 @@ impl RpmTracker {
                 .record(now_secs);
             *inner.in_flight_by_api_key.entry(key_id).or_default() += 1;
         }
-        InFlightGuard {
+        Ok(InFlightGuard {
             tracker: Arc::clone(self),
             scope: InFlightScope::ApiKey(api_key_id),
-        }
+        })
     }
 
-    /// 上游选中账号并返回成功：计入该账号的 RPM 和并发
-    pub fn begin_credential_request(self: &Arc<Self>, credential_id: u64) -> InFlightGuard {
-        self.record_credential(credential_id);
-        *self
-            .lock()
-            .in_flight_by_credential
-            .entry(credential_id)
-            .or_default() += 1;
-        InFlightGuard {
-            tracker: Arc::clone(self),
-            scope: InFlightScope::Credential(credential_id),
-        }
+    /// [`Self::try_begin_api_key_request`] 的排队版：满了等到名额释放，`deadline` 前仍满则放弃
+    pub async fn begin_api_key_request_by(
+        self: &Arc<Self>,
+        api_key_id: Option<u32>,
+        limits: LocalLimits,
+        deadline: Instant,
+    ) -> Result<InFlightGuard, LimitFull> {
+        self.queue_until(deadline, || {
+            self.try_begin_api_key_request(api_key_id, limits)
+        })
+        .await
     }
 
-    fn end_in_flight(&self, scope: &InFlightScope) {
+    /// 向上游发出一次请求：该账号未超 `limits` 时计入其 RPM 和并发
+    pub fn try_begin_credential_request(
+        self: &Arc<Self>,
+        credential_id: u64,
+        limits: LocalLimits,
+    ) -> Result<InFlightGuard, LimitFull> {
+        let now_secs = now_secs();
         let mut inner = self.lock();
-        match *scope {
-            InFlightScope::ApiKey(api_key_id) => {
-                inner.in_flight_global -= 1;
-                if let Some(key_id) = api_key_id {
-                    decrement(&mut inner.in_flight_by_api_key, key_id);
-                }
-            }
-            InFlightScope::Credential(credential_id) => {
-                decrement(&mut inner.in_flight_by_credential, credential_id);
-            }
-        }
-    }
-
-    /// 守卫的 drop 也走这里：锁中毒时恢复而不是 panic
-    fn lock(&self) -> std::sync::MutexGuard<'_, RpmTrackerInner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// 记录账号维度的请求（在 provider 成功调用后调用）
-    pub fn record_credential(&self, credential_id: u64) {
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let mut inner = self.inner.lock().unwrap();
+        let in_flight = inner.in_flight_by_credential.get(&credential_id).copied();
+        check_limits(
+            inner.by_credential.get(&credential_id),
+            in_flight,
+            limits,
+            now_secs,
+        )?;
         inner
             .by_credential
             .entry(credential_id)
             .or_insert_with(TimestampQueue::new)
             .record(now_secs);
+        *inner
+            .in_flight_by_credential
+            .entry(credential_id)
+            .or_default() += 1;
+        Ok(InFlightGuard {
+            tracker: Arc::clone(self),
+            scope: InFlightScope::Credential(credential_id),
+        })
     }
 
-    /// 计算指定账号在 RPM 满时，最快多久后会有一个 slot 释放
-    ///
-    /// 返回 None 表示当前 RPM 未满或无数据
-    pub fn time_until_slot(&self, credential_id: u64, max_rpm: u32) -> Option<std::time::Duration> {
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let inner = self.inner.lock().unwrap();
-        let queue = inner.by_credential.get(&credential_id)?;
-        if queue.count(now_secs) < max_rpm as u64 {
-            return None;
+    /// [`Self::try_begin_credential_request`] 的排队版：满了等到名额释放，`deadline` 前仍满则放弃
+    pub async fn begin_credential_request_by(
+        self: &Arc<Self>,
+        credential_id: u64,
+        limits: LocalLimits,
+        deadline: Instant,
+    ) -> Result<InFlightGuard, LimitFull> {
+        self.queue_until(deadline, || {
+            self.try_begin_credential_request(credential_id, limits)
+        })
+        .await
+    }
+
+    /// 反复尝试 `try_begin`，两次之间等到「有在途请求结束」或「最早的 RPM 名额释放」
+    async fn queue_until(
+        &self,
+        deadline: Instant,
+        try_begin: impl Fn() -> Result<InFlightGuard, LimitFull>,
+    ) -> Result<InFlightGuard, LimitFull> {
+        loop {
+            // 先登记唤醒再检查，检查与等待之间的释放不会漏掉
+            let released = self.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+
+            let full = match try_begin() {
+                Ok(guard) => return Ok(guard),
+                Err(full) => full,
+            };
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(full);
+            }
+            let wake_at = match full {
+                LimitFull::Rpm { retry_after } => (now + retry_after).min(deadline),
+                LimitFull::Concurrency => deadline,
+            };
+            tokio::select! {
+                () = tokio::time::sleep_until(wake_at) => {}
+                () = released => {}
+            }
         }
-        queue
-            .time_until_earliest_expires(now_secs)
-            .map(std::time::Duration::from_secs)
+    }
+
+    fn end_in_flight(&self, scope: &InFlightScope) {
+        {
+            let mut inner = self.lock();
+            match *scope {
+                InFlightScope::ApiKey(api_key_id) => {
+                    inner.in_flight_global -= 1;
+                    if let Some(key_id) = api_key_id {
+                        decrement(&mut inner.in_flight_by_api_key, key_id);
+                    }
+                }
+                InFlightScope::Credential(credential_id) => {
+                    decrement(&mut inner.in_flight_by_credential, credential_id);
+                }
+            }
+        }
+        self.released.notify_waiters();
+    }
+
+    /// 守卫的 drop 也走这里：锁中毒时恢复而不是 panic
+    fn lock(&self) -> std::sync::MutexGuard<'_, RpmTrackerInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// 查询指定账号的当前 RPM
@@ -249,6 +337,15 @@ impl RpmTracker {
             .by_credential
             .get(&credential_id)
             .map(|q| q.count(now_secs))
+            .unwrap_or(0)
+    }
+
+    /// 查询指定账号正在处理的请求数
+    pub fn credential_in_flight(&self, credential_id: u64) -> u64 {
+        self.lock()
+            .in_flight_by_credential
+            .get(&credential_id)
+            .copied()
             .unwrap_or(0)
     }
 
@@ -290,6 +387,41 @@ impl RpmTracker {
             concurrency_by_api_key: inner.in_flight_by_api_key.clone(),
         }
     }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// 再计入一次请求是否会超过 `limits`；`requests` / `in_flight` 为 None 表示该维度尚无记录
+fn check_limits(
+    requests: Option<&TimestampQueue>,
+    in_flight: Option<u64>,
+    limits: LocalLimits,
+    now_secs: u64,
+) -> Result<(), LimitFull> {
+    if limits.concurrency > 0 && in_flight.unwrap_or(0) >= u64::from(limits.concurrency) {
+        return Err(LimitFull::Concurrency);
+    }
+    if limits.rpm == 0 {
+        return Ok(());
+    }
+    let Some(queue) = requests else {
+        return Ok(());
+    };
+    if queue.count(now_secs) < u64::from(limits.rpm) {
+        return Ok(());
+    }
+    // 窗口内计数 ≥ rpm ≥ 1，必有未过期的 bucket
+    let wait_secs = queue
+        .time_until_earliest_expires(now_secs)
+        .expect("窗口内计数非零时必有未过期 bucket");
+    Err(LimitFull::Rpm {
+        retry_after: Duration::from_secs(wait_secs),
+    })
 }
 
 /// 在途计数减一，归零即删键；键必然存在（由对应的 begin_* 计入）
@@ -338,13 +470,110 @@ mod tests {
         assert_eq!(queue.count(now_secs + 123), 0);
     }
 
+    const UNLIMITED: LocalLimits = LocalLimits {
+        rpm: 0,
+        concurrency: 0,
+    };
+
+    fn key(tracker: &Arc<RpmTracker>, id: Option<u32>) -> InFlightGuard {
+        tracker.try_begin_api_key_request(id, UNLIMITED).unwrap()
+    }
+
+    #[test]
+    fn concurrency_limit_rejects_until_a_request_ends() {
+        let tracker = Arc::new(RpmTracker::new());
+        let limits = LocalLimits {
+            rpm: 0,
+            concurrency: 2,
+        };
+        let first = tracker.try_begin_credential_request(14, limits).unwrap();
+        let _second = tracker.try_begin_credential_request(14, limits).unwrap();
+
+        let full = tracker.try_begin_credential_request(14, limits);
+        assert_eq!(full.err(), Some(LimitFull::Concurrency));
+        // 被拒的请求不计入 RPM
+        assert_eq!(tracker.credential_rpm(14), 2);
+        // 其它账号互不影响
+        assert!(tracker.try_begin_credential_request(10, limits).is_ok());
+
+        drop(first);
+        assert!(tracker.try_begin_credential_request(14, limits).is_ok());
+    }
+
+    #[test]
+    fn rpm_limit_counts_finished_requests_and_reports_wait() {
+        let tracker = Arc::new(RpmTracker::new());
+        let limits = LocalLimits {
+            rpm: 2,
+            concurrency: 0,
+        };
+        // RPM 按发出计：请求结束也仍占名额
+        drop(tracker.try_begin_api_key_request(Some(7), limits).unwrap());
+        drop(tracker.try_begin_api_key_request(Some(7), limits).unwrap());
+
+        let Err(LimitFull::Rpm { retry_after }) =
+            tracker.try_begin_api_key_request(Some(7), limits)
+        else {
+            panic!("第 3 次应被 RPM 限额拒绝");
+        };
+        assert!((1..=60).contains(&retry_after.as_secs()));
+        // 被拒的请求不计入全局
+        assert_eq!(tracker.snapshot().global, 2);
+        // 无 Key 的请求不受 Key 限额约束
+        assert!(tracker.try_begin_api_key_request(None, limits).is_ok());
+    }
+
+    #[tokio::test]
+    async fn queued_request_starts_when_in_flight_request_ends() {
+        let tracker = Arc::new(RpmTracker::new());
+        let limits = LocalLimits {
+            rpm: 0,
+            concurrency: 1,
+        };
+        let holder = tracker.try_begin_credential_request(14, limits).unwrap();
+
+        let waiter = {
+            let tracker = Arc::clone(&tracker);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            tokio::spawn(async move {
+                tracker
+                    .begin_credential_request_by(14, limits, deadline)
+                    .await
+                    .is_ok()
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let released_at = Instant::now();
+        drop(holder);
+
+        assert!(waiter.await.unwrap());
+        assert!(released_at.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn queued_request_gives_up_at_deadline() {
+        let tracker = Arc::new(RpmTracker::new());
+        let limits = LocalLimits {
+            rpm: 0,
+            concurrency: 1,
+        };
+        let _holder = tracker.try_begin_api_key_request(Some(7), limits).unwrap();
+
+        let deadline = Instant::now() + Duration::from_millis(50);
+        let result = tracker
+            .begin_api_key_request_by(Some(7), limits, deadline)
+            .await;
+        assert_eq!(result.err(), Some(LimitFull::Concurrency));
+        assert!(Instant::now() >= deadline);
+    }
+
     #[test]
     fn in_flight_guards_count_until_dropped() {
         let tracker = Arc::new(RpmTracker::new());
-        let key_a = tracker.begin_api_key_request(Some(7));
-        let key_b = tracker.begin_api_key_request(Some(7));
-        let anonymous = tracker.begin_api_key_request(None);
-        let credential = tracker.begin_credential_request(14);
+        let key_a = key(&tracker, Some(7));
+        let key_b = key(&tracker, Some(7));
+        let anonymous = key(&tracker, None);
+        let credential = tracker.try_begin_credential_request(14, UNLIMITED).unwrap();
 
         let snapshot = tracker.snapshot();
         assert_eq!(snapshot.concurrency_global, 3);

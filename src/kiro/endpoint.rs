@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// 单次 429 后桶封禁时长（与 `provider::throttle_delay` 最大档对齐）
+/// 单次 429 后桶封禁时长（固定窗口，独立于 `provider::throttle_delay` 的请求内退避）
 pub const BUCKET_THROTTLE_DURATION: Duration = Duration::from_secs(30);
 
 /// Kiro 上游端点名称

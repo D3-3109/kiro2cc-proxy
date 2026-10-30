@@ -90,6 +90,10 @@ pub async fn create_api_key(
         payload.duration_days,
         payload.bound_credential_ids,
         normalize_allowed_models(payload.allowed_models),
+        crate::model::rpm::LocalLimits {
+            rpm: payload.rpm_limit,
+            concurrency: payload.concurrency_limit,
+        },
     ) {
         Ok(api_key) => (StatusCode::CREATED, Json(api_key)).into_response(),
         Err(e) => {
@@ -121,6 +125,8 @@ pub async fn update_api_key(
         payload.duration_days,
         payload.bound_credential_ids,
         payload.allowed_models.map(normalize_allowed_models),
+        payload.rpm_limit,
+        payload.concurrency_limit,
     ) {
         Ok(Some(api_key)) => Json(api_key).into_response(),
         Ok(None) => {
@@ -700,7 +706,16 @@ mod tests {
             crate::model::api_key::ApiKeyManager::load(guard.0.join("api_keys.json")).unwrap(),
         );
         let key = manager
-            .create("ci-runner".to_string(), None, None, None, None, None, None)
+            .create(
+                "ci-runner".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Default::default(),
+            )
             .unwrap();
         assert_eq!(key.id, 1, "注入记录固定 api_key_id=1，首个 key 应分配到 1");
         let state = state.with_api_key_manager(manager);

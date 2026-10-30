@@ -3,6 +3,7 @@
 mod basic;
 mod credentials;
 mod ext_idp;
+mod health;
 mod model_routing;
 mod multi;
 mod recovery;

@@ -52,6 +52,22 @@ function formatLastUsed(lastUsedAt: string, t: TFunction): string {
   return t('credentials.daysAgo', { count: Math.floor(hours / 24) })
 }
 
+/** 状态标签悬停提示：健康度的判定依据，降级与冷却另加说明 */
+function healthTitle(credential: CredentialStatusItem, t: TFunction): string {
+  const parts = [
+    t('credentials.healthDetail', {
+      throttled: credential.recentThrottleCount,
+      empty: credential.recentEmptyResponseCount,
+      consecutive: credential.consecutiveFailures,
+    }),
+  ]
+  if (credential.healthStatus === 'degraded') parts.push(t('credentials.healthDegradedNote'))
+  if (credential.cooldownRemainingSecs !== undefined) {
+    parts.push(t('credentials.healthCooldown', { secs: credential.cooldownRemainingSecs }))
+  }
+  return parts.join('\n')
+}
+
 /** 绝对时间小字（设计稿 `今天 17:56` / `08-10 14:22`）：跨年退化为整日期，避免误读 */
 function formatAbsolute(date: Date, t: TFunction): string {
   const now = new Date()
@@ -239,6 +255,7 @@ export function AccountRow({
         {/* .tag：20px 高 + 5px pip（pip 的 2.5px 外发光已在 ACCOUNT_STATE_VISUAL 里定义） */}
         <span
           className={`inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-[6px] border px-[7px] text-[11px] font-semibold ${visual.tagClass}`}
+          title={credential.disabled ? undefined : healthTitle(credential, t)}
         >
           <span aria-hidden="true" className={`size-[5px] flex-none rounded-full ${visual.pipClass}`} />
           {t(visual.labelKey)}
