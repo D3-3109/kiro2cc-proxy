@@ -20,14 +20,14 @@ pub(crate) const CONTENT_LENGTH_EXCEEDED_EXCEPTION: &str = "ContentLengthExceede
 pub(crate) struct UpstreamTermination {
     /// 首个致命信号（日志与错误文案用）
     fatal: Option<String>,
-    /// 本轮最后一次带 stopReason 的 metadataEvent 是否为 TOOL_USE
+    /// 最后一次带 stopReason 的 metadataEvent 是否为 TOOL_USE
     claimed_tool_use: bool,
-    /// 本轮是否收到过 toolUseEvent（含被 web_search 桥接截获的）
+    /// 是否收到过 toolUseEvent
     saw_tool_use: bool,
 }
 
 impl UpstreamTermination {
-    /// 观察每个成功解析的上游事件（须在桥接截获之前调用）
+    /// 观察每个成功解析的上游事件
     pub(crate) fn observe_event(&mut self, event: &Event) {
         match event {
             Event::ToolUse(_) => self.saw_tool_use = true,
@@ -76,12 +76,6 @@ impl UpstreamTermination {
             tracing::warn!(residual_bytes, "上游流结束时残留未完成的帧");
             self.mark_fatal("stream ended mid-frame");
         }
-    }
-
-    /// 进入 web_search 桥接续流：stopReason 与工具调用按轮判定，致命信号保留
-    pub(crate) fn on_continuation(&mut self) {
-        self.claimed_tool_use = false;
-        self.saw_tool_use = false;
     }
 
     /// 异常终止原因；None 表示可以正常收尾
@@ -144,11 +138,6 @@ mod tests {
         let mut t = UpstreamTermination::default();
         t.observe_event(&metadata("TOOL_USE"));
         assert!(t.failure().unwrap().contains("TOOL_USE"));
-
-        // 续流轮重新判定：上一轮的 TOOL_USE（被桥接截获的 web_search）不得残留
-        t.on_continuation();
-        t.observe_event(&metadata("END_TURN"));
-        assert_eq!(t.failure(), None);
     }
 
     #[test]
@@ -159,8 +148,7 @@ mod tests {
             t.failure().as_deref(),
             Some("stopReason=MALFORMED_TOOL_USE")
         );
-        // 致命信号跨续流保留，且只记首个
-        t.on_continuation();
+        // 致命信号只记首个
         t.observe_event(&Event::Error {
             error_code: "InternalServerError".to_string(),
             error_message: String::new(),

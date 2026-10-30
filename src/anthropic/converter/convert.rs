@@ -23,8 +23,7 @@ use super::tools::{
     write_chunking_max_lines, write_chunking_system_note,
 };
 use super::websearch::{
-    collect_history_tool_names, create_placeholder_tool, create_web_search_bridge_tool,
-    split_web_search_tool,
+    collect_history_tool_names, create_placeholder_tool, strip_web_search_server_tool,
 };
 
 /// 将 Anthropic 请求转换为 Kiro 请求
@@ -146,31 +145,10 @@ pub(super) fn convert_request_with_chunking(
     let text_content = append_recent_knowledge_hints(text_content);
     let text_content = append_output_format_instruction(text_content, &req.output_config);
 
-    // 6. 转换工具定义
-    // web_search server tool 不发给 Kiro（Kiro 不识别该格式），由 handlers 层桥接到
-    // Kiro MCP 执行；未命中时 split_web_search_tool 返回 None，与直接转换逐字节一致。
-    // 借用实现：未命中路径直接引用 req.tools，避免每个请求深拷贝全部工具定义
-    let split_owned;
-    let (web_search_max_uses, split_tools) = match split_web_search_tool(req) {
-        Some((max_uses, ordinary)) => {
-            split_owned = Some(ordinary);
-            (Some(max_uses), &split_owned)
-        }
-        None => (None, &req.tools),
-    };
-    let mut tools = convert_tools(split_tools);
-
-    // 6b. web_search server tool 命中时注入桥接工具定义（普通 tool spec 格式）
-    // 剔除 server tool 后若不在 context.tools 中补一份 Kiro 可识别的普通定义，
-    // 模型不知道自己具备搜索能力，不会发起 web_search toolUse，桥接永不触发
-    // （表现为模型回复"我没有 websearch 工具可用"）。
-    // collect_history_tool_names 会跳过历史中的 web_search toolUse，因此该
-    // 定义不会被占位符逻辑重复生成。
-    // 有效 max_uses（未声明默认 5）为 0 时桥接层不会截获任何轮次，注入反而
-    // 会让 toolUse 按普通 tool_use 透传给客户端，故跳过注入。
-    if web_search_max_uses.is_some_and(|max_uses| max_uses.unwrap_or(5) > 0) {
-        tools.push(create_web_search_bridge_tool());
-    }
+    // 6. 转换工具定义：剔除 web_search 服务端工具（Kiro 不认识该格式）。
+    // 没有可剔除的工具时直接借用 req.tools，避免每个请求深拷贝全部工具定义
+    let stripped = strip_web_search_server_tool(req).map(Some);
+    let mut tools = convert_tools(stripped.as_ref().unwrap_or(&req.tools));
 
     // 6c. 带 Write / Edit / MultiEdit 工具的请求在系统提示末尾追加分块写入约束（issue #46：上游对静默约 240s 的
     // 大块工具参数生成会 Reset）。放在会话 ID 派生之后，不改变既有会话/缓存标识的计算输入。
@@ -308,7 +286,6 @@ pub(super) fn convert_request_with_chunking(
         conversation_state,
         additional_model_request_fields,
         is_compact_request: is_compact,
-        web_search_max_uses,
         thinking_adaptive_requested: req
             .thinking
             .as_ref()

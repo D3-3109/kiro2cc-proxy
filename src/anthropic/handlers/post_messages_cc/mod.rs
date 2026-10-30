@@ -12,7 +12,6 @@ use axum::{
 use bytes::Bytes;
 use std::time::Duration;
 
-use super::bridge::build_bridge_context;
 use crate::anthropic::converter::{ConversionError, convert_request};
 use crate::anthropic::middleware::{ApiKeyContext, AppState};
 use crate::anthropic::types::ErrorResponse;
@@ -161,14 +160,6 @@ pub async fn post_messages_cc(
     let history_thinking_loss = conversion_result.history_thinking_loss;
     let history_reasoning_replay = conversion_result.history_reasoning_replay;
 
-    // web_search server tool 桥接上下文（D5/D7：未携带时为 None，零行为变化）
-    // 必须在 KiroRequest 构建（conversation_state 被 move）前构造
-    let bridge_ctx = build_bridge_context(
-        &conversion_result,
-        state.profile_arn.clone(),
-        bound_ids.clone(),
-    );
-
     // 会话 conversationId（cache-miss 诊断用）；须在 conversation_state move 前取出
     let conversation_id = Some(conversion_result.conversation_state.conversation_id.clone());
 
@@ -285,7 +276,6 @@ pub async fn post_messages_cc(
             Some(Duration::from_secs(CC_STREAM_DEADLINE_SECS)),
             is_compact_request,
             thinking_adaptive_requested,
-            bridge_ctx,
             effort,
             thinking_budget_tokens,
             thinking_as_text,
@@ -315,7 +305,6 @@ pub async fn post_messages_cc(
             fp_profile,
             is_compact_request,
             thinking_adaptive_requested,
-            bridge_ctx,
             effort,
             thinking_budget_tokens,
             thinking_enabled,

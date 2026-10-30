@@ -11,7 +11,7 @@
 //! - `model`: Anthropic 模型名 → Kiro 模型 ID 映射
 //! - `result`: ConversionResult / ConversionError
 //! - `session`: 会话 ID 提取/派生、compact 压缩请求检测
-//! - `websearch`: web_search server tool 拆分与历史占位工具
+//! - `websearch`: web_search 服务端工具识别与剔除、历史占位工具
 //! - `convert`: convert_request 主入口与触发类型判定
 //! - `message`: 消息内容解析（文本/图片/tool_result）
 //! - `pdf`: PDF 文本提取
@@ -102,10 +102,11 @@ mod websearch;
 
 pub use convert::convert_request;
 pub(crate) use model::map_model;
-pub use result::{ConversionError, ConversionResult, HistoryReasoningReplay, HistoryThinkingLoss};
+pub use result::{ConversionError, HistoryReasoningReplay, HistoryThinkingLoss};
 pub use tools::{
     DEFAULT_WRITE_CHUNKING_MAX_LINES, set_write_chunking_max_lines, write_chunking_max_lines,
 };
+pub(crate) use websearch::is_web_search_server_tool;
 
 pub(crate) use thinking::{
     additional_fields_skipped, is_gpt_model, is_luna_model, native_thinking_supported,

@@ -36,8 +36,8 @@ static LAST_SETTLEMENT: OnceLock<Mutex<HashMap<(String, String), LastSettlement>
 /// 流式 / 非流式结算路径共用：反推生效且命中率低于阈值时输出 `[cache-miss]` 诊断，
 /// 并无条件更新会话注册表（供下次结算计算间隔与凭据变化）。
 ///
-/// `inference_applied` 为 false 表示本次未走反推（metering 真值 / 断点账本优先 /
-/// 桥接续流回退静态前缀），诊断不触发，但注册表照常更新。
+/// `inference_applied` 为 false 表示本次未走反推（metering 真值 / 断点账本优先），
+/// 诊断不触发，但注册表照常更新。
 ///
 /// `request_started_at` 为本轮请求开始时刻，用于计算与上次结算的闲置间隔
 /// （不含本轮生成耗时；时序倒挂时该字段缺失）。

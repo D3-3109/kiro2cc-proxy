@@ -7,7 +7,6 @@ use crate::anthropic::stream::{
 use crate::anthropic::types::ErrorResponse;
 
 use crate::kiro::model::events::{Event, EventType, ReasoningContentEvent, UpstreamStop};
-use crate::kiro::model::requests::conversation::ConversationState;
 use crate::kiro::parser::decoder::EventStreamDecoder;
 use crate::token;
 use axum::{
@@ -15,15 +14,8 @@ use axum::{
     response::{IntoResponse, Json, Response},
 };
 use serde_json::json;
-use std::collections::VecDeque;
 use uuid::Uuid;
 
-use super::super::websearch;
-use super::bridge::{BridgeContext, PendingSearch, parse_bridge_query};
-use super::bridge::{
-    build_continuation_request, build_search_tool_result, build_web_search_result_block,
-    flush_unpaired_search_blocks,
-};
 use super::error::map_provider_error_with_context;
 use super::helpers::strip_json_fences;
 
@@ -92,7 +84,6 @@ fn count_thinking_tokens(content: &[serde_json::Value]) -> Option<i32> {
 fn finalize_non_stream_output_usage(
     mut content: Vec<serde_json::Value>,
     thinking_suppressed: bool,
-    intercepted_input: &str,
     include_thinking: bool,
 ) -> (Vec<serde_json::Value>, i32, i32, Option<i32>) {
     let billed_thinking_tokens = count_thinking_tokens(&content).unwrap_or(0);
@@ -100,9 +91,7 @@ fn finalize_non_stream_output_usage(
         drop_thinking_blocks(&mut content);
     }
     let thinking_token_count = count_thinking_tokens(&content);
-    // BPE 真值，与流式 output_full_text 同口径；空串计 0
-    let intercepted_output_tokens = token::count_tokens(intercepted_input) as i32;
-    let visible_output_tokens = token::estimate_output_tokens(&content) + intercepted_output_tokens;
+    let visible_output_tokens = token::estimate_output_tokens(&content);
     let billed_output_tokens = visible_output_tokens + billed_thinking_tokens;
     let output_tokens = if include_thinking {
         visible_output_tokens + thinking_token_count.unwrap_or(0)
@@ -194,63 +183,6 @@ fn build_non_stream_content_with_native(
     (native_blocks, thinking_only || native_only)
 }
 
-/// 非流式桥接的单步状态转移（D4 非流式段）
-///
-/// 与流式 `bridge_handle_event` 的语义对齐，返回 `(intercepted, completed)`：
-/// - `intercepted = true`：该 toolUse 被桥接截获，调用方不得再按普通 tool_use 处理
-///   （不置 has_tool_use、不 push tool_uses，避免 stop_reason 误覆盖）
-/// - `completed = Some(PendingSearch)`：本次 toolUse.stop 使截获完成，query 已解析，
-///   调用方在事件循环读取完毕后统一执行 MCP → 续请求
-///
-/// `rounds_used >= max_rounds`（轮次耗尽）或 `max_rounds == 0`（非桥接请求）时
-/// 不截获，web_search toolUse 按普通路径透传（D8）。
-pub(crate) fn non_stream_bridge_step(
-    collecting: &mut Option<(String, String)>,
-    rounds_used: usize,
-    max_rounds: usize,
-    tu: &crate::kiro::model::events::ToolUseEvent,
-) -> (bool, Option<PendingSearch>) {
-    // 已在聚合中：继续累积（无论是否 web_search 名称，按 tool_use_id 归属判定）
-    if let Some((id, buffer)) = collecting.as_mut() {
-        if tu.tool_use_id == *id {
-            buffer.push_str(&tu.input);
-            if tu.stop {
-                let (id, buf) = collecting.take().expect("collecting 已判定存在");
-                let query = parse_bridge_query(&buf);
-                return (
-                    true,
-                    Some(PendingSearch {
-                        tool_use_id: id,
-                        query,
-                    }),
-                );
-            }
-            return (true, None);
-        }
-        // 其他工具的事件不干扰当前聚合
-        return (false, None);
-    }
-
-    // 新的 web_search toolUse 且轮次未达上限 → 开始截获
-    if tu.name == "web_search" && rounds_used < max_rounds {
-        if tu.stop {
-            // 单事件完整调用，直接完成截获
-            let query = parse_bridge_query(&tu.input);
-            return (
-                true,
-                Some(PendingSearch {
-                    tool_use_id: tu.tool_use_id.clone(),
-                    query,
-                }),
-            );
-        }
-        *collecting = Some((tu.tool_use_id.clone(), tu.input.clone()));
-        return (true, None);
-    }
-
-    (false, None)
-}
-
 /// 处理非流式请求
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_non_stream_request(
@@ -271,8 +203,6 @@ pub(crate) async fn handle_non_stream_request(
     is_compact_request: bool,
     // 客户端是否请求了 thinking adaptive（与账号级开关在 provider 侧共同决定注入）
     thinking_adaptive_requested: bool,
-    // web_search server tool 桥接上下文（None = 非桥接请求，零行为变化）
-    bridge_ctx: Option<BridgeContext>,
     // 实际发往上游的 effort（ConversionResult::effort），随 usage 记录入库
     effort: Option<String>,
     // converter 注入的 thinking 文本标签预算（ConversionResult::thinking_budget_tokens）
@@ -344,7 +274,7 @@ pub(crate) async fn handle_non_stream_request(
         }
     };
 
-    // ---- 事件收集状态（首次请求与每轮续请求共用）----
+    // ---- 事件收集状态 ----
     let mut text_content = String::new();
     let mut native_reasoning = ReasoningContentEvent::default();
     let mut native_thinking_blocks = Vec::new();
@@ -361,253 +291,110 @@ pub(crate) async fn handle_non_stream_request(
     let mut tool_json_buffers: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
 
-    // ---- web_search 非流式桥接状态（D4 非流式段 / D5）----
-    // 多轮上限 min(max_uses, 5)（D8）；bridge_ctx 为 None 时 max_rounds = 0，
-    // 截获分支短路，非桥接请求零行为变化
-    let max_rounds = bridge_ctx
-        .as_ref()
-        .map(|ctx| ctx.max_uses.unwrap_or(5).clamp(0, 5) as usize)
-        .unwrap_or(0);
-    let mut rounds_used: usize = 0;
-    let mut has_continuation = false;
-    // 已截获完成、待执行的搜索队列（每轮事件读取完毕后按截获顺序逐个执行
-    // MCP → 续请求；Collecting 期间上游连发多次 web_search 时不丢失）
-    let mut pending_search: VecDeque<PendingSearch> = VecDeque::new();
-    // 正在聚合 input 分片的 web_search toolUse（(tool_use_id, buffer)）
-    let mut collecting: Option<(String, String)> = None;
-    // 多轮桥接的演进基底（D3：每轮续请求基于上一轮续请求所用状态演进）
-    let mut evolution_base: Option<ConversationState> = None;
-    // 客户端可见性块（D5 非流式顺序：server_tool_use → web_search_tool_result
-    // 逐轮交错，前置于 thinking/text/tool_use，无裸 tool_use 块）
-    let mut visibility_blocks: Vec<serde_json::Value> = Vec::new();
-    // 截获的 web_search input 全文累计（S2 计费口径对齐流式 bridge_handle_event：
-    // 上游已生成分片即已计费；每轮所有 intercepted 事件的 input 均属截获调用）
-    let mut intercepted_input_text = String::new();
     // 上游异常终止判定（错误帧 / 异常 stopReason / 帧丢失），收集结束后决定是否报错
     let mut termination = UpstreamTermination::default();
 
-    let mut body_bytes = body_bytes;
-    'rounds: loop {
-        // 解析事件流（首次请求与每轮续请求共用同一套收集逻辑）
-        let mut decoder = EventStreamDecoder::new();
-        if let Err(e) = decoder.feed(&body_bytes) {
-            tracing::warn!("缓冲区溢出: {}", e);
-            termination.observe_decode_error(&e);
-        }
+    let mut decoder = EventStreamDecoder::new();
+    if let Err(e) = decoder.feed(&body_bytes) {
+        tracing::warn!("缓冲区溢出: {}", e);
+        termination.observe_decode_error(&e);
+    }
 
-        for result in decoder.decode_iter() {
-            match result {
-                Ok(frame) => {
-                    let tool_use_frame = frame.event_type() == Some(EventType::ToolUse.as_str());
-                    let parsed = Event::from_frame(frame);
-                    if let Err(e) = &parsed {
-                        termination.observe_parse_failure(tool_use_frame, e);
-                    }
-                    if let Ok(event) = parsed {
-                        termination.observe_event(&event);
-                        collect_native_reasoning(
-                            &event,
-                            &mut native_reasoning,
-                            &mut native_thinking_blocks,
-                        );
-                        match event {
-                            Event::AssistantResponse(resp) => {
-                                text_content.push_str(&resp.content);
-                            }
-                            Event::ToolUse(tool_use) => {
-                                // 桥接截获（D4 非流式段）：轮次未达上限的
-                                // web_search toolUse 聚合分片，不解析为普通
-                                // tool_use 块（不置 has_tool_use，避免
-                                // stop_reason 误覆盖）；轮次耗尽按普通路径透传
-                                let (intercepted, completed) = non_stream_bridge_step(
-                                    &mut collecting,
-                                    rounds_used,
-                                    max_rounds,
-                                    &tool_use,
-                                );
-                                if intercepted {
-                                    // 计费口径（S2，对齐流式 bridge_handle_event 与
-                                    // process_tool_use）：截获调用的全部分片 input
-                                    // 无条件计入——上游已生成即已计费
-                                    intercepted_input_text.push_str(&tool_use.input);
-                                    if let Some(pending) = completed {
-                                        visibility_blocks.push(json!({
-                                            "type": "server_tool_use",
-                                            "id": pending.tool_use_id.clone(),
-                                            "name": "web_search",
-                                            "input": { "query": pending.query.clone() }
-                                        }));
-                                        pending_search.push_back(pending);
-                                        rounds_used += 1;
-                                    }
-                                    continue;
-                                }
+    for result in decoder.decode_iter() {
+        match result {
+            Ok(frame) => {
+                let tool_use_frame = frame.event_type() == Some(EventType::ToolUse.as_str());
+                let parsed = Event::from_frame(frame);
+                if let Err(e) = &parsed {
+                    termination.observe_parse_failure(tool_use_frame, e);
+                }
+                if let Ok(event) = parsed {
+                    termination.observe_event(&event);
+                    collect_native_reasoning(
+                        &event,
+                        &mut native_reasoning,
+                        &mut native_thinking_blocks,
+                    );
+                    match event {
+                        Event::AssistantResponse(resp) => {
+                            text_content.push_str(&resp.content);
+                        }
+                        Event::ToolUse(tool_use) => {
+                            has_tool_use = true;
 
-                                has_tool_use = true;
+                            // 累积工具的 JSON 输入
+                            let buffer = tool_json_buffers
+                                .entry(tool_use.tool_use_id.clone())
+                                .or_default();
+                            buffer.push_str(&tool_use.input);
 
-                                // 累积工具的 JSON 输入
-                                let buffer = tool_json_buffers
-                                    .entry(tool_use.tool_use_id.clone())
-                                    .or_default();
-                                buffer.push_str(&tool_use.input);
-
-                                // 如果是完整的工具调用，添加到列表
-                                if tool_use.stop {
-                                    let input: serde_json::Value = if buffer.is_empty() {
+                            // 如果是完整的工具调用，添加到列表
+                            if tool_use.stop {
+                                let input: serde_json::Value = if buffer.is_empty() {
+                                    serde_json::json!({})
+                                } else {
+                                    serde_json::from_str(buffer).unwrap_or_else(|e| {
+                                        tracing::warn!(
+                                            "工具输入 JSON 解析失败: {}, tool_use_id: {}",
+                                            e,
+                                            tool_use.tool_use_id
+                                        );
                                         serde_json::json!({})
-                                    } else {
-                                        serde_json::from_str(buffer).unwrap_or_else(|e| {
-                                            tracing::warn!(
-                                                "工具输入 JSON 解析失败: {}, tool_use_id: {}",
-                                                e,
-                                                tool_use.tool_use_id
-                                            );
-                                            serde_json::json!({})
-                                        })
-                                    };
+                                    })
+                                };
 
-                                    tool_uses.push(json!({
-                                        "type": "tool_use",
-                                        "id": tool_use.tool_use_id,
-                                        "name": tool_use.name,
-                                        "input": input
-                                    }));
-                                }
+                                tool_uses.push(json!({
+                                    "type": "tool_use",
+                                    "id": tool_use.tool_use_id,
+                                    "name": tool_use.name,
+                                    "input": input
+                                }));
                             }
-                            Event::ContextUsage(context_usage) => {
-                                // contextUsage 本地化：弃用 percentage × window 反算，
-                                // 仅保留 100% 触发 stop_reason 兜底
-                                if context_usage.context_usage_percentage >= 100.0 {
-                                    stop_reason = "model_context_window_exceeded".to_string();
-                                }
-                                tracing::debug!(
-                                    "[deprecated] contextUsageEvent: {:.2}% (仅记录, 不参与 input_tokens 反算)",
-                                    context_usage.context_usage_percentage,
-                                );
+                        }
+                        Event::ContextUsage(context_usage) => {
+                            // contextUsage 本地化：弃用 percentage × window 反算，
+                            // 仅保留 100% 触发 stop_reason 兜底
+                            if context_usage.context_usage_percentage >= 100.0 {
+                                stop_reason = "model_context_window_exceeded".to_string();
                             }
-                            Event::Metering(metering) => {
-                                metering_cache_read_tokens = metering.cache_read_input_tokens;
-                                metering_cache_creation_tokens =
-                                    metering.cache_creation_input_tokens;
-                                metering_usage = Some(metering.usage);
-                            }
-                            Event::Exception { exception_type, .. }
-                                if exception_type == CONTENT_LENGTH_EXCEEDED_EXCEPTION =>
-                            {
+                            tracing::debug!(
+                                "[deprecated] contextUsageEvent: {:.2}% (仅记录, 不参与 input_tokens 反算)",
+                                context_usage.context_usage_percentage,
+                            );
+                        }
+                        Event::Metering(metering) => {
+                            metering_cache_read_tokens = metering.cache_read_input_tokens;
+                            metering_cache_creation_tokens = metering.cache_creation_input_tokens;
+                            metering_usage = Some(metering.usage);
+                        }
+                        Event::Exception { exception_type, .. }
+                            if exception_type == CONTENT_LENGTH_EXCEEDED_EXCEPTION =>
+                        {
+                            stop_reason = "max_tokens".to_string();
+                        }
+                        // 异常类 stopReason 由 termination 判定，此处只映射正常收尾的 stop_reason
+                        Event::Metadata(metadata) => match metadata.upstream_stop() {
+                            Some(UpstreamStop::MaxTokens) => {
                                 stop_reason = "max_tokens".to_string();
                             }
-                            // 异常类 stopReason 由 termination 判定，此处只映射正常收尾的 stop_reason
-                            Event::Metadata(metadata) => match metadata.upstream_stop() {
-                                Some(UpstreamStop::MaxTokens) => {
-                                    stop_reason = "max_tokens".to_string();
-                                }
-                                Some(UpstreamStop::ContextWindowExceeded) => {
-                                    stop_reason = "model_context_window_exceeded".to_string();
-                                }
-                                _ => {}
-                            },
+                            Some(UpstreamStop::ContextWindowExceeded) => {
+                                stop_reason = "model_context_window_exceeded".to_string();
+                            }
                             _ => {}
-                        }
+                        },
+                        _ => {}
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("解码事件失败: {}", e);
-                    termination.observe_decode_error(&e);
-                }
-            }
-        }
-        termination.observe_eof(decoder.buffer_len());
-
-        flush_native_reasoning(&mut native_reasoning, &mut native_thinking_blocks);
-
-        // 事件读取完毕：无待执行搜索 → 全部轮次结束，退出收集循环
-        // （thinking 剥离与 JSON 组装在循环后统一进行，见下方）
-        let Some(pending) = pending_search.pop_front() else {
-            break 'rounds;
-        };
-        let Some(ctx) = bridge_ctx.as_ref() else {
-            break 'rounds;
-        };
-
-        // 1. MCP 真实搜索（失败降级 error ToolResult，仍发续请求让模型解读）
-        let (_mcp_tool_use_id, mcp_request) = websearch::create_mcp_request(&pending.query);
-        let search_results =
-            match websearch::call_mcp_api(&provider, &mcp_request, &ctx.bound_ids).await {
-                Ok(resp) => websearch::parse_search_results(&resp),
-                Err(e) => {
-                    tracing::warn!(
-                        tool_use_id = %pending.tool_use_id,
-                        "web_search MCP 调用失败，降级为 error ToolResult: {}",
-                        e
-                    );
-                    None
-                }
-            };
-        // web_search_tool_result 可见性块（MCP 完成后携带真实结果；失败为空数组）
-        visibility_blocks.push(build_web_search_result_block(
-            &pending.tool_use_id,
-            &search_results,
-        ));
-
-        // 2. 构建续请求（D3：仅替换 current_message.tool_results，
-        //    conversationId/agentContinuationId/history 逐字节不变）
-        let tool_result =
-            build_search_tool_result(&pending.tool_use_id, &pending.query, &search_results);
-        let kiro_request =
-            build_continuation_request(ctx, evolution_base.take(), vec![tool_result]);
-        let request_body = match serde_json::to_string(&kiro_request) {
-            Ok(body) => body,
-            Err(e) => {
-                // 降级：放弃续请求，保留首轮已收集内容走正常组装路径
-                // （与流式 Failed 分支语义对齐——结果块已入 visibility_blocks）
-                tracing::error!("web_search 续请求序列化失败，降级返回已收集内容: {}", e);
-                // 不写回 evolution_base：break 后直接退出 'rounds 循环，
-                // 该变量不再被读取，写回无实际效果
-                flush_unpaired_search_blocks(&mut pending_search, &mut visibility_blocks);
-                break 'rounds;
-            }
-        };
-
-        // 3. 续请求：响应体继续进入同一收集循环（多轮在同一 loop 内演进）
-        match provider
-            .call_api(
-                &request_body,
-                ctx.is_compact_request,
-                ctx.thinking_adaptive_requested,
-                &ctx.bound_ids,
-            )
-            .await
-        {
-            // 续请求沿用首轮的历史；签名被拒的剥离已在首轮记过
-            Ok(crate::kiro::provider::ApiResponse { response: resp, .. }) => {
-                body_bytes = match resp.bytes().await {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        // 降级：续请求响应读取失败，保留已收集内容正常收尾
-                        tracing::error!(
-                            "读取 web_search 续请求响应体失败，降级返回已收集内容: {}",
-                            e
-                        );
-                        // 不写回 evolution_base：break 后直接退出 'rounds 循环
-                        flush_unpaired_search_blocks(&mut pending_search, &mut visibility_blocks);
-                        break 'rounds;
-                    }
-                };
-                // 演进基底更新为本轮续请求所用状态（下一轮基于它演进）
-                has_continuation = true;
-                termination.on_continuation();
-                evolution_base = Some(kiro_request.conversation_state);
             }
             Err(e) => {
-                // 降级：续请求发起失败，保留首轮已收集内容走正常组装路径
-                // （与流式 Failed 分支语义对齐，不再丢弃已有响应）
-                tracing::error!("web_search 续请求发起失败，降级返回已收集内容: {}", e);
-                // 不写回 evolution_base：break 后直接退出 'rounds 循环
-                flush_unpaired_search_blocks(&mut pending_search, &mut visibility_blocks);
-                break 'rounds;
+                tracing::warn!("解码事件失败: {}", e);
+                termination.observe_decode_error(&e);
             }
         }
     }
+    termination.observe_eof(decoder.buffer_len());
+
+    flush_native_reasoning(&mut native_reasoning, &mut native_thinking_blocks);
 
     // 异常终止不得组装成正常响应（客户端会当成任务完成），返回可重试错误
     if let Some(reason) = termination.failure() {
@@ -674,22 +461,13 @@ pub(crate) async fn handle_non_stream_request(
         tool_uses,
     );
 
-    // 构建后再过滤，保留纯推理响应占位；可见性元数据不计入模型输出。
-    let (mut content, output_tokens, billed_output_tokens, thinking_token_count) =
+    // 构建后再过滤，保留纯推理响应占位
+    let (content, output_tokens, billed_output_tokens, thinking_token_count) =
         finalize_non_stream_output_usage(
             content,
             thinking_suppressed,
-            &intercepted_input_text,
             super::super::stream::output_tokens_include_thinking(),
         );
-
-    // web_search 桥接可见性块前置于 thinking/text/tool_use（D5 非流式顺序：
-    // server_tool_use → web_search_tool_result 逐轮交错在前，无裸 tool_use 块）
-    if !visibility_blocks.is_empty() {
-        let mut with_visibility = visibility_blocks;
-        with_visibility.append(&mut content);
-        content = with_visibility;
-    }
 
     // 退化响应（只有 thinking）与流式路径对齐报 max_tokens；但绝不覆盖 tool_use ——
     // 那会让客户端只渲染工具块而不执行（见上方 [TOOLUSE-DIAG] 注释）。
@@ -737,15 +515,10 @@ pub(crate) async fn handle_non_stream_request(
         final_input_tokens,
         &replayed_reasoning,
         &billed_output,
-        // 多轮累计输出与末轮积分不匹配，仅退回静态前缀，不改积分落库。
-        if has_continuation {
-            None
-        } else {
-            metering_usage
-        },
+        metering_usage,
     ));
-    // cache-miss 诊断：credits 反推实际生效（metering 真值未透传、无断点账本、
-    // 非桥接续流）且命中率低于阈值时输出，量化本次结算并登记会话注册表
+    // cache-miss 诊断：credits 反推实际生效（metering 真值未透传、无断点账本）
+    // 且命中率低于阈值时输出，量化本次结算并登记会话注册表
     crate::cache::cache_miss_diag::maybe_log(
         conversation_id.as_deref().unwrap_or(""),
         model,
@@ -755,7 +528,7 @@ pub(crate) async fn handle_non_stream_request(
         &billed_output,
         metering_usage,
         // 与实际用量选路（metering_pair）同口径：read/creation 任一缺失即无完整真值
-        metering_pair.is_none() && cache_accounting.is_none() && !has_continuation,
+        metering_pair.is_none() && cache_accounting.is_none(),
         credential_id,
         request_started_at,
     );
@@ -1016,9 +789,7 @@ mod native_tests {
                 "answer",
                 Vec::new(),
             );
-            let intercepted = "hello hello"; // BPE 2 tokens
-            let visible =
-                token::estimate_output_tokens(&content) + token::count_tokens(intercepted) as i32;
+            let visible = token::estimate_output_tokens(&content);
             let billed = visible + count_thinking_tokens(&content).unwrap();
             // haiku 5.5 计费曲线：cold − 命中比例 · (cold − cached) + 输出
             let input_mtok = final_input_tokens as f64 / 1_000_000.0;
@@ -1036,7 +807,6 @@ mod native_tests {
                         finalize_non_stream_output_usage(
                             content.clone(),
                             suppressed,
-                            intercepted,
                             include_thinking,
                         );
                     assert_eq!(billed_output, billed);

@@ -17,7 +17,6 @@ use axum::{
 };
 use bytes::Bytes;
 
-use super::bridge::build_bridge_context;
 use super::error::parse_messages_request;
 use super::helpers::{
     extract_client_ip, extract_user_agent, is_suggestion_mode_request,
@@ -179,14 +178,6 @@ pub(crate) async fn post_messages_as(
     let history_thinking_loss = conversion_result.history_thinking_loss;
     let history_reasoning_replay = conversion_result.history_reasoning_replay;
 
-    // web_search server tool 桥接上下文（D5/D7：未携带时为 None，零行为变化）
-    // 必须在 KiroRequest 构建（conversation_state 被 move）前构造
-    let bridge_ctx = build_bridge_context(
-        &conversion_result,
-        state.profile_arn.clone(),
-        bound_ids.clone(),
-    );
-
     // 会话 conversationId（cache-miss 诊断用）；须在 conversation_state move 前取出
     let conversation_id = Some(conversion_result.conversation_state.conversation_id.clone());
 
@@ -345,7 +336,6 @@ pub(crate) async fn post_messages_as(
             None, // /v1 无全局 deadline（保持现有行为）
             is_compact_request,
             thinking_adaptive_requested,
-            bridge_ctx,
             effort,
             thinking_budget_tokens,
             thinking_as_text,
@@ -375,7 +365,6 @@ pub(crate) async fn post_messages_as(
             fp_profile,
             is_compact_request,
             thinking_adaptive_requested,
-            bridge_ctx,
             effort,
             thinking_budget_tokens,
             thinking_enabled,

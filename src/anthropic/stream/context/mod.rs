@@ -83,8 +83,6 @@ pub struct StreamContext {
     prompt_cache_usage: PromptCacheUsage,
     /// 从 meteringEvent 获取的真实 credits 消耗
     pub metering_usage: Option<f64>,
-    /// 已成功接入桥接续流，累计输出不能与末轮积分用于反推。
-    has_continuation: bool,
     /// 从 meteringEvent 获取的 cache read tokens（Kiro 透传时有值）
     metering_cache_read_tokens: Option<i32>,
     /// 从 meteringEvent 获取的 cache creation tokens（Kiro 透传时有值）
@@ -118,7 +116,7 @@ pub struct StreamContext {
     pub(crate) first_token_at: Option<Instant>,
     /// 会话 conversationId（cache-miss 诊断按会话计算结算间隔与凭据变化）
     conversation_id: Option<String>,
-    /// 上游异常终止判定（handler 在桥接截获前喂入事件，流结束时据此决定收尾方式）
+    /// 上游异常终止判定（handler 逐个喂入事件，流结束时据此决定收尾方式）
     pub(crate) termination: super::UpstreamTermination,
 }
 
@@ -161,7 +159,6 @@ impl StreamContext {
             user_agent: None,
             prompt_cache_usage: PromptCacheUsage::uncached(input_tokens),
             metering_usage: None,
-            has_continuation: false,
             metering_cache_read_tokens: None,
             metering_cache_creation_tokens: None,
             context_usage_percentage: None,
@@ -211,11 +208,6 @@ impl StreamContext {
     pub fn with_prefix_estimated_tokens(mut self, prefix: i32) -> Self {
         self.prefix_estimated_tokens = Some(prefix);
         self
-    }
-
-    pub(crate) fn mark_continuation(&mut self) {
-        self.has_continuation = true;
-        self.termination.on_continuation();
     }
 
     /// 注入断点缓存记账（None 时维持前缀估算路径）
@@ -336,11 +328,7 @@ impl StreamContext {
                 input_tokens,
                 &self.replayed_reasoning,
                 billed_output,
-                if self.has_continuation {
-                    None
-                } else {
-                    credits_used
-                },
+                credits_used,
             );
             (input_tokens.saturating_sub(read), 0, read)
         } else {
@@ -1035,8 +1023,8 @@ impl StreamContext {
         let (report_cache_creation, report_cache_read) = (Some(cache_creation), Some(cache_read));
         let tracked_cache_read = Some(tracked_read);
 
-        // cache-miss 诊断：credits 反推实际生效（metering 真值未透传、无断点账本、
-        // 非桥接续流）且命中率低于阈值时输出，量化本次结算并登记会话注册表
+        // cache-miss 诊断：credits 反推实际生效（metering 真值未透传、无断点账本）
+        // 且命中率低于阈值时输出，量化本次结算并登记会话注册表
         crate::cache::cache_miss_diag::maybe_log(
             self.conversation_id.as_deref().unwrap_or(""),
             &self.model,
@@ -1050,8 +1038,7 @@ impl StreamContext {
             (self.metering_cache_read_tokens.is_none()
                 || self.metering_cache_creation_tokens.is_none())
                 && self.cache_accounting.is_none()
-                && self.prefix_estimated_tokens.is_some()
-                && !self.has_continuation,
+                && self.prefix_estimated_tokens.is_some(),
             self.credential_id.unwrap_or(0),
             self.request_started_at.unwrap_or_else(Instant::now),
         );
