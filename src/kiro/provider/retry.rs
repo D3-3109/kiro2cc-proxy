@@ -4,7 +4,181 @@ use tokio::time::sleep;
 use crate::kiro::endpoint::{BUCKET_THROTTLE_DURATION, Endpoint, EndpointName};
 use crate::kiro::model::credentials::KiroCredentials;
 
+use super::SignatureRepair;
 use super::core::{KiroProvider, MAX_RETRIES_PER_CREDENTIAL, MAX_TOTAL_RETRIES};
+
+/// 一次请求内逐个删除坏签名的上限；仍被拒则删除全部历史推理
+///
+/// 坏签名通常成片出现（会话中途从别的服务切过来），单次请求只认领这么多，
+/// 余下的由后续请求继续认领（认领结果由 handler 写入拒绝缓存）。
+const MAX_TARGETED_SIGNATURE_STRIPS: usize = 4;
+
+/// 签名被拒后逐个删除坏签名的进度
+///
+/// 上游每次只点名一个坏签名（`messages.N`）。删掉 `history[N]` 的推理后，下一次
+/// 响应成功或点名别的位置，才能确认 N 确实是坏签名；仍点名 N 说明下标映射不符、
+/// 删错了，此时放弃逐个删除，改为全部删除，且删错的那个不计入坏签名。
+#[derive(Default)]
+struct SignatureRepairState {
+    /// 删改后的请求体（None = 原始请求体）
+    body: Option<String>,
+    /// 最近一次删除的 (history 下标, 签名)，待下一次响应确认
+    unconfirmed: Option<(usize, String)>,
+    outcome: SignatureRepair,
+}
+
+impl SignatureRepairState {
+    /// 又一次被拒：确认上一次删除，再删下一个；返回 false 表示已无可删
+    ///
+    /// `history_offset`：本次发出前 rewrite 从 history 头部删掉的条数，用于把上游
+    /// 点名的下标换算回 `self.body` 的下标。
+    fn advance(&mut self, original_body: &str, error_body: &str, history_offset: usize) -> bool {
+        if self.outcome.stripped_all {
+            return false;
+        }
+
+        let rejected_index =
+            KiroProvider::rejected_history_index(error_body).map(|index| index + history_offset);
+        let mapping_holds = match self.unconfirmed.take() {
+            Some((index, _)) if rejected_index == Some(index) => false,
+            Some((_, signature)) => {
+                self.outcome.rejected.push(signature);
+                true
+            }
+            None => true,
+        };
+
+        let current = self.body.as_deref().unwrap_or(original_body);
+        let within_budget = self.outcome.rejected.len() < MAX_TARGETED_SIGNATURE_STRIPS;
+        let targeted = rejected_index
+            .filter(|_| mapping_holds && within_budget)
+            .and_then(|index| {
+                KiroProvider::strip_history_reasoning_at(current, index)
+                    .map(|(body, signature)| (index, body, signature))
+            });
+        if let Some((index, body, signature)) = targeted {
+            self.body = Some(body);
+            self.unconfirmed = Some((index, signature));
+            return true;
+        }
+
+        let Some(body) = KiroProvider::strip_history_reasoning(current) else {
+            return false;
+        };
+        self.body = Some(body);
+        self.outcome.stripped_all = true;
+        true
+    }
+
+    /// 请求成功：最近一次删除随之确认
+    fn finish(mut self) -> SignatureRepair {
+        if let Some((_, signature)) = self.unconfirmed.take() {
+            self.outcome.rejected.push(signature);
+        }
+        self.outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 第 1..=n 轮 assistant 各带签名 s1..sn，位于 history 的奇数下标
+    fn body_with_signatures(n: usize) -> String {
+        let history: Vec<serde_json::Value> = (1..=n)
+            .flat_map(|i| {
+                [
+                    serde_json::json!({"userInputMessage": {"content": format!("q{i}")}}),
+                    serde_json::json!({"assistantResponseMessage": {"content": format!("a{i}"),
+                        "reasoningContent": {"reasoningText": {"text": "", "signature": format!("s{i}")}}}}),
+                ]
+            })
+            .collect();
+        serde_json::json!({"conversationState": {"history": history}}).to_string()
+    }
+
+    fn rejection_at(index: usize) -> String {
+        format!(
+            r#"{{"message":"messages.{index}.content.0: Invalid `signature` in `thinking` block","reason":"THINKING_SIGNATURE_INVALID"}}"#
+        )
+    }
+
+    fn remaining_signatures(state: &SignatureRepairState) -> Vec<String> {
+        let body: serde_json::Value = serde_json::from_str(state.body.as_ref().unwrap()).unwrap();
+        body["conversationState"]["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| {
+                m.pointer("/assistantResponseMessage/reasoningContent/reasoningText/signature")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn named_signatures_are_stripped_one_by_one_and_confirmed() {
+        let original = body_with_signatures(3);
+        let mut state = SignatureRepairState::default();
+
+        assert!(state.advance(&original, &rejection_at(1), 0));
+        assert_eq!(remaining_signatures(&state), ["s2", "s3"]);
+        // 上游转而点名下一处：s1 确认是坏签名
+        assert!(state.advance(&original, &rejection_at(5), 0));
+        assert_eq!(remaining_signatures(&state), ["s2"]);
+
+        let outcome = state.finish();
+        assert_eq!(outcome.rejected, ["s1", "s3"]);
+        assert!(!outcome.stripped_all);
+    }
+
+    #[test]
+    fn same_index_named_again_falls_back_to_stripping_all() {
+        // 删掉 history[1] 后上游仍点名 1：映射不符，删错的 s1 不算坏签名
+        let original = body_with_signatures(2);
+        let mut state = SignatureRepairState::default();
+        assert!(state.advance(&original, &rejection_at(1), 0));
+        assert!(state.advance(&original, &rejection_at(1), 0));
+        assert!(remaining_signatures(&state).is_empty());
+
+        let outcome = state.finish();
+        assert!(outcome.rejected.is_empty());
+        assert!(outcome.stripped_all);
+    }
+
+    #[test]
+    fn unparsable_rejection_strips_all_and_then_gives_up() {
+        let original = body_with_signatures(2);
+        let mut state = SignatureRepairState::default();
+        assert!(state.advance(&original, r#"{"reason":"THINKING_SIGNATURE_INVALID"}"#, 0));
+        assert!(state.outcome.stripped_all);
+        // 全部删除后仍被拒：无可再删，交给普通 400 处理
+        assert!(!state.advance(&original, &rejection_at(1), 0));
+    }
+
+    #[test]
+    fn upstream_index_is_shifted_by_rewrite_offset() {
+        // 发出前删掉了 2 条前缀：上游点名 1，对应改写前的 history[3]
+        let original = body_with_signatures(2);
+        let mut state = SignatureRepairState::default();
+        assert!(state.advance(&original, &rejection_at(1), 2));
+        assert_eq!(remaining_signatures(&state), ["s1"]);
+        assert_eq!(state.finish().rejected, ["s2"]);
+    }
+
+    #[test]
+    fn targeted_strips_stop_at_budget() {
+        let original = body_with_signatures(MAX_TARGETED_SIGNATURE_STRIPS + 2);
+        let mut state = SignatureRepairState::default();
+        for round in 0..=MAX_TARGETED_SIGNATURE_STRIPS {
+            assert!(state.advance(&original, &rejection_at(2 * round + 1), 0));
+        }
+        let outcome = state.finish();
+        assert_eq!(outcome.rejected.len(), MAX_TARGETED_SIGNATURE_STRIPS);
+        assert!(outcome.stripped_all);
+    }
+}
 
 impl KiroProvider {
     pub(crate) fn select_endpoint(
@@ -75,10 +249,15 @@ impl KiroProvider {
         let continuation_id = Self::extract_continuation_id_from_request(request_body);
         // 本次请求内已限流的账号：重试时避开，但不销毁 sticky 绑定
         let mut throttled_in_request: Vec<u64> = Vec::new();
-        // 历史推理签名被拒后改用的请求体（已删 reasoningContent），整个请求只降级一次
-        let mut reasoning_stripped_body: Option<String> = None;
+        // 历史推理签名被拒后的请求体删改
+        let mut signature_repair = SignatureRepairState::default();
+        // 删改签名后的重试属请求内容问题，不占故障转移配额：每删改一次放宽一次上限
+        let mut attempt_limit = max_retries;
 
-        for attempt in 0..max_retries {
+        for attempt in 0.. {
+            if attempt >= attempt_limit {
+                break;
+            }
             // 获取调用上下文（优先路由到同一会话的缓存账号）
             let ctx = match self
                 .token_manager
@@ -176,8 +355,10 @@ impl KiroProvider {
             );
 
             let url = self.base_url_for(&ctx.credentials, &endpoint);
+            let current_body = signature_repair.body.as_deref().unwrap_or(request_body);
+            let history_offset = Self::rewritten_history_offset(current_body, &ctx.credentials);
             let effective_body = Self::rewrite_request_body(
-                reasoning_stripped_body.as_deref().unwrap_or(request_body),
+                current_body,
                 &ctx.credentials,
                 thinking_adaptive_requested,
             );
@@ -238,7 +419,7 @@ impl KiroProvider {
                 return Ok(super::ApiResponse {
                     response,
                     credential_id: ctx.id,
-                    history_reasoning_stripped: reasoning_stripped_body.is_some(),
+                    signature_repair: signature_repair.finish(),
                 });
             }
 
@@ -309,20 +490,17 @@ impl KiroProvider {
                     ));
                     continue;
                 }
-                // 历史推理签名无效（跨账号/跨模型或签名损坏）：删掉签名立即重试一次。
-                // 属请求内容问题，不计入账号失败、不退避；模型只是看不到之前的思考。
-                let retry_without_reasoning =
-                    reasoning_stripped_body.is_none() && Self::is_thinking_signature_invalid(&body);
-                if retry_without_reasoning
-                    && let Some(stripped) = Self::strip_history_reasoning(request_body)
+                // 历史推理签名无效（签名损坏或来自其他服务）：删掉被点名的签名立即重试。
+                // 属请求内容问题，不计入账号失败、不退避；模型只是看不到那一轮的思考。
+                if Self::is_thinking_signature_invalid(&body)
+                    && signature_repair.advance(request_body, &body, history_offset)
                 {
                     tracing::warn!(
-                        "历史推理签名被上游拒绝，删除 reasoningContent 后重试（尝试 {}/{}）: {}",
-                        attempt + 1,
-                        max_retries,
+                        stripped_all = signature_repair.outcome.stripped_all,
+                        "历史推理签名被上游拒绝，删除后重试: {}",
                         body
                     );
-                    reasoning_stripped_body = Some(stripped);
+                    attempt_limit += 1;
                     last_error = Some(anyhow::anyhow!(
                         "{} API 请求失败: {} {}",
                         api_type,

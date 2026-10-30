@@ -747,6 +747,10 @@ fn test_history_thinking_loss_and_replay_counted_per_turn() {
     };
     let fake = crate::anthropic::stream::generate_fake_signature();
     let real = "EqQBCkYIBhgCKkA".repeat(64);
+    let rejected = format!("{real}{}", uuid::Uuid::new_v4().simple());
+    super::super::rejected_signatures::remember_rejected_signatures(std::slice::from_ref(
+        &rejected,
+    ));
     let req = MessagesRequest {
         model: "claude-sonnet-4".to_string(),
         max_tokens: 1024,
@@ -783,6 +787,12 @@ fn test_history_thinking_loss_and_replay_counted_per_turn() {
             // 没有推理：不计
             message("assistant", serde_json::json!("r5")),
             message("user", serde_json::json!("q6")),
+            // 上游拒绝过的签名：发送前丢弃
+            message(
+                "assistant",
+                serde_json::json!([{"type": "thinking", "thinking": "f", "signature": rejected}, {"type": "text", "text": "r6"}]),
+            ),
+            message("user", serde_json::json!("q7")),
         ],
         stream: false,
         system: None,
@@ -799,8 +809,11 @@ fn test_history_thinking_loss_and_replay_counted_per_turn() {
         HistoryThinkingLoss {
             unsigned_turns: 2,
             rendered_turns: 1,
+            invalid_turns: 1,
         }
     );
+    let history = serde_json::to_string(&result.conversation_state.history).unwrap();
+    assert!(!history.contains(&rejected), "被拒绝过的签名不得回传");
     // 只有第 2 轮回传了真签名
     assert_eq!(
         result.history_reasoning_replay,

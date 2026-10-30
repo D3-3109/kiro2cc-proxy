@@ -57,6 +57,7 @@
     "nonStreamBadge": "Non-stream",
     "thinkingLossUnsigned": "Thinking lost in {{turns}} turn(s) (unsigned)",
     "thinkingLossRendered": "Thinking lost in {{turns}} turn(s) (thinking as text)",
+    "thinkingLossInvalid": "Thinking lost in {{turns}} turn(s) (invalid signature)",
     "thinkingLossRejected": "Thinking lost: signature rejected, stripped",
     "thinkingLossHint": "Earlier reasoning could not be sent back upstream; the model cannot see its thinking from these turns",
     "totalInputLabel": "Total Input: ",

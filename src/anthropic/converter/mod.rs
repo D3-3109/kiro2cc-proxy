@@ -9,6 +9,7 @@
 //! - `prompt`: 计费头规范化、输出格式与近期知识提示注入
 //! - `drift_diag`: history[0] 漂移诊断（DEBUG 日志，列出新增/消失的系统块）
 //! - `model`: Anthropic 模型名 → Kiro 模型 ID 映射
+//! - `rejected_signatures`: 被上游拒绝过的推理签名（发送前丢弃）
 //! - `result`: ConversionResult / ConversionError
 //! - `session`: 会话 ID 提取/派生、compact 压缩请求检测
 //! - `websearch`: web_search 服务端工具识别与剔除、历史占位工具
@@ -31,6 +32,7 @@ mod message;
 mod model;
 mod pdf;
 mod prompt;
+mod rejected_signatures;
 mod result;
 mod schema;
 mod session;
@@ -102,6 +104,7 @@ mod websearch;
 
 pub use convert::convert_request;
 pub(crate) use model::map_model;
+pub(crate) use rejected_signatures::remember_rejected_signatures;
 pub use result::{ConversionError, HistoryReasoningReplay, HistoryThinkingLoss};
 pub use tools::{
     DEFAULT_WRITE_CHUNKING_MAX_LINES, set_write_chunking_max_lines, write_chunking_max_lines,

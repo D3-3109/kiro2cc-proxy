@@ -286,6 +286,7 @@ export type ApiFormat = 'anthropic-messages' | 'cc-messages' | 'openai-chat' | '
 export interface ThinkingLoss {
   unsignedTurns?: number
   renderedTurns?: number
+  invalidTurns?: number
   signatureRejected?: boolean
 }
 

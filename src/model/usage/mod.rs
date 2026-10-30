@@ -109,7 +109,10 @@ pub struct ThinkingLoss {
     /// 推理以 thinkingAsText 文本形式回传、在历史中整块剥离的轮数
     #[serde(default, skip_serializing_if = "is_zero")]
     pub rendered_turns: u32,
-    /// 上游拒绝历史签名，降级重试时剥离了全部历史推理
+    /// 签名无效（损坏或来自其他服务）而未回传的轮数：命中拒绝缓存发送前丢弃，或被上游点名后删除
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub invalid_turns: u32,
+    /// 上游拒绝历史签名且逐个删除未能收敛，降级重试时剥离了全部历史推理
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signature_rejected: bool,
 }

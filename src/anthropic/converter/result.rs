@@ -59,6 +59,8 @@ pub struct HistoryThinkingLoss {
     pub unsigned_turns: u32,
     /// 推理以 thinkingAsText 渲染的文本回传，历史中整块剥离
     pub rendered_turns: u32,
+    /// 签名已被上游拒绝过（命中拒绝缓存），发送前丢弃
+    pub invalid_turns: u32,
 }
 
 /// 转换错误

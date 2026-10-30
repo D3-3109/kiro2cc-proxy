@@ -208,6 +208,7 @@ function ThinkingLossNote({ loss }: { loss: ThinkingLoss }) {
   if (loss.signatureRejected) lines.push(t('common.thinkingLossRejected'))
   if (loss.unsignedTurns) lines.push(t('common.thinkingLossUnsigned', { turns: loss.unsignedTurns }))
   if (loss.renderedTurns) lines.push(t('common.thinkingLossRendered', { turns: loss.renderedTurns }))
+  if (loss.invalidTurns) lines.push(t('common.thinkingLossInvalid', { turns: loss.invalidTurns }))
   return (
     <span className="block text-[10px] leading-tight text-danger" title={t('common.thinkingLossHint')}>
       {lines.map((line) => (

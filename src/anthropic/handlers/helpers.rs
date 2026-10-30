@@ -34,27 +34,31 @@ pub(crate) fn reject_disallowed_model(
 /// 合并 converter 与 provider 两侧的推理丢失情况，供 usage 记录入库（无丢失为 None）
 pub(crate) fn thinking_loss(
     history: crate::anthropic::converter::HistoryThinkingLoss,
-    history_reasoning_stripped: bool,
+    repair: &crate::kiro::provider::SignatureRepair,
 ) -> Option<crate::model::usage::ThinkingLoss> {
     crate::model::usage::ThinkingLoss {
         unsigned_turns: history.unsigned_turns,
         rendered_turns: history.rendered_turns,
-        signature_rejected: history_reasoning_stripped,
+        // 发送前按拒绝缓存丢弃的 + 本次被上游点名删除的
+        invalid_turns: history.invalid_turns + repair.rejected.len() as u32,
+        signature_rejected: repair.stripped_all,
     }
     .non_empty()
 }
 
-/// 实际回传上游的推理签名：签名被拒后 provider 已剥离全部历史推理，按未回传计
+/// 实际回传上游的推理签名：扣除 provider 删掉的签名，全部删除时按未回传计
 pub(crate) fn replayed_reasoning(
     history: crate::anthropic::converter::HistoryReasoningReplay,
-    history_reasoning_stripped: bool,
+    repair: &crate::kiro::provider::SignatureRepair,
 ) -> crate::model::usage::ReplayedReasoning {
-    if history_reasoning_stripped {
+    if repair.stripped_all {
         return crate::model::usage::ReplayedReasoning::default();
     }
+    // 被删的签名都出自 converter 回传的那批，计数必然覆盖它们
+    let rejected_chars: usize = repair.rejected.iter().map(String::len).sum();
     crate::model::usage::ReplayedReasoning {
-        signature_chars: history.signature_chars,
-        blocks: history.blocks,
+        signature_chars: history.signature_chars - rejected_chars,
+        blocks: history.blocks - repair.rejected.len(),
     }
 }
 

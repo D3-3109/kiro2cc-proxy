@@ -57,6 +57,7 @@
     "nonStreamBadge": "非流",
     "thinkingLossUnsigned": "思考丢失 {{turns}} 轮（无签名）",
     "thinkingLossRendered": "思考丢失 {{turns}} 轮（文本化思考）",
+    "thinkingLossInvalid": "思考丢失 {{turns}} 轮（签名无效）",
     "thinkingLossRejected": "思考丢失：签名被拒，已剥离",
     "thinkingLossHint": "历史推理未能回传上游，模型看不到这些轮次之前的思考",
     "totalInputLabel": "输入总计：",

@@ -8,8 +8,17 @@ pub struct ApiResponse {
     pub response: reqwest::Response,
     /// 实际服务本次请求的账号
     pub credential_id: u64,
-    /// 上游拒绝了历史推理签名，本响应来自删除全部 `reasoningContent` 后的重试
-    pub history_reasoning_stripped: bool,
+    /// 历史推理签名被上游拒绝后，为拿到本响应对请求体做的删改
+    pub signature_repair: SignatureRepair,
+}
+
+/// 历史推理签名被拒后的请求体删改
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SignatureRepair {
+    /// 被上游点名拒绝、已从请求中删除的签名（删除后上游不再点名同一位置，确认是坏签名）
+    pub rejected: Vec<String>,
+    /// 逐个删除未能收敛，最终删除了全部历史推理
+    pub stripped_all: bool,
 }
 
 impl KiroProvider {

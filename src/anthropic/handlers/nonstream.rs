@@ -229,7 +229,7 @@ pub(crate) async fn handle_non_stream_request(
     let crate::kiro::provider::ApiResponse {
         response,
         credential_id,
-        history_reasoning_stripped,
+        signature_repair,
     } = match provider
         .call_api(
             request_body,
@@ -242,6 +242,7 @@ pub(crate) async fn handle_non_stream_request(
         Ok(resp) => resp,
         Err(e) => return map_provider_error_with_context(e, model, input_tokens),
     };
+    crate::anthropic::converter::remember_rejected_signatures(&signature_repair.rejected);
 
     // 账号级 thinking 开关关闭 = 禁止思考：上游若仍返回推理内容，响应侧丢弃
     // （开启时非流式本就无条件输出推理块，无需额外处理）
@@ -508,7 +509,7 @@ pub(crate) async fn handle_non_stream_request(
     // 显式注入：handler 始终算出了 prefix_estimated_tokens（可能为 0），
     // 结合 metering_usage 反推校准后以 Some 传入 select_final_usage 选用 prefix 分支
     let replayed_reasoning =
-        super::helpers::replayed_reasoning(history_reasoning_replay, history_reasoning_stripped);
+        super::helpers::replayed_reasoning(history_reasoning_replay, &signature_repair);
     let prefix_estimated = Some(crate::model::usage::refine_prefix_cache_read(
         model,
         prefix_estimated_tokens,
@@ -601,7 +602,7 @@ pub(crate) async fn handle_non_stream_request(
                 user_agent,
                 thinking_loss: super::helpers::thinking_loss(
                     history_thinking_loss,
-                    history_reasoning_stripped,
+                    &signature_repair,
                 ),
                 api_format: Some(api_format),
             },

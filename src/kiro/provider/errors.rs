@@ -16,6 +16,8 @@ const RETRY_BACKOFF_MAX_EXPONENT: usize = 6;
 const RPM_GATE_DEFAULT_WAIT_SECS: u64 = 3;
 const RPM_GATE_MAX_WAIT_SECS: u64 = 5;
 const THINKING_SIGNATURE_INVALID_REASON: &str = "THINKING_SIGNATURE_INVALID";
+/// converter 注入的前缀对：history[0] 的 user + history[1] 的确认语 assistant
+const INJECTED_PAIR_LEN: usize = 2;
 
 impl KiroProvider {
     pub(crate) fn retry_delay(attempt: usize) -> Duration {
@@ -113,11 +115,69 @@ impl KiroProvider {
 
     /// 检测数据面 400 是否为"历史推理签名无效"。
     ///
-    /// 回传的 `reasoningContent` 签名不被当前账号/模型认可（或已损坏）时，上游返回
+    /// 回传的 `reasoningContent` 签名损坏（截断、改动）或来自其他服务时，上游返回
     /// `400 {"message":"messages.3.content.0: Invalid `signature` in `thinking` block",
-    /// "reason":"THINKING_SIGNATURE_INVALID"}`。删掉签名即可正常请求，见 [`Self::strip_history_reasoning`]。
+    /// "reason":"THINKING_SIGNATURE_INVALID"}`。跨账号、跨模型的真实签名不会被拒（2026-10-30 实测）。
     pub(crate) fn is_thinking_signature_invalid(body: &str) -> bool {
         body.contains(THINKING_SIGNATURE_INVALID_REASON)
+    }
+
+    /// 签名无效报错点名的 history 下标
+    ///
+    /// 报错文案形如 `messages.3.content.0: ...`。`messages.N` 即实际发出的请求体的
+    /// `conversationState.history[N]`（2026-10-30 实测：多轮、带 system、tool_use/tool_result
+    /// 交替、adaptive 无前缀对，点名下标均与 history 下标一致）。
+    pub(crate) fn rejected_history_index(body: &str) -> Option<usize> {
+        let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+        let message = value.get("message")?.as_str()?;
+        message
+            .strip_prefix("messages.")?
+            .split('.')
+            .next()?
+            .parse()
+            .ok()
+    }
+
+    /// [`Self::rewrite_request_body`] 发出前从 history 头部删掉的条数
+    ///
+    /// 上游的 `messages.N` 按实际发出的请求体计；账号关闭 thinking 时会整对删掉
+    /// converter 注入的前缀，换算回改写前的下标需加上这个偏移。
+    pub(crate) fn rewritten_history_offset(body: &str, credentials: &KiroCredentials) -> usize {
+        if credentials.thinking_adaptive {
+            return 0;
+        }
+        // 与 rewrite_request_body 一致：无法解析时原样发出，不删任何条目
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+            return 0;
+        };
+        let standalone_tag_pair = value
+            .pointer("/conversationState/history")
+            .and_then(|h| h.as_array())
+            .and_then(|h| Self::injected_text_tag_remainder(h))
+            .is_some_and(|remainder| remainder.is_empty());
+        if standalone_tag_pair {
+            INJECTED_PAIR_LEN
+        } else {
+            0
+        }
+    }
+
+    /// 只删除 `history[index]` 的 `reasoningContent`，返回 `(新请求体, 被删的签名)`
+    ///
+    /// 该位置不是带推理的 assistant 消息（下标映射与预期不符）时返回 None。
+    pub(crate) fn strip_history_reasoning_at(body: &str, index: usize) -> Option<(String, String)> {
+        let mut value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+        let message = value
+            .pointer_mut(&format!(
+                "/conversationState/history/{index}/assistantResponseMessage"
+            ))?
+            .as_object_mut()?;
+        let reasoning = message.remove("reasoningContent")?;
+        let signature = reasoning
+            .pointer("/reasoningText/signature")?
+            .as_str()?
+            .to_string();
+        Some((value.to_string(), signature))
     }
 
     /// 删除 history 中所有 `assistantResponseMessage.reasoningContent`，用于签名被拒后的降级重试。
@@ -323,7 +383,7 @@ impl KiroProvider {
 
         if remainder.is_empty() {
             // 单独成条：移除 user + 紧随其后的确认语 assistant 配对
-            history.drain(..2);
+            history.drain(..INJECTED_PAIR_LEN);
         } else if let Some(c) = history[0].pointer_mut("/userInputMessage/content") {
             *c = serde_json::Value::String(remainder);
         }

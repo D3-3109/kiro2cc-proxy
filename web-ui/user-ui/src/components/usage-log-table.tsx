@@ -176,6 +176,7 @@ function ThinkingLossNote({ loss }: { loss: ThinkingLoss }) {
   if (loss.signatureRejected) lines.push('思考丢失：签名被拒，已剥离')
   if (loss.unsignedTurns) lines.push(`思考丢失 ${loss.unsignedTurns} 轮（无签名）`)
   if (loss.renderedTurns) lines.push(`思考丢失 ${loss.renderedTurns} 轮（文本化思考）`)
+  if (loss.invalidTurns) lines.push(`思考丢失 ${loss.invalidTurns} 轮（签名无效）`)
   return (
     <span
       className="block text-[10px] leading-tight text-danger"
