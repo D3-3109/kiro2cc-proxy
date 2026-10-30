@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - local
+      - 'draft/**'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -121,6 +122,17 @@ jobs:
 
       - name: Build app
         run: cargo build --release --target ${{ matrix.target }}
+
+      - name: TEMP Debian 13 check
+        if: runner.os == 'Linux'
+        run: |
+          bin=target/${{ matrix.target }}/release/kiro2cc-proxy
+          echo "max GLIBC required: $(objdump -T $bin | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+          docker run --rm -v "$PWD/$bin:/app/kiro2cc-proxy:ro" debian:trixie-slim sh -c '
+            apt-get update -qq && apt-get install -y -qq libssl3t64 ca-certificates >/dev/null
+            cat /etc/debian_version
+            ldd /app/kiro2cc-proxy | grep -E "libssl|libcrypto|libc.so"
+            /app/kiro2cc-proxy --version'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
