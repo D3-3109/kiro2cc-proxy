@@ -9,6 +9,7 @@ on:
     branches:
       - master
       - local
+      - 'draft/**'
     tags:
       - 'v*'
   workflow_dispatch:
