@@ -292,7 +292,7 @@ impl CreditCurve {
         (self.replay_input_per_hidden_token * hidden).max(0.0)
     }
 
-    /// 本次计费对应的命中比例；超出 `[−0.15, 1.15]`（本曲线无法解释）或无法估算输出时为 `None`。
+    /// 本次计费对应的命中比例（未截断，可能超出 `[0, 1]`）；无法估算输出时为 `None`。
     ///
     /// 回传推理并入输入 `I`：它和普通输入一样按冷价 / 缓存价计费。
     fn hit_ratio(
@@ -307,20 +307,31 @@ impl CreditCurve {
         let cold = self.cold_base + self.cold_per_mtok * input_mtok;
         let cached = self.cached_base + self.cached_per_mtok * input_mtok;
         let output_cost = self.output_per_mtok * upstream_output / 1_000_000.0;
-        let hit_ratio = (cold + output_cost - credits_used) / (cold - cached);
-
-        (-HIT_RATIO_TOLERANCE..=1.0 + HIT_RATIO_TOLERANCE)
-            .contains(&hit_ratio)
-            .then_some(hit_ratio)
+        Some((cold + output_cost - credits_used) / (cold - cached))
     }
+}
+
+/// 命中比例落在 `[−0.15, 1.15]` 内才算该曲线能解释本次计费
+fn is_explainable(hit_ratio: f64) -> bool {
+    (-HIT_RATIO_TOLERANCE..=1.0 + HIT_RATIO_TOLERANCE).contains(&hit_ratio)
+}
+
+/// 比全未命中价还贵（超出容差）：计费里没有缓存折扣，确定未命中
+fn is_above_cold(hit_ratio: f64) -> bool {
+    hit_ratio < -HIT_RATIO_TOLERANCE
 }
 
 /// 由上游 `meteringEvent.usage`（`credits_used`）反推计费意义上的缓存读取 token 数。
 ///
 /// `hit = (cold(I) + r_out · O − credits) / (cold(I) − cached(I))`，返回 `round(clamp(hit, 0, 1) · I)`，
 /// 其中 `I` 含回传推理折合的输入（见 [`CreditCurve::hit_ratio`]），返回值按本地输入计。
-/// 仅对已标定模型、`input_tokens >= 4096`、`credits_used > 0` 生效；
-/// 没有曲线能解释本次计费（如上游计费口径变化），或 haiku 跳档区间内两档都能解释时返回 `None`。
+/// 仅对已标定模型、`input_tokens >= 4096`、`credits_used > 0` 生效。
+///
+/// 恰有一条候选曲线能解释时按它反推；所有候选曲线都判定比冷价还贵时返回 `Some(0)`
+/// （2026-10-30 线上：opus-5.5 输入 110903、输出 436 计费 2.59 credits，比冷价曲线加输出
+/// 高约 15%；此前退回静态前缀估算，记成 99% 命中）。
+/// 其余情况返回 `None`：比全命中价还便宜（曲线无法解释），无法估算输出，
+/// 或 haiku 跳档区间内两档都能解释。
 pub(crate) fn infer_cache_read_from_credits(
     model: &str,
     input_tokens: i32,
@@ -331,23 +342,32 @@ pub(crate) fn infer_cache_read_from_credits(
     if input_tokens < MIN_INFER_INPUT_TOKENS || !credits_used.is_finite() || credits_used <= 0.0 {
         return None;
     }
-    let mut explained = credit_curves(model, input_tokens)
+    let hit_ratios: Vec<f64> = credit_curves(model, input_tokens)
         .iter()
-        .filter_map(|curve| curve.hit_ratio(input_tokens, replayed, output, credits_used));
-    let hit_ratio = explained.next()?;
-    // 长上下文档全命中 ≈ 常态档冷价一半，与常态档约 55% 命中无法区分
-    let tier_ambiguous = explained.next().is_some();
-    if tier_ambiguous {
-        return None;
+        .filter_map(|curve| curve.hit_ratio(input_tokens, replayed, output, credits_used))
+        .collect();
+
+    let mut explained = hit_ratios.iter().copied().filter(|&r| is_explainable(r));
+    match (explained.next(), explained.next()) {
+        (Some(hit_ratio), None) => {
+            Some((hit_ratio.clamp(0.0, 1.0) * input_tokens as f64).round() as i32)
+        }
+        // 长上下文档全命中 ≈ 常态档冷价一半，与常态档约 55% 命中无法区分
+        (Some(_), Some(_)) => None,
+        (None, _) => {
+            let surely_missed =
+                !hit_ratios.is_empty() && hit_ratios.iter().all(|&r| is_above_cold(r));
+            surely_missed.then_some(0)
+        }
     }
-    Some((hit_ratio.clamp(0.0, 1.0) * input_tokens as f64).round() as i32)
 }
 
 /// 结合静态前缀上界与 `creditsUsed` 反推值校准最终 `cache_read_input_tokens`。
 ///
 /// - `prefix_estimated_tokens <= 0`（首轮或 `history[0]` 重置）时锁定为 `0`；
-/// - 满足反推条件时取 `min(prefix_estimated_tokens, inferred_read, final_input_tokens)`；
-/// - 其余情况（`< 4096`、无 `credits_used`、未标定模型、计费无法解释）保留
+/// - 满足反推条件时取 `min(prefix_estimated_tokens, inferred_read, final_input_tokens)`
+///   （比冷价还贵时反推值为 0）；
+/// - 其余情况（`< 4096`、无 `credits_used`、未标定模型、比全命中价还便宜）保留
 ///   `min(prefix_estimated_tokens, final_input_tokens)`。
 pub(crate) fn refine_prefix_cache_read(
     model: &str,

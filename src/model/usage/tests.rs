@@ -1468,32 +1468,91 @@ mod tests {
     }
 
     #[test]
-    fn test_pricing_infer_cache_read_unexplainable_credits_skipped() {
-        // credits 远超全未命中价 / 远低于全命中价：模型无法解释，返回 None 而非截成 0 或满额
-        for credits in [9.99, 0.001] {
-            assert_eq!(
-                infer_cache_read_from_credits(
-                    "claude-opus-5-5",
-                    50_000,
-                    &NO_REPLAY,
-                    &plain(500),
-                    credits
-                ),
-                None,
-                "credits={credits}"
-            );
-            assert_eq!(
-                refine_prefix_cache_read(
-                    "claude-opus-5-5",
-                    45_000,
-                    50_000,
-                    &NO_REPLAY,
-                    &plain(500),
-                    Some(credits)
-                ),
-                45_000
-            );
-        }
+    fn test_pricing_infer_cache_read_cheaper_than_cached_skipped() {
+        // credits 远低于全命中价：曲线无法解释，返回 None 而非截成满额
+        assert_eq!(
+            infer_cache_read_from_credits(
+                "claude-opus-5-5",
+                50_000,
+                &NO_REPLAY,
+                &plain(500),
+                0.001
+            ),
+            None
+        );
+        assert_eq!(
+            refine_prefix_cache_read(
+                "claude-opus-5-5",
+                45_000,
+                50_000,
+                &NO_REPLAY,
+                &plain(500),
+                Some(0.001)
+            ),
+            45_000
+        );
+    }
+
+    #[test]
+    fn test_pricing_infer_cache_read_above_cold_is_miss() {
+        // 2026-10-30 线上记录：opus-5.5 输入 110903、输出 436、2.5895 credits，
+        // 命中比例约 −0.21（比冷价还贵）。此前退回静态前缀 110286（99%），应为 0
+        let credits = 2.589_470_850_082_918_7;
+        assert_eq!(
+            infer_cache_read_from_credits(
+                "claude-opus-5-5",
+                110_903,
+                &NO_REPLAY,
+                &plain(436),
+                credits
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            refine_prefix_cache_read(
+                "claude-opus-5-5",
+                110_286,
+                110_903,
+                &NO_REPLAY,
+                &plain(436),
+                Some(credits)
+            ),
+            0
+        );
+
+        // 同会话下一条：111622 输入、215 输出、0.779 credits，按曲线约 92% 命中，行为不变
+        let next = infer_cache_read_from_credits(
+            "claude-opus-5-5",
+            111_622,
+            &NO_REPLAY,
+            &plain(215),
+            0.778_959_499_170_812_5,
+        )
+        .unwrap();
+        assert!((101_000..=103_500).contains(&next), "实际: {next}");
+    }
+
+    #[test]
+    fn test_pricing_infer_cache_read_haiku_tier_above_cold_needs_both_tiers() {
+        // haiku 跳档区间 70K：长上下文档 50% 命中的价格比常态档冷价还贵，
+        // 但长上下文档能解释，按它反推，不因常态档判未命中
+        let input = 70_000;
+        let long_cold = 0.00179 + 8.835 * 0.07;
+        let long_cached = 0.00128 + 0.883 * 0.07;
+        let inferred = infer_cache_read_from_credits(
+            "claude-haiku-5-5",
+            input,
+            &NO_REPLAY,
+            &plain(0),
+            (long_cold + long_cached) / 2.0,
+        )
+        .unwrap();
+        assert!((34_500..=35_500).contains(&inferred), "实际: {inferred}");
+        // 两档冷价都远低于该值：确定未命中
+        assert_eq!(
+            infer_cache_read_from_credits("claude-haiku-5-5", input, &NO_REPLAY, &plain(0), 5.0),
+            Some(0)
+        );
     }
 
     #[test]
