@@ -245,11 +245,14 @@ export interface ReleaseNotesResponse {
   data: ReleaseNote[]
 }
 
-// RPM 实时监控
+// RPM 与并发实时监控（并发 = 正在处理的请求数；无在途请求的键不出现）
 export interface RpmSnapshot {
   global: number
   byCredential: Record<string, number>
   byApiKey: Record<string, number>
+  concurrencyGlobal: number
+  concurrencyByCredential: Record<string, number>
+  concurrencyByApiKey: Record<string, number>
 }
 
 // 单条原始请求记录

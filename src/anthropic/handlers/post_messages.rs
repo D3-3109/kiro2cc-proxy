@@ -90,11 +90,11 @@ pub(crate) async fn post_messages_as(
         "Received POST /v1/messages request"
     );
 
-    // 记录 RPM（全局 + per-API-Key）
-    if let Some(rpm_tracker) = &state.rpm_tracker {
-        let api_key_id = identity.as_ref().map(|ext| ext.0.id);
-        rpm_tracker.record_request(api_key_id);
-    }
+    // 记录 RPM 与并发（全局 + per-API-Key）；非流式持有到本函数返回，流式随 SSE 流存活
+    let api_key_in_flight = state
+        .rpm_tracker
+        .as_ref()
+        .map(|rpm| rpm.begin_api_key_request(identity.as_ref().map(|ext| ext.0.id)));
 
     let bound_ids: Vec<u64> = identity
         .as_ref()
@@ -345,6 +345,7 @@ pub(crate) async fn post_messages_as(
             history_thinking_loss,
             history_reasoning_replay,
             api_format,
+            api_key_in_flight,
         )
         .await
     } else {

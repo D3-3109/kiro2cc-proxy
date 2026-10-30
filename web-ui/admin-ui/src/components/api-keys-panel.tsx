@@ -767,6 +767,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             expiringInDays={expiringInDaysOf(apiKey)}
             usage={usageMap.get(apiKey.id)}
             rpm={rpmData?.byApiKey?.[String(apiKey.id)] ?? 0}
+            concurrency={rpmData?.concurrencyByApiKey?.[String(apiKey.id)] ?? 0}
             bound={boundOf(apiKey)}
             selected={selectedIds.has(apiKey.id)}
             onToggleSelect={() => toggleSelect(apiKey.id)}

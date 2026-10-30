@@ -841,6 +841,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           balanceMap={balanceMap}
           loadingBalanceIds={loadingBalanceIds}
           rpmByCredential={rpmData?.byCredential}
+          concurrencyByCredential={rpmData?.concurrencyByCredential}
           toggleSelect={toggleSelect}
           setFailureLogCredentialId={setFailureLogCredentialId}
           setThrottleLogCredentialId={setThrottleLogCredentialId}

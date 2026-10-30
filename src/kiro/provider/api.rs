@@ -10,6 +10,8 @@ pub struct ApiResponse {
     pub credential_id: u64,
     /// 历史推理签名被上游拒绝后，为拿到本响应对请求体做的删改
     pub signature_repair: SignatureRepair,
+    /// 该账号的在途请求计数（未启用 RPM 监控时为 None）；须保存到响应体发完
+    pub credential_in_flight: Option<crate::model::rpm::InFlightGuard>,
 }
 
 /// 历史推理签名被拒后的请求体删改

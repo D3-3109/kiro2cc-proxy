@@ -58,6 +58,8 @@ export interface ApiKeyRowProps {
   expiringInDays: number | null
   usage?: UsageSummary
   rpm: number
+  /** 正在处理的请求数 */
+  concurrency: number
   bound: { label: string; balance: string | null }[]
   selected: boolean
   onToggleSelect: () => void
@@ -84,6 +86,7 @@ export function ApiKeyRow({
   expiringInDays,
   usage,
   rpm,
+  concurrency,
   bound,
   selected,
   onToggleSelect,
@@ -265,10 +268,16 @@ export function ApiKeyRow({
         </div>
       </td>
 
-      {/* 实时 RPM（原「RPM 上限」降级）：0 时设计稿显示破折号 */}
+      {/* 实时并发 / RPM（原「RPM 上限」降级）：都为 0 时设计稿显示破折号 */}
       <td className={`${CELL} text-right`}>
-        {rpm > 0 ? (
-          <span className="font-mono text-[12px] font-semibold tabular-nums text-brand">{rpm}</span>
+        {rpm > 0 || concurrency > 0 ? (
+          <span className="whitespace-nowrap font-mono text-[12px] tabular-nums">
+            <span className={concurrency > 0 ? 'font-semibold text-brand' : 'font-medium text-ink-3'}>
+              {concurrency}
+            </span>
+            <span className="px-0.5 text-ink-3 opacity-60">/</span>
+            <span className={rpm > 0 ? 'font-semibold text-brand' : 'font-medium text-ink-3'}>{rpm}</span>
+          </span>
         ) : (
           <span className="text-ink-3">—</span>
         )}

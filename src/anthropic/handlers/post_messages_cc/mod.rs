@@ -78,6 +78,12 @@ pub async fn post_messages_cc(
         "Received POST /cc/v1/messages request"
     );
 
+    // 记录 RPM 与并发（与 /v1/messages 同口径）；非流式持有到本函数返回，流式随 SSE 流存活
+    let api_key_in_flight = state
+        .rpm_tracker
+        .as_ref()
+        .map(|rpm| rpm.begin_api_key_request(identity.as_ref().map(|ext| ext.0.id)));
+
     // 检查 KiroProvider 是否可用
     let provider = match &state.kiro_provider {
         Some(p) => p.clone(),
@@ -285,6 +291,7 @@ pub async fn post_messages_cc(
             history_thinking_loss,
             history_reasoning_replay,
             crate::model::usage::ApiFormat::CcMessages,
+            api_key_in_flight,
         )
         .await
     } else {

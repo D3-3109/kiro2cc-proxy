@@ -60,6 +60,8 @@ pub(crate) async fn handle_stream_request(
     history_reasoning_replay: crate::anthropic::converter::HistoryReasoningReplay,
     // 客户端请求所用的 API 格式（随 usage 记录入库）
     api_format: crate::model::usage::ApiFormat,
+    // 该 API Key 的在途请求计数：随 SSE 流存活；上游在宽限期内报错时随本函数返回释放
+    api_key_in_flight: Option<crate::model::rpm::InFlightGuard>,
 ) -> Response {
     // 计时起点：发起上游请求之前（与 nonstream.rs 口径一致，对齐 codex2cc 的 TTFT 实现），
     // 首字/耗时均包含上游建连与故障转移耗时；ctx 计时统一用 std Instant，与 tokio 时间源无关
@@ -85,6 +87,7 @@ pub(crate) async fn handle_stream_request(
             response,
             credential_id,
             signature_repair,
+            credential_in_flight,
         } = upstream;
         let model = stream_model.as_str();
         crate::anthropic::converter::remember_rejected_signatures(
@@ -144,13 +147,14 @@ pub(crate) async fn handle_stream_request(
         // 生成初始事件
         let initial_events = ctx.generate_initial_events();
 
-        // 创建 SSE 流
-        create_sse_stream(
+        // 创建 SSE 流；并发计数随流存活
+        let events = create_sse_stream(
             response,
             ctx,
             initial_events,
             stream_deadline.map(|d| Instant::now() + d),
-        )
+        );
+        hold_while_streaming(events, (api_key_in_flight, credential_in_flight))
     };
 
     // 宽限期内完成（含秒级返回的 400/402/429）→ 原有路径，HTTP 状态码语义不变
@@ -274,6 +278,18 @@ where
                 Some((item, UpstreamPhase::Streaming(events)))
             }
         }
+    })
+}
+
+/// 让 `guards` 随流存活：流结束或客户端断开（流被 drop）时一并释放
+fn hold_while_streaming<S, G>(stream: S, guards: G) -> impl Stream<Item = S::Item>
+where
+    S: Stream,
+    G: Send + 'static,
+{
+    stream.map(move |item| {
+        let _ = &guards;
+        item
     })
 }
 
@@ -562,4 +578,27 @@ fn create_sse_stream(
     .flatten();
 
     initial_stream.chain(processing_stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::rpm::RpmTracker;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn held_guard_is_released_only_when_stream_is_dropped() {
+        let tracker = Arc::new(RpmTracker::new());
+        let guard = tracker.begin_api_key_request(Some(1));
+        let mut held = Box::pin(hold_while_streaming(stream::iter([1, 2]), guard));
+
+        // 流读尽前后都不释放：释放时机是流被 drop（正常结束或客户端断开）
+        assert_eq!(held.next().await, Some(1));
+        assert_eq!(held.next().await, Some(2));
+        assert_eq!(held.next().await, None);
+        assert_eq!(tracker.snapshot().concurrency_global, 1);
+
+        drop(held);
+        assert_eq!(tracker.snapshot().concurrency_global, 0);
+    }
 }

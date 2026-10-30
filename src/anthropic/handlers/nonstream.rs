@@ -230,6 +230,8 @@ pub(crate) async fn handle_non_stream_request(
         response,
         credential_id,
         signature_repair,
+        // 持有到函数返回：非流式响应体在返回前已完整生成
+        credential_in_flight: _credential_in_flight,
     } = match provider
         .call_api(
             request_body,

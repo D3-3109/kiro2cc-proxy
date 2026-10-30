@@ -413,13 +413,15 @@ impl KiroProvider {
             // 成功响应
             if status.is_success() {
                 self.token_manager.report_success(ctx.id);
-                if let Some(rpm) = &self.rpm_tracker {
-                    rpm.record_credential(ctx.id);
-                }
+                let credential_in_flight = self
+                    .rpm_tracker
+                    .as_ref()
+                    .map(|rpm| rpm.begin_credential_request(ctx.id));
                 return Ok(super::ApiResponse {
                     response,
                     credential_id: ctx.id,
                     signature_repair: signature_repair.finish(),
+                    credential_in_flight,
                 });
             }
 

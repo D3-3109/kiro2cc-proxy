@@ -71,6 +71,8 @@ export interface AccountRowProps {
   loadingBalance: boolean
   /** 当前分钟请求数（来自 useRpm 轮询） */
   rpm: number
+  /** 正在处理的请求数（来自 useRpm 轮询） */
+  concurrency: number
   selected: boolean
   onToggleSelect: () => void
   onViewFailureLog: (id: number) => void
@@ -82,13 +84,14 @@ export interface AccountRowProps {
   onRefetchBalance: (id: number) => void
 }
 
-/** 账号表格行（设计稿 tbody tr）：10 列 = 选择框 / ID / 账号 / 状态 / 套餐 / 额度 / 调用 / RPM / 最后调用 / 操作 */
+/** 账号表格行（设计稿 tbody tr）：10 列 = 选择框 / ID / 账号 / 状态 / 套餐 / 额度 / 调用 / 并发·RPM / 最后调用 / 操作 */
 export function AccountRow({
   credential,
   sequence,
   balance,
   loadingBalance,
   rpm,
+  concurrency,
   selected,
   onToggleSelect,
   onViewFailureLog,
@@ -337,19 +340,29 @@ export function AccountRow({
           )}
         </div>
       </td>
-      {/* RPM（设计稿 .rpm）：0 用次要色，高压值染 danger */}
+      {/* 并发 / RPM（设计稿 .rpm）：0 用次要色，RPM 高压值染 danger */}
       <td className={`${CELL} text-right`}>
-        <span
-          className={`font-mono text-[12.5px] tabular-nums ${
-            rpmIdle || rpm === 0
-              ? 'font-medium text-ink-3'
-              : rpm >= RPM_DANGER
-                ? 'font-semibold text-danger'
-                : 'font-medium text-brand'
-          }`}
-        >
-          {rpmIdle ? '—' : rpm}
-        </span>
+        {rpmIdle ? (
+          <span className="font-mono text-[12.5px] font-medium tabular-nums text-ink-3">—</span>
+        ) : (
+          <span className="whitespace-nowrap font-mono text-[12.5px] tabular-nums">
+            <span className={concurrency === 0 ? 'font-medium text-ink-3' : 'font-semibold text-brand'}>
+              {concurrency}
+            </span>
+            <span className="px-0.5 text-ink-3 opacity-60">/</span>
+            <span
+              className={
+                rpm === 0
+                  ? 'font-medium text-ink-3'
+                  : rpm >= RPM_DANGER
+                    ? 'font-semibold text-danger'
+                    : 'font-medium text-brand'
+              }
+            >
+              {rpm}
+            </span>
+          </span>
+        )}
       </td>
       {/* 最后调用（设计稿 .when + small）：相对时间主行 + 绝对时间小字 */}
       <td className={CELL}>
