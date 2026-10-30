@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useApiKeys, useCreateApiKey, useUpdateApiKey, useDeleteApiKey, useAllUsage, useResetKeyUsage, useRpm, useCredentials, useCredentialBalances, useDailyUsage } from '@/hooks/use-credentials'
 import { CreateKeyDialog } from '@/components/api-keys/create-key-dialog'
 import { EditKeyDialog } from '@/components/api-keys/edit-key-dialog'
+import { UNLIMITED_REQUEST_LIMITS, type RequestLimits } from '@/components/api-keys/request-limits-fields'
 import { PurgeDialog } from '@/components/api-keys/purge-dialog'
 import {
   deleteApiKey as deleteApiKeyApi,
@@ -46,6 +47,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
   const [newUnlimited, setNewUnlimited] = useState(true)
   const [newBoundCredentialIds, setNewBoundCredentialIds] = useState<number[]>([])
   const [newAllowedModels, setNewAllowedModels] = useState<string[]>([])
+  const [newRequestLimits, setNewRequestLimits] = useState<RequestLimits>(UNLIMITED_REQUEST_LIMITS)
   const [editName, setEditName] = useState('')
   const [editMode, setEditMode] = useState<'date' | 'quota'>('date')
   const [editDuration, setEditDuration] = useState<number | null | string>(1)
@@ -55,6 +57,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
   const [editDurationUnit, setEditDurationUnit] = useState<'days' | 'hours'>('days')
   const [editBoundCredentialIds, setEditBoundCredentialIds] = useState<number[]>([])
   const [editAllowedModels, setEditAllowedModels] = useState<string[]>([])
+  const [editRequestLimits, setEditRequestLimits] = useState<RequestLimits>(UNLIMITED_REQUEST_LIMITS)
   const [editSpendingLimit, setEditSpendingLimit] = useState(50)
   const [editLimitUnit, setEditLimitUnit] = useState<'usd' | 'credits'>('usd')
   const [copiedId, setCopiedId] = useState<number | null>(null)
@@ -205,6 +208,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
           : { spendingLimit: newUnlimited ? null : newSpendingLimit, limitUnit: newLimitUnit }),
         boundCredentialIds: newBoundCredentialIds.length > 0 ? newBoundCredentialIds : null,
         allowedModels: newAllowedModels.length > 0 ? newAllowedModels : null,
+        ...newRequestLimits,
       },
       {
         onSuccess: () => {
@@ -219,6 +223,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
           setNewUnlimited(true)
           setNewBoundCredentialIds([])
           setNewAllowedModels([])
+          setNewRequestLimits(UNLIMITED_REQUEST_LIMITS)
         },
         onError: (err) => toast.error(t('apiKeys.toastCreateFailed', { message: extractErrorMessage(err) })),
       }
@@ -251,6 +256,8 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
     }
     data.boundCredentialIds = editBoundCredentialIds.length > 0 ? editBoundCredentialIds : null
     data.allowedModels = editAllowedModels.length > 0 ? editAllowedModels : null
+    data.rpmLimit = editRequestLimits.rpmLimit
+    data.concurrencyLimit = editRequestLimits.concurrencyLimit
     updateKey(
       { id: editingKey.id, data },
       {
@@ -305,6 +312,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
     }
     setEditBoundCredentialIds(key.boundCredentialIds ?? [])
     setEditAllowedModels(key.allowedModels ?? [])
+    setEditRequestLimits({ rpmLimit: key.rpmLimit, concurrencyLimit: key.concurrencyLimit })
   }
 
   const formatDate = (dateStr: string) => {
@@ -767,6 +775,7 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
             expiringInDays={expiringInDaysOf(apiKey)}
             usage={usageMap.get(apiKey.id)}
             rpm={rpmData?.byApiKey?.[String(apiKey.id)] ?? 0}
+            concurrency={rpmData?.concurrencyByApiKey?.[String(apiKey.id)] ?? 0}
             bound={boundOf(apiKey)}
             selected={selectedIds.has(apiKey.id)}
             onToggleSelect={() => toggleSelect(apiKey.id)}
@@ -807,6 +816,8 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         setNewBoundCredentialIds={setNewBoundCredentialIds}
         newAllowedModels={newAllowedModels}
         setNewAllowedModels={setNewAllowedModels}
+        newRequestLimits={newRequestLimits}
+        setNewRequestLimits={setNewRequestLimits}
         credentials={credentials?.credentials}
         credentialBalanceMap={credentialBalanceMap}
         createCredDropdownRef={createCredDropdownRef}
@@ -836,6 +847,8 @@ export function ApiKeysPanel({ onViewDetail }: ApiKeysPanelProps) {
         setEditBoundCredentialIds={setEditBoundCredentialIds}
         editAllowedModels={editAllowedModels}
         setEditAllowedModels={setEditAllowedModels}
+        editRequestLimits={editRequestLimits}
+        setEditRequestLimits={setEditRequestLimits}
         editSpendingLimit={editSpendingLimit}
         setEditSpendingLimit={setEditSpendingLimit}
         editLimitUnit={editLimitUnit}

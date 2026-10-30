@@ -16,6 +16,21 @@ use std::time::{Duration as StdDuration, Instant};
 
 // ============================================================================
 
+/// 健康状态的判定依据（近期上游失败），供管理页解释账号为何变色
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthDetail {
+    /// 最近 10 分钟上游限流次数
+    pub recent_throttle_count: u32,
+    /// 最近 10 分钟上游空响应次数
+    pub recent_empty_response_count: u32,
+    /// 连续上游失败次数（一次正常完成的响应即清零）
+    pub consecutive_failures: u32,
+    /// 不健康时冷却期剩余秒数；其它状态为 None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cooldown_remaining_secs: Option<u64>,
+}
+
 /// 账号条目快照（用于 Admin API 读取）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +86,8 @@ pub struct CredentialEntrySnapshot {
     pub proxy_url: Option<String>,
     /// 健康状态
     pub health_status: HealthStatus,
+    /// 健康状态的判定依据
+    pub health_detail: HealthDetail,
     /// 被限流次数（429 响应，累计）
     pub throttle_count: u64,
     /// 禁用原因（manual / too_many_failures / quota_exceeded / invalid_refresh_token /
@@ -138,6 +155,8 @@ pub struct MultiTokenManager {
     /// 每账号 RPM 上限（运行时可经 Admin API 热切换；0 = 不限）。
     /// 独立于 config 持久化值，避免为热切换引入 Config 内部可变性
     pub(crate) max_rpm_per_credential: AtomicU32,
+    /// 每账号并发上限（运行时可经 Admin API 热切换；0 = 不限）
+    pub(crate) max_concurrency_per_credential: AtomicU32,
     /// 每账号实际可用模型缓存（账号 ID → 上游 ListAvailableModels 结果），
     /// 用于按模型路由；仅在内存中，重启后按需重新探测。
     /// 锁序：可在持有 `entries` 时获取，但它是叶子锁，持有期间不得再获取其它锁

@@ -15,10 +15,6 @@ pub struct ConversionResult {
     /// 用于 provider 层选择更长的上游超时（压缩请求通常处理超长历史，
     /// 耗时明显高于普通请求）。检测逻辑见 `is_compact_request`。
     pub is_compact_request: bool,
-    /// web_search server tool 声明的次数上限（请求未携带该 server tool 时为 None）
-    ///
-    /// 供 handlers 桥接层计算多轮搜索上限 `min(max_uses, 5)`。
-    pub web_search_max_uses: Option<Option<i32>>,
     /// 客户端是否请求了 `thinking: {"type": "adaptive"}`
     ///
     /// 账号在 provider 阶段才确定，converter 阶段先记录该意图，
@@ -63,6 +59,8 @@ pub struct HistoryThinkingLoss {
     pub unsigned_turns: u32,
     /// 推理以 thinkingAsText 渲染的文本回传，历史中整块剥离
     pub rendered_turns: u32,
+    /// 签名已被上游拒绝过（命中拒绝缓存），发送前丢弃
+    pub invalid_turns: u32,
 }
 
 /// 转换错误

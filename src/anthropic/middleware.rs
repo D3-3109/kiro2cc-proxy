@@ -40,6 +40,8 @@ pub struct ApiKeyContext {
     pub bound_credential_ids: Option<Vec<u64>>,
     /// 可调用模型白名单（规范模型 ID），None 或空表示不限制
     pub allowed_models: Option<Vec<String>>,
+    /// 本 Key 的 RPM / 并发上限
+    pub limits: crate::model::rpm::LocalLimits,
 }
 
 impl ApiKeyContext {
@@ -197,6 +199,7 @@ pub async fn auth_middleware(
                 limit_unit,
                 bound_credential_ids,
                 allowed_models,
+                limits,
             } => {
                 // 懒激活：首次使用时激活 key
                 if let Err(e) = manager.activate_key(id) {
@@ -241,6 +244,7 @@ pub async fn auth_middleware(
                     id,
                     bound_credential_ids,
                     allowed_models,
+                    limits,
                 });
                 return next.run(request).await;
             }
@@ -297,6 +301,7 @@ mod tests {
             bound_credential_ids: None,
             allowed_models: allowed_models
                 .map(|models| models.into_iter().map(str::to_string).collect()),
+            limits: Default::default(),
         }
     }
 

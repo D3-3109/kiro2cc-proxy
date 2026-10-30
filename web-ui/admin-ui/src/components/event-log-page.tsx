@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Harllan He. Licensed under MIT.
 import { useState } from 'react'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Loader2, RotateCw, SearchX, type LucideIcon } from 'lucide-react'
@@ -27,12 +28,29 @@ export const PAGE_SIZE = 50
 /** FIFO 淘汰阈值，与后端日志表上限一致；两页文案相同故不作为注入项 */
 const RECORD_LIMIT = 500
 
-/** 两页共用的记录形状 —— `ThrottleLogRecord` 与 `FailureLogRecord` 字段完全一致 */
+/** 两页共用的记录形状；现场字段只有限流日志带，失败日志与旧记录缺省 */
 interface EventLogRecord {
   requestType: string
   statusCode: number
   responseBody: string
   createdAt: string
+  endpoint?: string
+  credentialRpm?: number
+  credentialInFlight?: number
+  attempt?: number
+  model?: string
+}
+
+/** 现场字段拼成一行摘要，如 `ide · 第 2 次尝试 · RPM 12 · 并发 3 · claude-opus-5.5`；无字段返回空串 */
+function contextSummary(record: EventLogRecord, t: TFunction): string {
+  const parts = [
+    record.endpoint,
+    record.attempt === undefined ? undefined : t('logs.contextAttempt', { n: record.attempt }),
+    record.credentialRpm === undefined ? undefined : `RPM ${record.credentialRpm}`,
+    record.credentialInFlight === undefined ? undefined : t('logs.contextInFlight', { n: record.credentialInFlight }),
+    record.model,
+  ]
+  return parts.filter((part) => part !== undefined).join(' · ')
 }
 
 /** 色调白名单：动态拼接类名会被 Tailwind purge，故用静态 Record */
@@ -176,32 +194,40 @@ export function EventLogPage({
                     </td>
                   </tr>
                 ) : (
-                  records.map((record, idx) => (
-                    <tr key={`${record.createdAt}-${idx}`} className="transition-colors hover:bg-surface-2">
-                      <td className={`${CELL} whitespace-nowrap font-mono text-[11.5px] text-ink-2`}>
-                        {formatDateTime(record.createdAt)}
-                      </td>
-                      <td className={CELL}>
-                        <span className={`${TAG} border-transparent bg-surface-3 text-ink-2`}>
-                          {record.requestType.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className={`${CELL} font-mono text-[12px] font-medium tabular-nums ${visual.value}`}>
-                        {record.statusCode}
-                      </td>
-                      <td className={CELL}>
-                        {/* 改版前挂在 td 上的 onClick 键盘不可达，改为 button 并补 title 显示全文 */}
-                        <button
-                          type="button"
-                          onClick={() => setSelectedBody(record.responseBody)}
-                          title={record.responseBody}
-                          className="block w-full truncate text-left text-[11.5px] text-ink-2 transition-colors hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                        >
-                          {record.responseBody}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  records.map((record, idx) => {
+                    const context = contextSummary(record, t)
+                    return (
+                      <tr key={`${record.createdAt}-${idx}`} className="transition-colors hover:bg-surface-2">
+                        <td className={`${CELL} whitespace-nowrap font-mono text-[11.5px] text-ink-2`}>
+                          {formatDateTime(record.createdAt)}
+                        </td>
+                        <td className={CELL}>
+                          <span className={`${TAG} border-transparent bg-surface-3 text-ink-2`}>
+                            {record.requestType.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className={`${CELL} font-mono text-[12px] font-medium tabular-nums ${visual.value}`}>
+                          {record.statusCode}
+                        </td>
+                        <td className={CELL}>
+                          {/* 改版前挂在 td 上的 onClick 键盘不可达，改为 button 并补 title 显示全文 */}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedBody(record.responseBody)}
+                            title={record.responseBody}
+                            className="block w-full truncate text-left text-[11.5px] text-ink-2 transition-colors hover:text-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                          >
+                            {record.responseBody}
+                          </button>
+                          {context && (
+                            <div className="mt-0.5 truncate font-mono text-[11px] text-ink-3" title={context}>
+                              {context}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>

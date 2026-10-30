@@ -7,6 +7,7 @@ use super::super::types::{
     CallContext, MultiTokenManager, STICKY_CACHE_TTL, STICKY_THROTTLE_EVICT_THRESHOLD,
     StickyCacheEntry, TOKEN_REFRESH_COOLDOWN,
 };
+use super::super::upstream_failures::UpstreamFailures;
 
 use crate::http_client::ProxyConfig;
 use crate::kiro::machine_id;
@@ -93,7 +94,7 @@ impl MultiTokenManager {
                     success_count: 0,
                     last_used_at: None,
                     throttle_count: 0,
-                    last_throttled_at: None,
+                    upstream_failures: UpstreamFailures::new(Instant::now()),
                     last_throttled_wall: None,
                     last_refreshed_at: None,
                     rotation_bias: 0,
@@ -135,6 +136,7 @@ impl MultiTokenManager {
 
         let load_balancing_mode = config.load_balancing_mode.clone();
         let max_rpm = config.max_rpm_per_credential;
+        let max_concurrency = config.max_concurrency_per_credential;
         let manager = Self {
             config,
             proxy,
@@ -155,6 +157,7 @@ impl MultiTokenManager {
             persist_lock: Mutex::new(()),
             next_id_counter: AtomicU64::new(final_max_id),
             max_rpm_per_credential: AtomicU32::new(max_rpm),
+            max_concurrency_per_credential: AtomicU32::new(max_concurrency),
             model_support: Mutex::new(HashMap::new()),
             model_support_refresh_lock: TokioMutex::new(()),
         };
@@ -196,6 +199,17 @@ impl MultiTokenManager {
         self.max_rpm_per_credential.store(value, Ordering::Relaxed);
     }
 
+    /// 获取每账号并发上限（运行时热切换后的当前值；0 = 不限）
+    pub fn max_concurrency_per_credential(&self) -> u32 {
+        self.max_concurrency_per_credential.load(Ordering::Relaxed)
+    }
+
+    /// 热切换每账号并发上限（0 = 不限），仅影响运行时，持久化由调用方负责
+    pub fn set_max_concurrency_per_credential(&self, value: u32) {
+        self.max_concurrency_per_credential
+            .store(value, Ordering::Relaxed);
+    }
+
     /// 获取当前活动账号的克隆（仅测试使用）
     #[cfg(test)]
     pub fn credentials(&self) -> KiroCredentials {
@@ -228,6 +242,7 @@ impl MultiTokenManager {
     }
 
     /// 返回当前未禁用账号的 id 列表
+    #[cfg(test)]
     pub fn credential_ids(&self) -> Vec<u64> {
         self.entries
             .lock()
@@ -291,9 +306,10 @@ impl MultiTokenManager {
         }
 
         // 优先选择健康状态不为 Unhealthy 的账号；全部不健康时才 fallback 避免完全不可用
+        let now = Instant::now();
         let preferred: Vec<_> = available
             .iter()
-            .filter(|e| Self::compute_health(e) != HealthStatus::Unhealthy)
+            .filter(|e| Self::compute_health_at(e, now) != HealthStatus::Unhealthy)
             .copied()
             .collect();
         let pool: &[&CredentialEntry] = if preferred.is_empty() {
@@ -301,13 +317,24 @@ impl MultiTokenManager {
         } else {
             &preferred
         };
+        // 降级账号相当于优先级 +0.5：同优先级内最后被选中，仍先于下一优先级
+        let degraded =
+            |e: &CredentialEntry| Self::compute_health_at(e, now) == HealthStatus::Degraded;
 
         let mode = self.load_balancing_mode.lock().clone();
         let mode = mode.as_str();
 
         match mode {
             "balanced" => {
-                // Round-Robin + rotation_bias：优先选 bias 最小的子集，再 round-robin
+                // 先排除降级账号（全部降级时不排除），再 Round-Robin + rotation_bias：
+                // 优先选 bias 最小的子集，再 round-robin
+                let not_degraded: Vec<&CredentialEntry> =
+                    pool.iter().filter(|e| !degraded(e)).copied().collect();
+                let pool = if not_degraded.is_empty() {
+                    pool
+                } else {
+                    &not_degraded
+                };
                 let min_bias = pool.iter().map(|e| e.rotation_bias).min().unwrap_or(0);
                 let low_bias: Vec<&CredentialEntry> = pool
                     .iter()
@@ -319,11 +346,15 @@ impl MultiTokenManager {
                 Some((entry.id, entry.credentials.clone()))
             }
             _ => {
-                // priority 模式：同优先级内按 rotation_bias 排序后 round-robin
-                let min_priority = pool.iter().map(|e| e.credentials.priority).min()?;
+                // priority 模式：取顺位最高的一档（优先级 ×2，降级再 +1），
+                // 档内按 rotation_bias 排序后 round-robin
+                let rank = |e: &CredentialEntry| {
+                    u64::from(e.credentials.priority) * 2 + u64::from(degraded(e))
+                };
+                let min_rank = pool.iter().map(|e| rank(e)).min()?;
                 let top_tier: Vec<&CredentialEntry> = pool
                     .iter()
-                    .filter(|e| e.credentials.priority == min_priority)
+                    .filter(|e| rank(e) == min_rank)
                     .copied()
                     .collect();
                 if top_tier.len() == 1 {
@@ -385,9 +416,13 @@ impl MultiTokenManager {
                     entries
                         .iter()
                         .find(|e| {
+                            // 当前账号降级时也重新选号：同优先级里有正常账号就换过去
                             e.id == current_id
                                 && !e.disabled
-                                && Self::compute_health(e) != HealthStatus::Unhealthy
+                                && !matches!(
+                                    Self::compute_health(e),
+                                    HealthStatus::Unhealthy | HealthStatus::Degraded
+                                )
                                 && (!is_opus || e.credentials.supports_opus())
                                 && !self.is_known_unsupported(e.id, model)
                         })
@@ -627,16 +662,13 @@ impl MultiTokenManager {
         if let Some((id, credentials)) = cached {
             match self.try_ensure_token(id, &credentials).await {
                 Ok(ctx) => {
-                    // 命中成功，续期
+                    // 命中，续期。连续限流计数不在此清零：选中不代表能承载，
+                    // 由请求成功后的 report_sticky_success 清零
                     self.sticky_hits.fetch_add(1, Ordering::Relaxed);
                     self.sticky_cache
                         .lock()
                         .entry(cid.to_string())
-                        .and_modify(|e| {
-                            e.inserted_at = Instant::now();
-                            // 成功命中说明该账号仍可承载此会话，清零连续限流计数
-                            e.consecutive_throttles = 0;
-                        });
+                        .and_modify(|e| e.inserted_at = Instant::now());
                     return Ok(ctx);
                 }
                 Err(e) => {
@@ -730,6 +762,18 @@ impl MultiTokenManager {
             STICKY_THROTTLE_EVICT_THRESHOLD
         );
         true
+    }
+
+    /// 会话在绑定账号上请求成功：清零连续限流计数
+    ///
+    /// 成功落在别的账号（本次请求避让了绑定账号）时不清零：绑定账号仍未证明能承载此会话。
+    pub fn report_sticky_success(&self, continuation_id: &str, credential_id: u64) {
+        let mut cache = self.sticky_cache.lock();
+        if let Some(entry) = cache.get_mut(continuation_id)
+            && entry.credential_id == credential_id
+        {
+            entry.consecutive_throttles = 0;
+        }
     }
 
     /// 切换到下一个优先级最高的可用账号（内部方法）

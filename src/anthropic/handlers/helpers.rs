@@ -7,11 +7,68 @@ use crate::anthropic::types::{
     CountTokensRequest, CountTokensResponse, ErrorResponse, MessagesRequest, OutputConfig, Thinking,
 };
 
+use crate::model::rpm::{InFlightGuard, LimitFull, LocalLimits, RpmTracker};
 use crate::token;
 use axum::{
     Json as JsonExtractor,
+    http::{StatusCode, header},
     response::{IntoResponse, Json},
 };
+use std::sync::Arc;
+use std::time::Duration;
+
+/// API Key 本地限额满时排队的最长时间，超出返回 429
+const API_KEY_QUEUE: Duration = Duration::from_secs(10);
+
+/// 并发满时建议客户端的重试间隔（秒）：何时有在途请求结束无从预知，与上游限流的 429 一致
+const CONCURRENCY_RETRY_AFTER_SECS: u64 = 5;
+
+/// 请求准入：计入全局与本 Key 的 RPM、并发（未启用监控时返回 `Ok(None)`）
+///
+/// 本 Key 的 RPM / 并发满时排队，[`API_KEY_QUEUE`] 内仍满则返回 429 + Retry-After。
+/// 返回的守卫须持有到响应体发完。
+pub(crate) async fn admit_request(
+    rpm: Option<&Arc<RpmTracker>>,
+    identity: Option<&ApiKeyContext>,
+) -> Result<Option<InFlightGuard>, Box<axum::response::Response>> {
+    let Some(rpm) = rpm else {
+        return Ok(None);
+    };
+    let key_id = identity.map(|ctx| ctx.id);
+    let limits = identity.map_or(LocalLimits::default(), |ctx| ctx.limits);
+    let deadline = tokio::time::Instant::now() + API_KEY_QUEUE;
+    let full = match rpm.begin_api_key_request_by(key_id, limits, deadline).await {
+        Ok(guard) => return Ok(Some(guard)),
+        Err(full) => full,
+    };
+
+    tracing::warn!(api_key_id = ?key_id, "API Key 本地限额排队超时：{}", full);
+    let (retry_after_secs, message) = match full {
+        LimitFull::Rpm { retry_after } => (
+            retry_after.as_secs(),
+            format!(
+                "API key rate limit reached: {} requests per minute. Please retry shortly.",
+                limits.rpm
+            ),
+        ),
+        LimitFull::Concurrency => (
+            CONCURRENCY_RETRY_AFTER_SECS,
+            format!(
+                "API key concurrency limit reached: {} concurrent requests. Please retry shortly.",
+                limits.concurrency
+            ),
+        ),
+    };
+    let error = ErrorResponse::new("rate_limit_error", message);
+    Err(Box::new(
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, retry_after_secs.to_string())],
+            Json(error),
+        )
+            .into_response(),
+    ))
+}
 
 /// 模型白名单拦截：Key 无权调用 `model` 时返回 403，放行时返回 None
 pub(crate) fn reject_disallowed_model(
@@ -34,27 +91,31 @@ pub(crate) fn reject_disallowed_model(
 /// 合并 converter 与 provider 两侧的推理丢失情况，供 usage 记录入库（无丢失为 None）
 pub(crate) fn thinking_loss(
     history: crate::anthropic::converter::HistoryThinkingLoss,
-    history_reasoning_stripped: bool,
+    repair: &crate::kiro::provider::SignatureRepair,
 ) -> Option<crate::model::usage::ThinkingLoss> {
     crate::model::usage::ThinkingLoss {
         unsigned_turns: history.unsigned_turns,
         rendered_turns: history.rendered_turns,
-        signature_rejected: history_reasoning_stripped,
+        // 发送前按拒绝缓存丢弃的 + 本次被上游点名删除的
+        invalid_turns: history.invalid_turns + repair.rejected.len() as u32,
+        signature_rejected: repair.stripped_all,
     }
     .non_empty()
 }
 
-/// 实际回传上游的推理签名：签名被拒后 provider 已剥离全部历史推理，按未回传计
+/// 实际回传上游的推理签名：扣除 provider 删掉的签名，全部删除时按未回传计
 pub(crate) fn replayed_reasoning(
     history: crate::anthropic::converter::HistoryReasoningReplay,
-    history_reasoning_stripped: bool,
+    repair: &crate::kiro::provider::SignatureRepair,
 ) -> crate::model::usage::ReplayedReasoning {
-    if history_reasoning_stripped {
+    if repair.stripped_all {
         return crate::model::usage::ReplayedReasoning::default();
     }
+    // 被删的签名都出自 converter 回传的那批，计数必然覆盖它们
+    let rejected_chars: usize = repair.rejected.iter().map(String::len).sum();
     crate::model::usage::ReplayedReasoning {
-        signature_chars: history.signature_chars,
-        blocks: history.blocks,
+        signature_chars: history.signature_chars - rejected_chars,
+        blocks: history.blocks - repair.rejected.len(),
     }
 }
 
@@ -425,12 +486,52 @@ mod tests {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 
+    fn limited_key(limits: LocalLimits) -> ApiKeyContext {
+        ApiKeyContext {
+            id: 7,
+            bound_credential_ids: None,
+            allowed_models: None,
+            limits,
+        }
+    }
+
+    /// 暂停时钟：排队到截止时刻瞬间完成
+    #[tokio::test(start_paused = true)]
+    async fn admit_request_returns_429_after_queueing_on_full_key() {
+        let tracker = Arc::new(RpmTracker::new());
+        let key = limited_key(LocalLimits {
+            rpm: 0,
+            concurrency: 1,
+        });
+        let _held = admit_request(Some(&tracker), Some(&key)).await.unwrap();
+
+        let started = tokio::time::Instant::now();
+        let resp = *admit_request(Some(&tracker), Some(&key))
+            .await
+            .err()
+            .expect("并发已满应拒绝");
+        assert_eq!(started.elapsed(), API_KEY_QUEUE);
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(resp.headers()[header::RETRY_AFTER], "5");
+        let v: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(v["error"]["type"], "rate_limit_error");
+
+        // 其它 Key、无 Key 请求不受影响
+        let other = ApiKeyContext {
+            id: 8,
+            ..limited_key(LocalLimits::default())
+        };
+        assert!(admit_request(Some(&tracker), Some(&other)).await.is_ok());
+        assert!(admit_request(Some(&tracker), None).await.is_ok());
+    }
+
     #[tokio::test]
     async fn reject_disallowed_model_returns_403_only_outside_whitelist() {
         let ctx = ApiKeyContext {
             id: 1,
             bound_credential_ids: None,
             allowed_models: Some(vec!["claude-opus-4.8".to_string()]),
+            limits: Default::default(),
         };
         assert!(reject_disallowed_model(None, "claude-opus-4.7").is_none());
         assert!(reject_disallowed_model(Some(&ctx), "claude-opus-4-8").is_none());

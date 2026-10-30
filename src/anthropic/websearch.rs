@@ -103,12 +103,16 @@ pub struct WebSearchResult {
     pub public_domain: Option<bool>,
 }
 
-/// 检查请求是否为纯 WebSearch 请求
+/// 检查请求是否为纯 WebSearch 请求（Claude Code WebSearch 工具发出的搜索子请求）
 ///
-/// 条件：tools 有且只有一个，且 name 为 web_search
+/// 条件：tools 有且只有一个，且是 web_search 服务端工具；客户端自己实现的同名
+/// 普通工具不算，按普通请求转发
 pub fn has_web_search_tool(req: &MessagesRequest) -> bool {
     req.tools.as_ref().is_some_and(|tools| {
-        tools.len() == 1 && tools.first().is_some_and(|t| t.name == "web_search")
+        tools.len() == 1
+            && tools
+                .first()
+                .is_some_and(crate::anthropic::converter::is_web_search_server_tool)
     })
 }
 
@@ -589,6 +593,41 @@ mod tests {
         };
 
         // 多个工具时不应该被识别为纯 websearch 请求
+        assert!(!has_web_search_tool(&req));
+    }
+
+    #[test]
+    fn test_has_web_search_tool_ignores_same_name_client_tool() {
+        use crate::anthropic::types::{Message, Tool};
+
+        // 客户端自己实现的普通 web_search 工具（无 type、带 input_schema）不走纯搜索路径
+        let req = MessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            max_tokens: 1024,
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: serde_json::json!("test"),
+            }],
+            stream: true,
+            system: None,
+            tools: Some(vec![Tool {
+                tool_type: None,
+                name: "web_search".to_string(),
+                description: "Search the web".to_string(),
+                input_schema: serde_json::from_value(serde_json::json!({
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}}
+                }))
+                .unwrap(),
+                max_uses: None,
+                defer_loading: None,
+            }]),
+            tool_choice: None,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
         assert!(!has_web_search_tool(&req));
     }
 

@@ -8,8 +8,7 @@ mod tests {
 
     use super::super::super::nonstream::build_non_stream_content;
     use super::super::super::stream::{
-        stream_interrupted_error_event, stream_interrupted_error_event_after,
-        upstream_aborted_error_event, wait_deadline,
+        stream_interrupted_error_event_after, upstream_aborted_error_event, wait_deadline,
     };
 
     use crate::anthropic::stream::{CLIENT_ASSUMED_CONTEXT_WINDOW, scale_for_client};
@@ -24,28 +23,14 @@ mod tests {
     use tokio::time::Instant;
 
     #[test]
-    fn test_stream_interrupted_error_event_signals_failure_not_success() {
-        // 流中断（已有部分内容）必须报错重试，不能是伪装成功的 message_delta/message_stop
-        let event = stream_interrupted_error_event();
-        assert_eq!(event.event, "error");
-        assert_eq!(event.data["type"], "error");
-        assert_eq!(event.data["error"]["type"], "overloaded_error");
-        assert!(
-            event.data["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("interrupted"),
-            "错误信息应说明是连接中断导致，而非正常结束"
-        );
-    }
-
-    #[test]
     fn test_stream_interrupted_after_reports_elapsed_without_asserting_cause() {
+        // 流中断（已有部分内容）必须报错重试，不能是伪装成功的 message_delta/message_stop。
         // 短流/长流（含 issue #46 的 ~247s）一律：可重试的 overloaded_error + 耗时，
         // 且不断言"时长上限"等未证实的原因
         for secs in [30u64, 247, 361] {
             let event = stream_interrupted_error_event_after(Duration::from_secs(secs));
             assert_eq!(event.event, "error");
+            assert_eq!(event.data["type"], "error");
             assert_eq!(event.data["error"]["type"], "overloaded_error");
             let msg = event.data["error"]["message"].as_str().unwrap();
             assert!(msg.contains("interrupted"));

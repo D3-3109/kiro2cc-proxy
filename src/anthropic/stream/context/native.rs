@@ -96,7 +96,7 @@ impl StreamContext {
         events
     }
 
-    /// 正文、工具与桥接边界共用；重复收尾不产生额外事件。
+    /// 正文与工具边界共用；重复收尾不产生额外事件。
     pub(crate) fn finish_native_thinking(&mut self) -> Vec<SseEvent> {
         self.native_thinking_index
             .take()

@@ -249,81 +249,64 @@ mod tests {
         let path = dir.join("api_key_usage.json");
         let tracker = std::sync::Arc::new(crate::model::usage::UsageTracker::load(&path).unwrap());
 
-        for (continued, key_id) in [(false, 1), (true, 2)] {
-            let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
-                .with_prefix_estimated_tokens(53_650)
-                .with_conversation_id(Some(format!("miss-diag-integration-{key_id}")))
-                .with_usage_tracking(
-                    Some(std::sync::Arc::clone(&tracker)),
-                    Some(key_id),
-                    Some(7),
-                    None,
-                    None,
-                );
-
-            // message_start 阶段尚未收到 meteringEvent，保持静态前缀估算 53_650
-            let (_, _, start_cache_read) =
-                ctx.derive_report_cache_usage(53_776, None, &Default::default());
-            assert_eq!(start_cache_read, 53_650);
-            let _ = ctx.generate_initial_events();
-
-            // 模拟 346 tokens 输出（BPE 8 个 'a' 合并 1 token，2768 = 346）与部分缓存失效的 meteringEvent
-            ctx.output_full_text = "a".repeat(346 * 8);
-            let metering_event = crate::kiro::model::events::Event::Metering(
-                crate::kiro::model::events::MeteringEvent {
-                    usage: 0.06475,
-                    unit_plural: "credits".to_string(),
-                    unit: String::new(),
-                    cache_read_input_tokens: None,
-                    cache_creation_input_tokens: None,
-                },
+        let key_id = 1;
+        let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
+            .with_prefix_estimated_tokens(53_650)
+            .with_conversation_id(Some(format!("miss-diag-integration-{key_id}")))
+            .with_usage_tracking(
+                Some(std::sync::Arc::clone(&tracker)),
+                Some(key_id),
+                Some(7),
+                None,
+                None,
             );
-            let _ = ctx.process_kiro_event(&metering_event);
-            if continued {
-                ctx.mark_continuation();
-            }
-            // [cache-miss] 诊断：非续流轮 credits 反推生效（命中率 ~39%）应触发一次；
-            // 续流轮回退静态前缀（inference_applied=false）不触发
-            let (final_events, diag_out) = capture_debug_logs(|| ctx.generate_final_events());
-            if continued {
-                assert!(!diag_out.contains("[cache-miss]"), "{diag_out}");
-            } else {
-                assert_eq!(diag_out.matches("[cache-miss]").count(), 1, "{diag_out}");
-                assert!(
-                    diag_out.contains("session=miss-diag-integration-1"),
-                    "{diag_out}"
-                );
-            }
 
-            // 1. 验证 UsageTracker 落库的 cache_read_input_tokens 已按 creditsUsed 反推下修
-            let page = tracker.get_records_paged(
-                key_id,
-                1,
-                10,
-                &crate::model::usage::RecordLabels::default(),
-            );
-            assert_eq!(page.records.len(), 1);
-            let recorded_read = page.records[0].cache_read_input_tokens.unwrap();
-            if continued {
-                assert_eq!(recorded_read, 53_650);
-            } else {
-                assert!((20_000..=22_500).contains(&recorded_read));
-            }
-            assert_eq!(page.records[0].credits_used, Some(0.06475));
+        // message_start 阶段尚未收到 meteringEvent，保持静态前缀估算 53_650
+        let (_, _, start_cache_read) =
+            ctx.derive_report_cache_usage(53_776, None, &Default::default());
+        assert_eq!(start_cache_read, 53_650);
+        let _ = ctx.generate_initial_events();
 
-            // 2. 末尾 message_delta 保持静态前缀口径，与 message_start 一致
-            let delta_evt = final_events
-                .iter()
-                .find(|e| e.event == "message_delta")
-                .unwrap();
-            let delta_read = delta_evt.data["usage"]["cache_read_input_tokens"]
-                .as_i64()
-                .unwrap() as i32;
-            assert_eq!(
-                delta_read,
-                crate::anthropic::stream::calib::scale_for_client(53_650, "claude-haiku-5-5")
-            );
-        }
+        // 模拟 346 tokens 输出（BPE 8 个 'a' 合并 1 token，2768 = 346）与部分缓存失效的 meteringEvent
+        ctx.output_full_text = "a".repeat(346 * 8);
+        let metering_event = crate::kiro::model::events::Event::Metering(
+            crate::kiro::model::events::MeteringEvent {
+                usage: 0.06475,
+                unit_plural: "credits".to_string(),
+                unit: String::new(),
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+            },
+        );
+        let _ = ctx.process_kiro_event(&metering_event);
+        // [cache-miss] 诊断：credits 反推生效（命中率 ~39%）应触发一次
+        let (final_events, diag_out) = capture_debug_logs(|| ctx.generate_final_events());
+        assert_eq!(diag_out.matches("[cache-miss]").count(), 1, "{diag_out}");
+        assert!(
+            diag_out.contains("session=miss-diag-integration-1"),
+            "{diag_out}"
+        );
+
+        // 1. 验证 UsageTracker 落库的 cache_read_input_tokens 已按 creditsUsed 反推下修
+        let page =
+            tracker.get_records_paged(key_id, 1, 10, &crate::model::usage::RecordLabels::default());
+        assert_eq!(page.records.len(), 1);
+        let recorded_read = page.records[0].cache_read_input_tokens.unwrap();
+        assert!((20_000..=22_500).contains(&recorded_read));
+        assert_eq!(page.records[0].credits_used, Some(0.06475));
+
+        // 2. 末尾 message_delta 保持静态前缀口径，与 message_start 一致
+        let delta_evt = final_events
+            .iter()
+            .find(|e| e.event == "message_delta")
+            .unwrap();
+        let delta_read = delta_evt.data["usage"]["cache_read_input_tokens"]
+            .as_i64()
+            .unwrap() as i32;
+        assert_eq!(
+            delta_read,
+            crate::anthropic::stream::calib::scale_for_client(53_650, "claude-haiku-5-5")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -363,19 +346,14 @@ mod tests {
             let mut ctx = StreamContext::new_with_thinking("claude-haiku-5-5", 53_776, false)
                 .with_prefix_estimated_tokens(53_650)
                 .with_cache_accounting(Some(accounting.clone()));
-            for continued in [false, true] {
-                if continued {
-                    ctx.mark_continuation();
-                }
-                assert_eq!(
-                    ctx.derive_report_cache_usage(53_776, Some(9.99), &Default::default()),
-                    (
-                        expected.input_tokens,
-                        expected.cache_creation_input_tokens,
-                        expected.cache_read_input_tokens
-                    )
-                );
-            }
+            assert_eq!(
+                ctx.derive_report_cache_usage(53_776, Some(9.99), &Default::default()),
+                (
+                    expected.input_tokens,
+                    expected.cache_creation_input_tokens,
+                    expected.cache_read_input_tokens
+                )
+            );
             ctx.process_kiro_event(&Event::Metering(MeteringEvent {
                 usage: 9.99,
                 unit_plural: "credits".into(),

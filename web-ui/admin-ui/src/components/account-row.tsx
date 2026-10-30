@@ -52,6 +52,22 @@ function formatLastUsed(lastUsedAt: string, t: TFunction): string {
   return t('credentials.daysAgo', { count: Math.floor(hours / 24) })
 }
 
+/** 状态标签悬停提示：健康度的判定依据，降级与冷却另加说明 */
+function healthTitle(credential: CredentialStatusItem, t: TFunction): string {
+  const parts = [
+    t('credentials.healthDetail', {
+      throttled: credential.recentThrottleCount,
+      empty: credential.recentEmptyResponseCount,
+      consecutive: credential.consecutiveFailures,
+    }),
+  ]
+  if (credential.healthStatus === 'degraded') parts.push(t('credentials.healthDegradedNote'))
+  if (credential.cooldownRemainingSecs !== undefined) {
+    parts.push(t('credentials.healthCooldown', { secs: credential.cooldownRemainingSecs }))
+  }
+  return parts.join('\n')
+}
+
 /** 绝对时间小字（设计稿 `今天 17:56` / `08-10 14:22`）：跨年退化为整日期，避免误读 */
 function formatAbsolute(date: Date, t: TFunction): string {
   const now = new Date()
@@ -71,6 +87,8 @@ export interface AccountRowProps {
   loadingBalance: boolean
   /** 当前分钟请求数（来自 useRpm 轮询） */
   rpm: number
+  /** 正在处理的请求数（来自 useRpm 轮询） */
+  concurrency: number
   selected: boolean
   onToggleSelect: () => void
   onViewFailureLog: (id: number) => void
@@ -82,13 +100,14 @@ export interface AccountRowProps {
   onRefetchBalance: (id: number) => void
 }
 
-/** 账号表格行（设计稿 tbody tr）：10 列 = 选择框 / ID / 账号 / 状态 / 套餐 / 额度 / 调用 / RPM / 最后调用 / 操作 */
+/** 账号表格行（设计稿 tbody tr）：10 列 = 选择框 / ID / 账号 / 状态 / 套餐 / 额度 / 调用 / 并发·RPM / 最后调用 / 操作 */
 export function AccountRow({
   credential,
   sequence,
   balance,
   loadingBalance,
   rpm,
+  concurrency,
   selected,
   onToggleSelect,
   onViewFailureLog,
@@ -236,6 +255,7 @@ export function AccountRow({
         {/* .tag：20px 高 + 5px pip（pip 的 2.5px 外发光已在 ACCOUNT_STATE_VISUAL 里定义） */}
         <span
           className={`inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-[6px] border px-[7px] text-[11px] font-semibold ${visual.tagClass}`}
+          title={credential.disabled ? undefined : healthTitle(credential, t)}
         >
           <span aria-hidden="true" className={`size-[5px] flex-none rounded-full ${visual.pipClass}`} />
           {t(visual.labelKey)}
@@ -337,19 +357,29 @@ export function AccountRow({
           )}
         </div>
       </td>
-      {/* RPM（设计稿 .rpm）：0 用次要色，高压值染 danger */}
+      {/* 并发 / RPM（设计稿 .rpm）：0 用次要色，RPM 高压值染 danger */}
       <td className={`${CELL} text-right`}>
-        <span
-          className={`font-mono text-[12.5px] tabular-nums ${
-            rpmIdle || rpm === 0
-              ? 'font-medium text-ink-3'
-              : rpm >= RPM_DANGER
-                ? 'font-semibold text-danger'
-                : 'font-medium text-brand'
-          }`}
-        >
-          {rpmIdle ? '—' : rpm}
-        </span>
+        {rpmIdle ? (
+          <span className="font-mono text-[12.5px] font-medium tabular-nums text-ink-3">—</span>
+        ) : (
+          <span className="whitespace-nowrap font-mono text-[12.5px] tabular-nums">
+            <span className={concurrency === 0 ? 'font-medium text-ink-3' : 'font-semibold text-brand'}>
+              {concurrency}
+            </span>
+            <span className="px-0.5 text-ink-3 opacity-60">/</span>
+            <span
+              className={
+                rpm === 0
+                  ? 'font-medium text-ink-3'
+                  : rpm >= RPM_DANGER
+                    ? 'font-semibold text-danger'
+                    : 'font-medium text-brand'
+              }
+            >
+              {rpm}
+            </span>
+          </span>
+        )}
       </td>
       {/* 最后调用（设计稿 .when + small）：相对时间主行 + 绝对时间小字 */}
       <td className={CELL}>

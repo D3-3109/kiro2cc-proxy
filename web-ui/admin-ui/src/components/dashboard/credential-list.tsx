@@ -52,6 +52,7 @@ interface CredentialListProps {
   balanceMap: Map<number, BalanceResponse>
   loadingBalanceIds: Set<number>
   rpmByCredential: Record<string, number> | undefined
+  concurrencyByCredential: Record<string, number> | undefined
   toggleSelect: (id: number) => void
   setFailureLogCredentialId: (id: number) => void
   setThrottleLogCredentialId: (id: number) => void
@@ -100,6 +101,7 @@ export function CredentialList({
   balanceMap,
   loadingBalanceIds,
   rpmByCredential,
+  concurrencyByCredential,
   toggleSelect,
   setFailureLogCredentialId,
   setThrottleLogCredentialId,
@@ -177,6 +179,7 @@ export function CredentialList({
                   balance={balanceMap.get(credential.id) ?? null}
                   loadingBalance={loadingBalanceIds.has(credential.id)}
                   rpm={rpmByCredential?.[String(credential.id)] ?? 0}
+                  concurrency={concurrencyByCredential?.[String(credential.id)] ?? 0}
                   selected={selectedIds.has(credential.id)}
                   onToggleSelect={() => toggleSelect(credential.id)}
                   onViewFailureLog={(id) => setFailureLogCredentialId(id)}

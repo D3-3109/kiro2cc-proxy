@@ -151,6 +151,10 @@ pub struct Config {
     #[serde(default = "default_max_rpm_per_credential")]
     pub max_rpm_per_credential: u32,
 
+    /// 单账号同时在途请求数上限（从发出到响应体发完，含流式生成；超出时排队等待），0 表示不限制
+    #[serde(default)]
+    pub max_concurrency_per_credential: u32,
+
     /// `/v1/models` 动态列表缓存 TTL（秒），默认 3600
     #[serde(default = "default_model_cache_ttl_secs")]
     pub model_cache_ttl_secs: u64,
@@ -321,6 +325,7 @@ impl Default for Config {
             admin_psw: None,
             load_balancing_mode: default_load_balancing_mode(),
             max_rpm_per_credential: default_max_rpm_per_credential(),
+            max_concurrency_per_credential: 0,
             model_cache_ttl_secs: default_model_cache_ttl_secs(),
             cache_simulation: CacheSimulationConfig::default(),
             client_token_passthrough: false,

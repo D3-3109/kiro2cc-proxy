@@ -18,6 +18,7 @@ use super::message::process_message_content_with_tool_filter;
 use super::prompt::{
     is_dynamic_hook_injection, is_token_budget_reminder, normalize_billing_header,
 };
+use super::rejected_signatures::is_rejected_signature;
 use super::result::{ConversionError, HistoryReasoningReplay, HistoryThinkingLoss};
 use super::thinking::{
     generate_thinking_prefix, gpt_anti_pseudo_tag_hint, has_thinking_tags, thinking_prefix_budget,
@@ -211,6 +212,7 @@ pub(super) fn build_history(
                 push_assistant_turn(
                     &mut history,
                     &assistant_buffer,
+                    &req.model,
                     &mut thinking_loss,
                     &mut reasoning_replay,
                 )?;
@@ -234,6 +236,7 @@ pub(super) fn build_history(
         push_assistant_turn(
             &mut history,
             &assistant_buffer,
+            &req.model,
             &mut thinking_loss,
             &mut reasoning_replay,
         )?;
@@ -261,13 +264,16 @@ pub(super) fn build_history(
 
 /// 合并一轮 assistant 消息写入历史；回传的推理签名计入 `replay`，
 /// 没回传推理时按其中的推理形态计入 `loss`
+///
+/// `model`：客户端请求的模型名，按它查拒绝缓存
 fn push_assistant_turn(
     history: &mut Vec<Message>,
     turn: &[&crate::anthropic::types::Message],
+    model: &str,
     loss: &mut HistoryThinkingLoss,
     replay: &mut HistoryReasoningReplay,
 ) -> Result<(), ConversionError> {
-    let merged = merge_assistant_messages(turn)?;
+    let merged = merge_assistant_messages(turn, model)?;
     let replayed = merged.assistant_response_message.reasoning_content.as_ref();
     if let Some(reasoning) = replayed {
         replay.signature_chars += reasoning.reasoning_text.signature.len();
@@ -275,6 +281,7 @@ fn push_assistant_turn(
     }
     match lost_thinking_form(turn).filter(|_| replayed.is_none()) {
         Some(LostThinkingForm::Unsigned) => loss.unsigned_turns += 1,
+        Some(LostThinkingForm::Rejected) => loss.invalid_turns += 1,
         Some(LostThinkingForm::Rendered) => loss.rendered_turns += 1,
         None => {}
     }
@@ -282,15 +289,24 @@ fn push_assistant_turn(
     Ok(())
 }
 
+/// 签名是否出自上游（非空且不是代理伪造的）
+fn is_genuine_signature(signature: &str) -> bool {
+    !signature.is_empty() && !crate::anthropic::stream::is_fake_signature(signature)
+}
+
 /// 没能回传的推理在客户端历史里的形态
 enum LostThinkingForm {
     /// thinking 块，但没有可回传签名
     Unsigned,
+    /// thinking 块带上游签名，但该签名被上游拒绝过
+    Rejected,
     /// thinkingAsText 渲染出的文本
     Rendered,
 }
 
 /// 一轮 assistant 消息里的推理形态；thinking 块优先（它才可能带签名）
+///
+/// 只在该轮没有回传任何推理时调用，所以带上游签名的 thinking 块必然是被拒绝缓存挡下的。
 fn lost_thinking_form(turn: &[&crate::anthropic::types::Message]) -> Option<LostThinkingForm> {
     let is_rendered = |text: &str| {
         matches!(
@@ -298,29 +314,36 @@ fn lost_thinking_form(turn: &[&crate::anthropic::types::Message]) -> Option<Lost
             std::borrow::Cow::Owned(_)
         )
     };
-
-    let mut rendered = false;
-    for msg in turn {
-        match &msg.content {
-            serde_json::Value::String(s) => rendered |= is_rendered(s),
-            serde_json::Value::Array(blocks) => {
-                for block in blocks {
-                    match block.get("type").and_then(serde_json::Value::as_str) {
-                        Some("thinking") => return Some(LostThinkingForm::Unsigned),
-                        Some("text") => {
-                            rendered |= block
-                                .get("text")
-                                .and_then(serde_json::Value::as_str)
-                                .is_some_and(is_rendered);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
+    fn str_field<'a>(block: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+        block.get(key).and_then(serde_json::Value::as_str)
     }
-    rendered.then_some(LostThinkingForm::Rendered)
+    let blocks = || {
+        turn.iter()
+            .filter_map(|msg| msg.content.as_array())
+            .flatten()
+    };
+
+    let mut thinking_blocks = blocks()
+        .filter(|block| str_field(block, "type") == Some("thinking"))
+        .peekable();
+    if thinking_blocks.peek().is_some() {
+        let has_genuine_signature = thinking_blocks
+            .any(|block| str_field(block, "signature").is_some_and(is_genuine_signature));
+        return Some(if has_genuine_signature {
+            LostThinkingForm::Rejected
+        } else {
+            LostThinkingForm::Unsigned
+        });
+    }
+
+    let rendered_string = turn
+        .iter()
+        .filter_map(|msg| msg.content.as_str())
+        .any(is_rendered);
+    let rendered_block = blocks()
+        .filter(|block| str_field(block, "type") == Some("text"))
+        .any(|block| str_field(block, "text").is_some_and(is_rendered));
+    (rendered_string || rendered_block).then_some(LostThinkingForm::Rendered)
 }
 
 /// `prefix_cached` 判定：本请求的缓存前缀（history[0] + 历史轮次）是否已命中会话级冻结缓存。
@@ -388,8 +411,11 @@ pub(super) fn merge_user_messages(
 }
 
 /// 转换 assistant 消息
+///
+/// `model`：客户端请求的模型名，被该模型拒绝过的签名不回传
 pub(super) fn convert_assistant_message(
     msg: &crate::anthropic::types::Message,
+    model: &str,
 ) -> Result<HistoryAssistantMessage, ConversionError> {
     let mut text_content = String::new();
     let mut tool_uses = Vec::new();
@@ -404,11 +430,11 @@ pub(super) fn convert_assistant_message(
                 match serde_json::from_value::<ContentBlock>(item.clone()) {
                     Ok(block) => match block.block_type.as_str() {
                         // 带上游真实签名的 thinking 块回传为 reasoningContent（明文 + 签名配对）；
-                        // 无签名或代理伪造签名的块不回传。
+                        // 无签名、代理伪造签名、被上游拒绝过的签名不回传。
                         // 一条消息含多个块时取最后一个：它覆盖到该轮结束的推理。
                         "thinking" => {
                             if let Some(signature) = block.signature.filter(|s| {
-                                !s.is_empty() && !crate::anthropic::stream::is_fake_signature(s)
+                                is_genuine_signature(s) && !is_rejected_signature(model, s)
                             }) {
                                 reasoning = Some(ReasoningContent {
                                     reasoning_text: ReasoningText {
@@ -503,10 +529,11 @@ pub(super) fn convert_assistant_message(
 /// 用于处理网络不稳定时产生的连续 assistant 消息（Issue #79）
 pub(super) fn merge_assistant_messages(
     messages: &[&crate::anthropic::types::Message],
+    model: &str,
 ) -> Result<HistoryAssistantMessage, ConversionError> {
     assert!(!messages.is_empty());
     if messages.len() == 1 {
-        return convert_assistant_message(messages[0]);
+        return convert_assistant_message(messages[0], model);
     }
 
     let mut all_tool_uses: Vec<ToolUseEntry> = Vec::new();
@@ -514,7 +541,7 @@ pub(super) fn merge_assistant_messages(
     let mut reasoning_content = None;
 
     for msg in messages {
-        let converted = convert_assistant_message(msg)?;
+        let converted = convert_assistant_message(msg, model)?;
         let am = converted.assistant_response_message;
         if !am.content.trim().is_empty() {
             content_parts.push(am.content);

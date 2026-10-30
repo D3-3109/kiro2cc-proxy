@@ -3,7 +3,6 @@
 #[cfg(test)]
 mod tests {
 
-    use super::super::super::bridge::body_dummy_bytes;
     use super::super::super::error::provider_error_sse_event;
     use super::super::super::stream::{create_awaiting_upstream_sse_stream, keepalive_comment_sse};
 
@@ -19,7 +18,9 @@ mod tests {
     const NEXT_FRAME_TIMEOUT: Duration = Duration::from_secs(1);
 
     fn dummy_upstream_response() -> reqwest::Response {
-        reqwest::Response::from(http::Response::new(body_dummy_bytes()))
+        reqwest::Response::from(http::Response::new(
+            reqwest::Body::from(bytes::Bytes::new()),
+        ))
     }
 
     /// 上游调用由 oneshot 控制完成时机；into_sse_stream 产出单个 message_start 帧

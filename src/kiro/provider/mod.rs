@@ -17,5 +17,5 @@ mod retry;
 #[cfg(test)]
 mod tests;
 
-pub use api::ApiResponse;
+pub use api::{ApiResponse, SignatureRepair, UpstreamFeedback, UpstreamRoute};
 pub use core::KiroProvider;

@@ -75,6 +75,9 @@ pub struct CredentialStatusItem {
     pub thinking_adaptive: bool,
     /// 健康状态
     pub health_status: crate::kiro::token_manager::HealthStatus,
+    /// 健康状态的判定依据（近 10 分钟限流 / 空响应、连续失败、冷却剩余）
+    #[serde(flatten)]
+    pub health_detail: crate::kiro::token_manager::HealthDetail,
     /// 最近 7 天限流次数（429 响应，滚动 7×24 小时窗口）
     pub throttle_count: u64,
     /// 禁用原因（None = 未禁用；QuotaExceeded 时前端显示「额度已用尽」而非通用「已禁用」）
@@ -201,6 +204,7 @@ mod tests {
             proxy_url: None,
             thinking_adaptive: true,
             health_status: crate::kiro::token_manager::HealthStatus::Healthy,
+            health_detail: Default::default(),
             throttle_count: 0,
             disabled_reason: None,
         }
@@ -461,6 +465,8 @@ pub struct SetDebugLogsRequest {
 pub struct RuntimeConfigResponse {
     /// 每账号 RPM 上限（运行时当前值，0 = 不限，热生效）
     pub max_rpm_per_credential: u32,
+    /// 每账号并发上限（运行时当前值，0 = 不限，热生效）
+    pub max_concurrency_per_credential: u32,
     /// 监听端口（config.json 持久化值，重启后生效）
     pub port: u16,
     /// 上游代理地址（config.json 持久化值，重启后生效；空表示未配置）
@@ -475,6 +481,8 @@ pub struct RuntimeConfigResponse {
 pub struct SetRuntimeConfigRequest {
     /// 每账号 RPM 上限（0 = 不限，热生效）
     pub max_rpm_per_credential: Option<u32>,
+    /// 每账号并发上限（0 = 不限，热生效）
+    pub max_concurrency_per_credential: Option<u32>,
     /// 监听端口（1–65535，重启后生效）
     pub port: Option<u16>,
     /// 上游代理地址（空串/None = 清除；支持 http/https/socks5，重启后生效）
@@ -527,6 +535,12 @@ pub struct CreateApiKeyRequest {
     /// 可调用模型白名单（空或缺省表示不限制）
     #[serde(default)]
     pub allowed_models: Option<Vec<String>>,
+    /// 每分钟请求数上限（缺省 0 = 不限）
+    #[serde(default)]
+    pub rpm_limit: u32,
+    /// 同时在途请求数上限（缺省 0 = 不限）
+    #[serde(default)]
+    pub concurrency_limit: u32,
 }
 
 /// 更新 API Key 请求
@@ -557,6 +571,12 @@ pub struct UpdateApiKeyRequest {
     /// 可调用模型白名单（null 表示清除限制）
     #[serde(default, deserialize_with = "deserialize_optional_vec_string")]
     pub allowed_models: Option<Option<Vec<String>>>,
+    /// 每分钟请求数上限（0 = 不限）
+    #[serde(default)]
+    pub rpm_limit: Option<u32>,
+    /// 同时在途请求数上限（0 = 不限）
+    #[serde(default)]
+    pub concurrency_limit: Option<u32>,
 }
 
 /// 区分 JSON 中"字段缺失"与"字段为 null"

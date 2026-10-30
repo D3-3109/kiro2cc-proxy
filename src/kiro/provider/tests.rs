@@ -158,6 +158,59 @@ mod tests {
     }
 
     #[test]
+    fn test_rejected_history_index_parses_upstream_message() {
+        assert_eq!(
+            KiroProvider::rejected_history_index(
+                r#"{"message":"messages.3.content.0: Invalid `signature` in `thinking` block","reason":"THINKING_SIGNATURE_INVALID"}"#
+            ),
+            Some(3)
+        );
+        assert_eq!(
+            KiroProvider::rejected_history_index(
+                r#"{"message":"Invalid signature","reason":"THINKING_SIGNATURE_INVALID"}"#
+            ),
+            None
+        );
+        assert_eq!(KiroProvider::rejected_history_index("not json"), None);
+    }
+
+    #[test]
+    fn test_strip_history_reasoning_at_removes_only_that_entry() {
+        let body = serde_json::json!({
+            "conversationState": {
+                "history": [
+                    {"userInputMessage": {"content": "q1"}},
+                    {"assistantResponseMessage": {"content": "a1",
+                        "reasoningContent": {"reasoningText": {"text": "", "signature": "s1"}}}},
+                    {"userInputMessage": {"content": "q2"}},
+                    {"assistantResponseMessage": {"content": "a2",
+                        "reasoningContent": {"reasoningText": {"text": "t", "signature": "s2"}}}}
+                ]
+            }
+        })
+        .to_string();
+
+        let (stripped, signature) = KiroProvider::strip_history_reasoning_at(&body, 3).unwrap();
+        assert_eq!(signature, "s2");
+        let stripped: serde_json::Value = serde_json::from_str(&stripped).unwrap();
+        let history = &stripped["conversationState"]["history"];
+        assert!(
+            history[1]
+                .pointer("/assistantResponseMessage/reasoningContent")
+                .is_some()
+        );
+        assert!(
+            history[3]
+                .pointer("/assistantResponseMessage/reasoningContent")
+                .is_none()
+        );
+
+        // 下标落在 user 消息或越界：映射不符，不删
+        assert!(KiroProvider::strip_history_reasoning_at(&body, 2).is_none());
+        assert!(KiroProvider::strip_history_reasoning_at(&body, 9).is_none());
+    }
+
+    #[test]
     fn test_extract_agent_task_type_vibe_default() {
         assert_eq!(
             KiroProvider::extract_agent_task_type_from_request("{}"),
@@ -460,6 +513,32 @@ mod tests {
         let h = v["conversationState"]["history"].as_array().unwrap();
         assert_eq!(h.len(), 2);
         assert_eq!(h[0]["userInputMessage"]["content"], "earlier question");
+    }
+
+    #[test]
+    fn test_rewritten_history_offset_matches_removed_pair() {
+        let standalone = body_with_history(serde_json::json!([
+            {"userInputMessage": {"content": TAG}},
+            {"assistantResponseMessage": {"content": "I will follow these instructions."}},
+            {"userInputMessage": {"content": "earlier question"}},
+            {"assistantResponseMessage": {"content": "earlier answer"}}
+        ]));
+        let with_system = body_with_history(serde_json::json!([
+            {"userInputMessage": {"content": format!("{TAG}\nSYSTEM RULES")}},
+            {"assistantResponseMessage": {"content": "I will follow these instructions."}}
+        ]));
+        let off = KiroCredentials::default();
+
+        // 账号关闭 thinking 且前缀单独成条：整对删除，上游下标比改写前少 2
+        assert_eq!(KiroProvider::rewritten_history_offset(&standalone, &off), 2);
+        assert_eq!(
+            KiroProvider::rewritten_history_offset(&with_system, &off),
+            0
+        );
+        assert_eq!(
+            KiroProvider::rewritten_history_offset(&standalone, &adaptive_cred()),
+            0
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ use super::super::entry::{CredentialEntry, DisabledReason};
 use super::super::types::{
     MAX_FAILURES_PER_CREDENTIAL, MultiTokenManager, QUOTA_EXHAUSTED_ALL_MARKER,
 };
+use super::super::upstream_failures::UpstreamFailure;
 
 use chrono::{Datelike, Utc};
 use std::sync::atomic::Ordering;
@@ -14,12 +15,34 @@ impl MultiTokenManager {
         let mut entries = self.entries.lock();
         if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
             entry.throttle_count += 1;
-            entry.last_throttled_at = Some(Instant::now());
+            entry
+                .upstream_failures
+                .record(UpstreamFailure::Throttled, Instant::now());
             entry.last_throttled_wall = Some(Utc::now());
             tracing::debug!("账号 #{} 被限流（累计 {} 次）", id, entry.throttle_count);
         }
         // throttle_count 在下次 success/failure 时随 debounce 一起落盘
         self.stats_dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// 报告指定账号返回了空响应（200 正常结束但无任何内容），计入健康度
+    pub fn report_empty_response(&self, id: u64) {
+        let mut entries = self.entries.lock();
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+            entry
+                .upstream_failures
+                .record(UpstreamFailure::EmptyResponse, Instant::now());
+        }
+    }
+
+    /// 报告指定账号完整返回了一次正常响应：中断健康度的连续失败计数
+    ///
+    /// 与 [`Self::report_success`] 分开：后者在拿到 200 响应头时调用，那时还不知道响应体是否为空。
+    pub fn report_response_completed(&self, id: u64) {
+        let mut entries = self.entries.lock();
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+            entry.upstream_failures.end_streak();
+        }
     }
 
     /// 报告指定账号被限流并增加轮转偏移量

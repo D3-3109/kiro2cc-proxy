@@ -5,7 +5,7 @@ import { Loader2, SearchX } from 'lucide-react'
 import { DataCheckbox, TH_BASE } from '@/components/table-kit'
 
 /** 列宽（设计稿 #p-keys colgroup）：名称列为 undefined = auto，吃掉剩余宽度 */
-const COLUMN_WIDTHS: (number | undefined)[] = [34, undefined, 200, 88, 150, 168, 108, 76, 112, 124]
+const COLUMN_WIDTHS: (number | undefined)[] = [34, undefined, 200, 88, 150, 168, 108, 88, 112, 124]
 /** 空状态行需要横跨全部列 */
 export const API_KEY_TABLE_COLUMNS = COLUMN_WIDTHS.length
 

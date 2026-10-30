@@ -173,7 +173,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn test_sticky_hit_resets_throttle_counter() {
+    async fn test_sticky_success_resets_throttle_counter() {
         let config = Config::default();
         let manager = MultiTokenManager::new(
             config,
@@ -183,26 +183,77 @@ pub(crate) mod tests {
             false,
         )
         .unwrap();
+        let counter = |m: &MultiTokenManager| {
+            m.sticky_cache
+                .lock()
+                .get("session-reset")
+                .map(|e| e.consecutive_throttles)
+        };
 
         let ctx = manager
             .acquire_context_sticky(None, &[], Some("session-reset"), &[])
             .await
             .unwrap();
-
         assert!(!manager.report_sticky_throttled("session-reset", ctx.id));
-        // 一次成功命中即清零，避免跨越较长时间的零散限流累积成解绑
+
+        // 再次选中不清零：选中不代表账号能承载此会话
         manager
             .acquire_context_sticky(None, &[], Some("session-reset"), &[])
             .await
             .unwrap();
-        assert_eq!(
-            manager
-                .sticky_cache
-                .lock()
-                .get("session-reset")
-                .map(|e| e.consecutive_throttles),
-            Some(0)
-        );
+        assert_eq!(counter(&manager), Some(1));
+
+        // 成功落在别的账号不清零
+        let other = manager
+            .credential_ids()
+            .into_iter()
+            .find(|&id| id != ctx.id)
+            .unwrap();
+        manager.report_sticky_success("session-reset", other);
+        assert_eq!(counter(&manager), Some(1));
+
+        // 在绑定账号上成功才清零
+        manager.report_sticky_success("session-reset", ctx.id);
+        assert_eq!(counter(&manager), Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_sticky_throttled_once_per_request_evicts_after_threshold() {
+        // 真实流程：每个请求先选中绑定账号、被 429 一次，同请求内的重试改走别的账号成功。
+        // 连续 STICKY_THROTTLE_EVICT_THRESHOLD 个请求如此，应解绑（以前选中即清零，永远到不了阈值）
+        let config = Config::default();
+        let manager = MultiTokenManager::new(
+            config,
+            vec![make_valid_cred("t1"), make_valid_cred("t2")],
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        let bound = manager
+            .acquire_context_sticky(None, &[], Some("session-cross"), &[])
+            .await
+            .unwrap();
+
+        let mut evicted = false;
+        for _ in 0..STICKY_THROTTLE_EVICT_THRESHOLD {
+            let first = manager
+                .acquire_context_sticky(None, &[], Some("session-cross"), &[])
+                .await
+                .unwrap();
+            assert_eq!(first.id, bound.id);
+            evicted = manager.report_sticky_throttled("session-cross", first.id);
+
+            let retry = manager
+                .acquire_context_sticky(None, &[], Some("session-cross"), &[first.id])
+                .await
+                .unwrap();
+            if !evicted {
+                assert_ne!(retry.id, bound.id);
+                manager.report_sticky_success("session-cross", retry.id);
+            }
+        }
+        assert!(evicted);
     }
 
     #[tokio::test]

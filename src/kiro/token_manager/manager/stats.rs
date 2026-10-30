@@ -1,6 +1,9 @@
 //! 凭据统计持久化：stats.json 防抖写入、缓存目录与统计文件路径管理。
 use super::super::entry::{CredentialEntry, DisabledReason, HealthStatus, StatsEntry};
-use super::super::types::{MultiTokenManager, STATS_SAVE_DEBOUNCE};
+use super::super::types::{HealthDetail, MultiTokenManager, STATS_SAVE_DEBOUNCE};
+use super::super::upstream_failures::{
+    DEGRADED_CONSECUTIVE, DEGRADED_RECENT, UNHEALTHY_CONSECUTIVE, UNHEALTHY_RECENT, WARNING_RECENT,
+};
 use crate::common::fs::atomic_write;
 use crate::kiro::model::credentials::KiroCredentials;
 use chrono::{DateTime, Utc};
@@ -8,7 +11,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Instant;
 
 impl MultiTokenManager {
     /// 将账号列表回写到源文件
@@ -288,45 +291,56 @@ impl MultiTokenManager {
 
     /// 根据账号条目计算健康状态
     pub(crate) fn compute_health(entry: &CredentialEntry) -> HealthStatus {
+        Self::compute_health_at(entry, Instant::now())
+    }
+
+    /// 健康度只看近期上游失败（最近 10 分钟次数 F、连续次数 C）与连续认证失败，不看成功次数：
+    ///
+    /// | 状态   | 条件                                              | 选号时         |
+    /// |--------|---------------------------------------------------|----------------|
+    /// | 不健康 | 冷却期内，且 C ≥ 3 或 F ≥ 10                       | 排除           |
+    /// | 降级   | C ≥ 2，或 F ≥ 5，或认证失败 2 次                   | 同优先级内最后 |
+    /// | 警告   | F ≥ 2，或认证失败 1 次                             | 不变           |
+    ///
+    /// 认证失败第 3 次即自动禁用，故不单列不健康档。
+    pub(crate) fn compute_health_at(entry: &CredentialEntry, now: Instant) -> HealthStatus {
         if entry.disabled {
             return HealthStatus::Disabled;
         }
 
-        // 认证失败（401/403）是严重问题，直接根据次数判断
-        if entry.failure_count >= 3 {
+        let failures = &entry.upstream_failures;
+        let consecutive = failures.consecutive(now);
+        let recent = failures.recent(now).total();
+
+        let failing_hard = consecutive >= UNHEALTHY_CONSECUTIVE || recent >= UNHEALTHY_RECENT;
+        if failing_hard && failures.cooldown_remaining(now).is_some() {
             return HealthStatus::Unhealthy;
         }
-        if entry.failure_count >= 2 {
+        let degraded = consecutive >= DEGRADED_CONSECUTIVE
+            || recent >= DEGRADED_RECENT
+            || entry.failure_count >= 2;
+        if degraded {
             return HealthStatus::Degraded;
         }
-        if entry.failure_count >= 1 {
+        if recent >= WARNING_RECENT || entry.failure_count >= 1 {
             return HealthStatus::Warning;
         }
+        HealthStatus::Healthy
+    }
 
-        // 限流判断：样本不足时默认健康，避免少量请求时误判
-        let total_calls = entry.success_count + entry.throttle_count;
-        if total_calls < 5 {
-            return HealthStatus::Healthy;
-        }
-
-        let throttle_rate = entry.throttle_count as f64 / total_calls as f64;
-        let very_recently_throttled = entry
-            .last_throttled_at
-            .map(|t| t.elapsed() < StdDuration::from_secs(120))
-            .unwrap_or(false);
-        let recently_throttled = entry
-            .last_throttled_at
-            .map(|t| t.elapsed() < StdDuration::from_secs(600))
-            .unwrap_or(false);
-
-        if very_recently_throttled && throttle_rate > 0.5 {
-            HealthStatus::Unhealthy
-        } else if recently_throttled && throttle_rate > 0.3 {
-            HealthStatus::Degraded
-        } else if recently_throttled && throttle_rate > 0.15 {
-            HealthStatus::Warning
-        } else {
-            HealthStatus::Healthy
+    /// [`Self::compute_health_at`] 用到的近期上游失败数据
+    pub(crate) fn health_detail_at(entry: &CredentialEntry, now: Instant) -> HealthDetail {
+        let failures = &entry.upstream_failures;
+        let recent = failures.recent(now);
+        let unhealthy = Self::compute_health_at(entry, now) == HealthStatus::Unhealthy;
+        HealthDetail {
+            recent_throttle_count: recent.throttled,
+            recent_empty_response_count: recent.empty_responses,
+            consecutive_failures: failures.consecutive(now),
+            cooldown_remaining_secs: unhealthy
+                .then(|| failures.cooldown_remaining(now))
+                .flatten()
+                .map(|d| d.as_secs().max(1)),
         }
     }
 }

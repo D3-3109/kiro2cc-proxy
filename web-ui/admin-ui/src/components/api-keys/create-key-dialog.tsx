@@ -15,6 +15,7 @@ import {
 import type { BalanceResponse, CredentialStatusItem } from '@/types/api'
 import { CredentialMultiSelect } from '@/components/api-keys/credential-multi-select'
 import { ModelMultiSelect } from '@/components/api-keys/model-multi-select'
+import { RequestLimitsFields, type RequestLimits } from '@/components/api-keys/request-limits-fields'
 
 const quickDurationOptions = [
   { value: 1, unit: 'hours' as const },
@@ -48,6 +49,8 @@ interface CreateKeyDialogProps {
   setNewBoundCredentialIds: (ids: number[]) => void
   newAllowedModels: string[]
   setNewAllowedModels: (models: string[]) => void
+  newRequestLimits: RequestLimits
+  setNewRequestLimits: (limits: RequestLimits) => void
   credentials: CredentialStatusItem[] | undefined
   credentialBalanceMap: Map<number, BalanceResponse>
   createCredDropdownRef: React.RefObject<HTMLDivElement>
@@ -82,6 +85,8 @@ export function CreateKeyDialog({
   setNewBoundCredentialIds,
   newAllowedModels,
   setNewAllowedModels,
+  newRequestLimits,
+  setNewRequestLimits,
   credentials,
   credentialBalanceMap,
   createCredDropdownRef,
@@ -260,6 +265,7 @@ export function CreateKeyDialog({
             <p className="text-xs text-muted-foreground mt-0.5">{t('apiKeys.allowedModelsHint')}</p>
             <ModelMultiSelect selected={newAllowedModels} onChange={setNewAllowedModels} />
           </div>
+          <RequestLimitsFields value={newRequestLimits} onChange={setNewRequestLimits} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>

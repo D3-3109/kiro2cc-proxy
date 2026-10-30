@@ -338,7 +338,10 @@ mod tests {
             make_valid_cred("t3"),
         ];
         let m = MultiTokenManager::new(Config::default(), creds, None, None, false).unwrap();
-        m.entries.lock()[2].failure_count = 3; // Unhealthy
+        // 连续限流 3 次 → 冷却期内不健康
+        for _ in 0..3 {
+            m.report_throttled(3);
+        }
         assert_eq!(m.model_support_probe_targets(&[]), vec![1, 2]);
     }
 
