@@ -321,7 +321,7 @@ fn test_convert_assistant_message_tool_use_only() {
         ]),
     };
 
-    let result = convert_assistant_message(&msg).expect("应该成功转换");
+    let result = convert_assistant_message(&msg, "claude-sonnet-4").expect("应该成功转换");
 
     // 验证 content 不为空（使用占位符）
     assert!(
@@ -356,7 +356,7 @@ fn test_convert_assistant_message_with_text_and_tool_use() {
         ]),
     };
 
-    let result = convert_assistant_message(&msg).expect("应该成功转换");
+    let result = convert_assistant_message(&msg, "claude-sonnet-4").expect("应该成功转换");
 
     // 验证 content 使用原始文本（不是占位符）
     assert_eq!(
@@ -386,7 +386,7 @@ fn test_history_thinking_signature_replayed_as_reasoning_content() {
         ]),
     };
 
-    let am = convert_assistant_message(&msg)
+    let am = convert_assistant_message(&msg, "claude-sonnet-4")
         .expect("应该成功转换")
         .assistant_response_message;
 
@@ -410,7 +410,7 @@ fn test_history_fake_signature_not_replayed() {
         ]),
     };
 
-    let am = convert_assistant_message(&msg)
+    let am = convert_assistant_message(&msg, "claude-sonnet-4")
         .expect("应该成功转换")
         .assistant_response_message;
 
@@ -517,7 +517,7 @@ fn test_merge_consecutive_assistant_messages() {
     };
 
     let messages: Vec<&AnthropicMessage> = vec![&msg1, &msg2];
-    let result = merge_assistant_messages(&messages).expect("合并应成功");
+    let result = merge_assistant_messages(&messages, "claude-sonnet-4").expect("合并应成功");
 
     let content = &result.assistant_response_message.content;
     // thinking 块在 convert_assistant_message 中被有意剥离，不应出现
@@ -748,10 +748,11 @@ fn test_history_thinking_loss_and_replay_counted_per_turn() {
     let fake = crate::anthropic::stream::generate_fake_signature();
     let real = "EqQBCkYIBhgCKkA".repeat(64);
     let rejected = format!("{real}{}", uuid::Uuid::new_v4().simple());
-    super::super::rejected_signatures::remember_rejected_signatures(std::slice::from_ref(
-        &rejected,
-    ));
-    let req = MessagesRequest {
+    super::super::rejected_signatures::remember_rejected_signatures(
+        "claude-sonnet-4",
+        std::slice::from_ref(&rejected),
+    );
+    let mut req = MessagesRequest {
         model: "claude-sonnet-4".to_string(),
         max_tokens: 1024,
         messages: vec![
@@ -822,4 +823,11 @@ fn test_history_thinking_loss_and_replay_counted_per_turn() {
             blocks: 1,
         }
     );
+
+    // 拒绝只对拒绝它的模型生效：同一历史发给别的模型照常回传
+    req.model = "claude-opus-5.5".to_string();
+    let result = convert_request(&req).unwrap();
+    assert_eq!(result.history_thinking_loss.invalid_turns, 0);
+    let history = serde_json::to_string(&result.conversation_state.history).unwrap();
+    assert!(history.contains(&rejected));
 }

@@ -242,7 +242,7 @@ pub(crate) async fn handle_non_stream_request(
         Ok(resp) => resp,
         Err(e) => return map_provider_error_with_context(e, model, input_tokens),
     };
-    crate::anthropic::converter::remember_rejected_signatures(&signature_repair.rejected);
+    crate::anthropic::converter::remember_rejected_signatures(model, &signature_repair.rejected);
 
     // 账号级 thinking 开关关闭 = 禁止思考：上游若仍返回推理内容，响应侧丢弃
     // （开启时非流式本就无条件输出推理块，无需额外处理）

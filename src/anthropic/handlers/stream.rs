@@ -86,8 +86,11 @@ pub(crate) async fn handle_stream_request(
             credential_id,
             signature_repair,
         } = upstream;
-        crate::anthropic::converter::remember_rejected_signatures(&signature_repair.rejected);
         let model = stream_model.as_str();
+        crate::anthropic::converter::remember_rejected_signatures(
+            model,
+            &signature_repair.rejected,
+        );
 
         // 账号级 thinking 开关是最终裁决（开 = 强制思考，关 = 禁止思考），必须在选中账号后
         // 才能确定；故障转移后的账号即 credential_id 对应账号
