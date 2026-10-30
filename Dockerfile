@@ -25,6 +25,12 @@ COPY --from=frontend-builder /app/web-ui/user-ui/dist /app/web-ui/user-ui/dist
 
 RUN cargo build --release
 
+# Exports only the static musl binary (`--target binary --output type=local`),
+# so systemd users get the exact binary that ships in the image.
+# Not the last stage, so a plain `docker build` still produces the runtime image.
+FROM scratch AS binary
+COPY --from=builder /app/target/release/kiro2cc-proxy /kiro2cc-proxy
+
 FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates

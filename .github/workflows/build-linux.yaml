@@ -1,0 +1,127 @@
+name: Build Linux Binaries
+
+# Static (musl) Linux binaries for systemd deployments. They are built through
+# the Dockerfile's `binary` stage, so they are identical to the binary inside
+# the Docker image and do not depend on the host's glibc or libssl version.
+
+on:
+  push:
+    branches:
+      - master
+      - local
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for artifacts (e.g., 2025.12.1)'
+        required: true
+        default: '2026.1.1'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            name: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            name: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${INPUT_VERSION}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=beta-$(echo "${{ github.sha }}" | cut -c1-6)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Same cache scope as docker-build.yaml, so the image build reuses the
+      # compiled `builder` stage instead of compiling the crate twice.
+      - name: Build binary
+        run: |
+          docker buildx build \
+            --target binary \
+            --platform ${{ matrix.platform }} \
+            --provenance=false \
+            --cache-from type=gha,scope=${{ matrix.platform }} \
+            --cache-to type=gha,mode=max,scope=${{ matrix.platform }} \
+            --output type=local,dest=out \
+            .
+
+      # Both runners are native, so the binary can actually be executed here.
+      - name: Smoke test
+        run: |
+          chmod +x out/kiro2cc-proxy
+          info=$(file out/kiro2cc-proxy)
+          echo "$info"
+          # `file` instead of `ldd`: glibc's ldd may execute a static binary.
+          if ! grep -Eq 'statically linked|static-pie linked' <<< "$info"; then
+            echo "::error::binary is not statically linked"
+            exit 1
+          fi
+          out/kiro2cc-proxy --version
+
+      - name: Package
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NAME: ${{ matrix.name }}
+        run: |
+          pkg="kiro2cc-proxy-${VERSION}-${NAME}"
+          mkdir -p "dist/${pkg}"
+          cp out/kiro2cc-proxy kiro2cc-proxy.service config.example.json LICENSE "dist/${pkg}/"
+          tar -C dist -czf "dist/${pkg}.tar.gz" "${pkg}"
+          (cd dist && sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256")
+          echo "archive=dist/${pkg}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiro2cc-proxy-${{ steps.version.outputs.version }}-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: kiro2cc-proxy-*-linux-*
+          merge-multiple: true
+
+      - name: Publish to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*
